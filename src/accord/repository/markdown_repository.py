@@ -7,9 +7,9 @@ Markdown の在処と書き方を知るのはこの文書だけである。上�
 
 from __future__ import annotations
 
-from pathlib import Path
+from datetime import date
 
-from accord.models.results import SourceSnapshot
+from accord.models.results import SourceDefect, SourceSnapshot
 from accord.models.types import (
     Capability,
     CareerFrame,
@@ -35,14 +35,25 @@ POSITIONING_LABELS = {
     "前面に出す束": "headline_package",
     "根拠": "rationale",
 }
+# 並びは、書き戻すときの行の並びでもある（読むときは並びを見ない）。
 PACKAGE_LABELS = {
+    "最終更新": "updated_on",
     "想定買い手": "buyer",
     "仮説の状態": "hypothesis_state",
-    "最終更新": "updated_on",
     "判定根拠": "basis",
     "出典": "source",
     "崩れる条件": "breaks_when",
 }
+
+# パッケージの「束ねる機能」の欄。一覧の欄なので、他の欄と書き方が違う。
+PACKAGE_CAPABILITIES_LABEL = "束ねる機能"
+
+# 決めの「例外」の欄。値が無いブロックにも、空を表す語で 1 行置く。
+POSITIONING_EXCEPTIONS_LABEL = "例外"
+
+# 例外の欄が持つ、提示物の名前と理由の鍵。読み書きの両方がこの鍵を使う。
+EXCEPTION_PRESENTATION_KEY = "提示物"
+EXCEPTION_REASON_KEY = "理由"
 CAREER_LABELS = {
     "期間": "period",
     "所属": "organization",
@@ -88,6 +99,9 @@ EXCEPTION_SEPARATOR = "—"
 
 # 値が空であることを表す語。「未反映の注記: なし」のように書ける。
 EMPTY_WORDS = {"", "なし", "無し", "-", "—"}
+
+# 空の欄を書き戻すときに使う語。読むときは上の一覧のどれでも空として扱う。
+EMPTY_MARK = "なし"
 
 # 機能の台帳の表の見出し。節を新しく作るときに書き出す。
 CAPABILITY_TABLE_HEADER = ("| 機能名 | 説明 | 裏づけの節 |", "|---|---|---|")
@@ -139,28 +153,49 @@ class MarkdownRepository:
         return path.read_text(encoding="utf-8")
 
     def load(self) -> SourceSnapshot:
-        """7 種の正本を読み、型のインスタンスの集合にする。"""
+        """7 種の正本を読み、型のインスタンスの集合にする。
+
+        必須の欄が欠けたブロックは型にできないので集合には入らないが、飛ばしたこと自体を
+        defects に載せて渡す。黙って飛ばすと、1 つ前のブロックが「いまの正本」として通ってしまう。
+        """
+        positionings, defects = self._load_positionings()
         return SourceSnapshot(
-            positionings=self._load_positionings(),
+            positionings=positionings,
             packages=self._load_packages(),
             capabilities=self._load_capabilities(),
             career_frames=self._load_career_frames(),
             engagements=self._load_engagements(),
             presentations=self._load_presentations(),
             ledger_entries=self._load_ledger_entries(),
+            defects=defects,
         )
 
-    def _load_positionings(self) -> list[Positioning]:
-        """売り方の決めを、1 決め 1 ブロックで読む。"""
+    def _load_positionings(self) -> tuple[list[Positioning], list[SourceDefect]]:
+        """売り方の決めを、1 決め 1 ブロックで読む。
+
+        欄が欠けたブロックは決めとして読めないので、読めなかったことと欠けた欄の名前を
+        2 つ目の返り値に入れる。どちらを返すかではなく、両方を返すのがこの関数の仕事である。
+        """
         result: list[Positioning] = []
+        defects: list[SourceDefect] = []
         for block in _blocks(split_sections(self._read("positioning"))):
             fields = parse_definition_list(block.body)
-            if not all(label in fields for label in POSITIONING_LABELS):
+            missing = [label for label in POSITIONING_LABELS if label not in fields]
+            if missing:
+                defects.append(
+                    SourceDefect(
+                        file=self.settings.files["positioning"],
+                        location=f"「{block.heading}」のブロック",
+                        missing_fields=missing,
+                    )
+                )
                 continue
             values = {name: fields[label] for label, name in POSITIONING_LABELS.items()}
-            values["exceptions"] = self._parse_exceptions(fields.get("例外", ""))
+            values["exceptions"] = self._parse_exceptions(
+                fields.get(POSITIONING_EXCEPTIONS_LABEL, "")
+            )
             result.append(Positioning(**values))
-        return result
+        return result, defects
 
     @staticmethod
     def _parse_exceptions(value: str) -> list[dict[str, str]]:
@@ -174,7 +209,12 @@ class MarkdownRepository:
                 presentation, reason = entry.split(EXCEPTION_SEPARATOR, 1)
             else:
                 presentation, reason = entry, ""
-            exceptions.append({"提示物": presentation.strip(), "理由": reason.strip()})
+            exceptions.append(
+                {
+                    EXCEPTION_PRESENTATION_KEY: presentation.strip(),
+                    EXCEPTION_REASON_KEY: reason.strip(),
+                }
+            )
         return exceptions
 
     def _load_packages(self) -> list[Package]:
@@ -188,7 +228,7 @@ class MarkdownRepository:
             for optional_name in ("basis", "source", "breaks_when"):
                 values[optional_name] = _optional(values.get(optional_name))
             values["name"] = block.heading
-            values["capabilities"] = _split_list(fields.get("束ねる機能", ""))
+            values["capabilities"] = _split_list(fields.get(PACKAGE_CAPABILITIES_LABEL, ""))
             if "buyer" not in values or "updated_on" not in values:
                 continue
             result.append(Package(**values))
@@ -378,9 +418,93 @@ class MarkdownRepository:
         return f"| {cell(capability.name)} | {cell(capability.description)} | {evidence} |"
 
     def append_positioning(self, positioning: Positioning) -> None:
-        """売り方の決めを 1 ブロック足す（書きの操作 3 つの段で実装する）。"""
-        raise NotImplementedError("決めの書き戻しは書きの操作 3 つの段で実装する")
+        """売り方の決めを 1 ブロック足す。過去のブロックは書き換えず、末尾に積む。
+
+        積むだけにするのは、いつ何を前面に出していたかを後から辿れるようにするためである。
+        どのブロックが効いているかは、読むときに日付で決める。
+        """
+        path = self.settings.path_for("positioning")
+        text = path.read_text(encoding="utf-8") if path.is_file() else ""
+        lines = text.splitlines()
+        lines.extend(["", *self._positioning_block(positioning)])
+        path.write_text("\n".join(lines).rstrip("\n") + "\n", encoding="utf-8")
+
+    @classmethod
+    def _positioning_block(cls, positioning: Positioning) -> list[str]:
+        """決め 1 件を、正本のブロックの行にする。読み戻すのは _load_positionings である。"""
+        decided_on = positioning.decided_on.isoformat()
+        lines = [f"## {decided_on} {positioning.scope}", ""]
+        for label, name in POSITIONING_LABELS.items():
+            value = getattr(positioning, name)
+            lines.append(f"- {label}: {cls._as_text(value)}")
+
+        exceptions = [
+            cls._exception_line(entry) for entry in positioning.exceptions
+        ]
+        exceptions = [line for line in exceptions if line]
+        if not exceptions:
+            exceptions = [EMPTY_MARK]
+        lines.extend(f"- {POSITIONING_EXCEPTIONS_LABEL}: {line}" for line in exceptions)
+        return lines
+
+    @staticmethod
+    def _exception_line(entry: dict[str, str]) -> str:
+        """例外 1 件を「提示物 — 理由」の 1 行にする。理由が無ければ提示物だけを書く。"""
+        presentation = str(entry.get(EXCEPTION_PRESENTATION_KEY, "")).strip()
+        reason = str(entry.get(EXCEPTION_REASON_KEY, "")).strip()
+        if not presentation:
+            return ""
+        if not reason:
+            return presentation
+        return f"{presentation} {EXCEPTION_SEPARATOR} {reason}"
 
     def write_package(self, package: Package) -> None:
-        """パッケージ定義の 1 節を書き換える（書きの操作 3 つの段で実装する）。"""
-        raise NotImplementedError("パッケージの書き戻しは書きの操作 3 つの段で実装する")
+        """パッケージ定義の 1 節を書き換える。その名前の節が無ければ、末尾に足す。
+
+        決めと違って積まないのは、パッケージがいまの売り物の定義 1 つだからである。
+        いつ何を売っていたかは決めの正本の側が持つ。
+        """
+        path = self.settings.path_for("packages")
+        text = path.read_text(encoding="utf-8") if path.is_file() else ""
+        lines = text.splitlines()
+        block = self._package_block(package)
+
+        target = next(
+            (
+                section
+                for section in _blocks(split_sections(text))
+                if section.heading == package.name
+            ),
+            None,
+        )
+        if target is None:
+            lines.extend(["", *block])
+        else:
+            lines[target.start : target.end] = [*block, ""]
+
+        path.write_text("\n".join(lines).rstrip("\n") + "\n", encoding="utf-8")
+
+    @classmethod
+    def _package_block(cls, package: Package) -> list[str]:
+        """パッケージ 1 つを、正本の節の行にする。値の無い任意の欄は行ごと書かない。"""
+        lines = [f"## {package.name}", ""]
+        for label, name in PACKAGE_LABELS.items():
+            value = getattr(package, name)
+            if value is None or value == "":
+                continue
+            lines.append(f"- {label}: {cls._as_text(value)}")
+
+        bundled = f" {LIST_SEPARATOR} ".join(package.capabilities)
+        lines.append(f"- {PACKAGE_CAPABILITIES_LABEL}: {bundled or EMPTY_MARK}")
+        return lines
+
+    @staticmethod
+    def _as_text(value: object) -> str:
+        """欄の値を、正本に書く 1 行の文字列にする。日付は 2026-09-16 の形で書く。
+
+        1 欄 1 行の書き方なので、値の中の改行は空白に畳む。畳まないと、2 行目以降が
+        欄の付いていない行になり、読み戻したときに落ちる。
+        """
+        if isinstance(value, date):
+            return value.isoformat()
+        return " ".join(str(value).split())

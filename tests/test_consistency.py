@@ -205,3 +205,28 @@ def test_check_consistency_cannot_judge_freshness_without_the_headline_package(s
     listed = "\n".join(report.notes)
     assert "鮮度は判定できない" in listed, listed
     assert HEADLINE_PACKAGE in listed, listed
+
+
+def test_check_consistency_names_a_positioning_block_that_lost_a_field(settings) -> None:
+    """必須の欄を欠いた決めのブロックは、黙って捨てず、どのブロックのどの欄が無いかを断る。
+
+    黙って捨てると、1 つ前の決めが「いまの看板」として通り、正しい提示物 2 件に対して
+    逆向きの直し先（旧い束に書き換えよ）が返る。
+    """
+    positioning = settings.path_for("positioning")
+    _rewrite(positioning, "- 日付: 2026-09-10\n", "", last=True)
+
+    report = _report(settings)
+
+    listed = "\n".join(report.notes)
+    assert settings.files["positioning"] in listed, listed
+    assert "2026-09-10 全体" in listed, listed
+    assert "日付" in listed, listed
+    assert "record_positioning" in listed, listed
+
+    # 読めなかったぶん、看板は 1 つ前の決めになる。それ自体は検査に判断できないので、
+    # 違反は 1 つ前の決めを基準に出る。断りが無いとこれが黙って起きる、というのが直した点である。
+    outdated = [item for item in report.violations if item.constraint == OUTDATED_OFFERING_CLAIM]
+    assert outdated, "1 つ前の決めを基準にした違反は出る（断りと組で読む）"
+    assert all("2026-06-01" in item.expected for item in outdated)
+    assert report.notes, "違反だけを返して、読めなかったブロックを黙っていない"

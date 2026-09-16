@@ -71,7 +71,7 @@ types:
         label: 仮説の状態
         type: text
         required: true
-        description: 仮説のみ・検証中・実績あり。選べる語は設定ファイルから読む。
+        description: 選べる語は設定ファイルの package_hypothesis_states が持つ一覧に限る。
       - name: capabilities
         label: 束ねる機能
         type: text_list

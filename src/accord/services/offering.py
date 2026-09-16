@@ -6,17 +6,21 @@
 
 from __future__ import annotations
 
-import difflib
+from datetime import date
 
 from accord.models.constraints import CONSTRAINTS
+from accord.models.ontology import field_example, missing_required_fields
 from accord.models.results import (
+    FALLBACK_COUNT,
     CapabilityDraft,
     NextAction,
     PackageDraft,
     Rejection,
+    SourceSnapshot,
     WriteResult,
+    close_names,
 )
-from accord.models.types import Capability
+from accord.models.types import Capability, Package
 from accord.repository.markdown_repository import MarkdownRepository
 from accord.vocabulary.settings import Settings
 
@@ -25,19 +29,21 @@ CONSTRAINT_BY_NAME = {constraint.name: constraint for constraint in CONSTRAINTS}
 EVIDENCE_SECTION_EXISTS = CONSTRAINT_BY_NAME["裏づけ節名の実在"].name
 PACKAGE_CAPABILITY_MATCHES = CONSTRAINT_BY_NAME["束ねる機能名の一致"].name
 
-# 分類の列挙は制約 7 つではなく、型 Capability の欄の定義である（選べる語は設定が持つ）。
+# 次の 3 つは制約 7 つではなく、型 Capability と型 Package の欄の定義である
+# （選べる分類と、選べる仮説の状態の語は設定が持つ）。
 CAPABILITY_CATEGORY_ENUM = "機能の分類の列挙"
+PACKAGE_HYPOTHESIS_STATE_ENUM = "仮説の状態の列挙"
+PACKAGE_REQUIRED_FIELDS = "パッケージの必須欄"
 
-# 候補を探すときの緩さ。近い名前が 1 つも出ないときは、実在する名前をそのまま並べる。
-CLOSE_MATCH_CUTOFF = 0.3
-CLOSE_MATCH_COUNT = 3
-FALLBACK_COUNT = 5
+# 入力の欄を引くときの、型の名前。
+PACKAGE_TYPE_NAME = "Package"
 
+# 操作の名前。次の一手にそのまま載せる。
+REGISTER_OPERATION = "register_capability"
+REVISE_OPERATION = "revise_package"
 
-def _candidates(wanted: str, pool: list[str]) -> list[str]:
-    """実在する名前のうち、渡された名前に近いものを返す。近いものが無ければ先頭から並べる。"""
-    close = difflib.get_close_matches(wanted, pool, n=CLOSE_MATCH_COUNT, cutoff=CLOSE_MATCH_CUTOFF)
-    return close or pool[:FALLBACK_COUNT]
+# パッケージを改訂するときに、入力が持たない欄。前の定義の値をそのまま残し、残したことを断る。
+CARRIED_OVER_LABEL = "崩れる条件"
 
 
 class OfferingService:
@@ -62,7 +68,7 @@ class OfferingService:
                         f"分類は設定ファイル {self.settings.config_path.name} が持つ節の名前に限る。"
                     ),
                     next_action=NextAction(
-                        operation="register_capability",
+                        operation=REGISTER_OPERATION,
                         candidates=list(categories),
                         example=f"分類には「{categories[0]}」のように、上の候補のどれかをそのまま渡す。",
                     ),
@@ -77,7 +83,7 @@ class OfferingService:
                     constraint=EVIDENCE_SECTION_EXISTS,
                     reason="裏づけの節が 1 つも無い。機能は、その仕事をしたと言える節を 1 つ以上指す。",
                     next_action=NextAction(
-                        operation="register_capability",
+                        operation=REGISTER_OPERATION,
                         missing_fields=["裏づけの節"],
                         candidates=headings[:FALLBACK_COUNT],
                         example="裏づけの節には、職歴の枠か受託案件の見出しをそのまま渡す。",
@@ -95,9 +101,9 @@ class OfferingService:
                         f"裏づけの節「{unknown[0]}」は、職歴の枠にも受託案件にも無い見出しである。"
                     ),
                     next_action=NextAction(
-                        operation="register_capability",
-                        candidates=_candidates(unknown[0], headings),
-                        example="上の候補をそのまま裏づけの節に渡して、もう一度 register_capability を呼ぶ。",
+                        operation=REGISTER_OPERATION,
+                        candidates=close_names(unknown[0], headings),
+                        example=f"上の候補をそのまま裏づけの節に渡して、もう一度 {REGISTER_OPERATION} を呼ぶ。",
                     ),
                 ),
             )
@@ -130,17 +136,128 @@ class OfferingService:
         )
 
     def revise_package(self, draft: PackageDraft) -> WriteResult:
-        """パッケージ定義を改訂する（書きの操作 3 つの段で実装する）。"""
+        """パッケージ定義の 1 節を改訂し、最終更新日を今日に進める。
+
+        制約を先に全部見て、通ると決まってから 1 度だけ書き戻す。拒否のときは書き戻しに
+        入らないので、パッケージ定義は 1 バイトも変わらない。
+        最終更新日をこの操作が進めるのは、鮮度の制約（定義が決めより古くないこと）を
+        満たす側がここだからである。
+        """
+        snapshot = self.repository.load()
+
+        rejection = self._package_rejection(snapshot, draft)
+        if rejection is not None:
+            return WriteResult(accepted=False, rejection=rejection)
+
+        previous = next((item for item in snapshot.packages if item.name == draft.name), None)
+        carried, warnings = self._carried_over(previous, draft)
+
+        package = Package(
+            name=draft.name,
+            buyer=draft.buyer,
+            hypothesis_state=draft.hypothesis_state,
+            capabilities=list(draft.capabilities),
+            updated_on=date.today(),
+            basis=carried["basis"],
+            source=carried["source"],
+            breaks_when=carried["breaks_when"],
+        )
+        self.repository.write_package(package)
+
         return WriteResult(
-            accepted=False,
-            rejection=Rejection(
-                constraint=PACKAGE_CAPABILITY_MATCHES,
+            accepted=True,
+            recorded={
+                "改訂したパッケージ": package.model_dump(mode="json"),
+                "最終更新": package.updated_on.isoformat(),
+                "新しい節か": previous is None,
+            },
+            warnings=warnings,
+        )
+
+    # ------------------------------------------------------------ 改訂の部品
+
+    def _package_rejection(
+        self, snapshot: SourceSnapshot, draft: PackageDraft
+    ) -> Rejection | None:
+        """改訂の入力を制約に当てる。通れば None を返し、通らなければ次の一手つきの拒否を返す。"""
+        missing = missing_required_fields(PACKAGE_TYPE_NAME, draft)
+        if missing:
+            return Rejection(
+                constraint=PACKAGE_REQUIRED_FIELDS,
                 reason=(
-                    "この操作は後の段で実装する。いまはパッケージ定義を 1 バイトも変えない。"
+                    "パッケージの必須の欄"
+                    + "、".join(f"「{field.label}」" for field in missing)
+                    + "が無い。売り物の定義は、誰に何を売るかがそろって初めて書ける。"
                 ),
                 next_action=NextAction(
-                    operation="revise_package",
-                    example="書きの操作 3 つの段が済んでから、同じ入力でもう一度呼ぶ。",
+                    operation=REVISE_OPERATION,
+                    missing_fields=[field.label for field in missing],
+                    example="\n".join(field_example(field) for field in missing),
                 ),
-            ),
-        )
+            )
+
+        states = self.settings.package_hypothesis_states
+        if draft.hypothesis_state not in states:
+            return Rejection(
+                constraint=PACKAGE_HYPOTHESIS_STATE_ENUM,
+                reason=(
+                    f"仮説の状態「{draft.hypothesis_state}」は、"
+                    f"設定ファイル {self.settings.config_path.name} が持つ語の一覧に無い。"
+                ),
+                next_action=NextAction(
+                    operation=REVISE_OPERATION,
+                    candidates=list(states),
+                    example=f"仮説の状態には「{states[0]}」のように、上の候補のどれかをそのまま渡す。",
+                ),
+            )
+
+        names = [item.name for item in snapshot.capabilities]
+        unknown = [name for name in draft.capabilities if name not in names]
+        if unknown:
+            return Rejection(
+                constraint=PACKAGE_CAPABILITY_MATCHES,
+                reason=f"束ねる機能「{unknown[0]}」は、機能の台帳に無い名前である。",
+                next_action=NextAction(
+                    operation=REVISE_OPERATION,
+                    candidates=close_names(unknown[0], names),
+                    example=(
+                        f"上の候補をそのまま束ねる機能に渡して、もう一度 {REVISE_OPERATION} を呼ぶ。"
+                        f"まだ台帳に無い仕事を束ねるなら、先に機能を登記する（{REGISTER_OPERATION}）。"
+                    ),
+                ),
+            )
+
+        return None
+
+    @staticmethod
+    def _carried_over(
+        previous: Package | None, draft: PackageDraft
+    ) -> tuple[dict[str, str | None], list[str]]:
+        """入力が持たない任意の欄を、前の定義から引き継ぐ。引き継いだ欄は断りに書く。
+
+        改訂の入力は「崩れる条件」の欄を持たず、判定根拠と出典も省ける。省かれた欄を空にすると、
+        前に書いた中身が改訂のたびに黙って消える。だから残し、残したことを言う。
+        """
+        carried: dict[str, str | None] = {
+            "basis": draft.basis,
+            "source": draft.source,
+            "breaks_when": None,
+        }
+        if previous is None:
+            return carried, []
+
+        warnings: list[str] = []
+        for name, label in (("basis", "判定根拠"), ("source", "出典")):
+            if carried[name] is None and getattr(previous, name) is not None:
+                carried[name] = getattr(previous, name)
+                warnings.append(
+                    f"「{label}」は入力に無かったので、前の定義の値をそのまま残した。"
+                    f"変えるなら、{REVISE_OPERATION} にこの欄を入れてもう一度呼ぶ。"
+                )
+        if previous.breaks_when is not None:
+            carried["breaks_when"] = previous.breaks_when
+            warnings.append(
+                f"「{CARRIED_OVER_LABEL}」はこの操作の入力に無い欄なので、"
+                "前の定義の値をそのまま残した。変えるなら正本を直す。"
+            )
+        return carried, warnings

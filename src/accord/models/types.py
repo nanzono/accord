@@ -27,7 +27,7 @@ class Package(BaseModel):
 
     name: str = Field(description="パッケージ名。決めと提示物が名前で指す先。")
     buyer: str = Field(description="想定買い手。誰に売るか。")
-    hypothesis_state: str = Field(description="仮説の状態。仮説のみ・検証中・実績あり。選べる語は設定ファイルから読む。")
+    hypothesis_state: str = Field(description="仮説の状態。選べる語は設定ファイルの package_hypothesis_states が持つ一覧に限る。")
     capabilities: list[str] = Field(description="束ねる機能。束ねる機能の名前。機能の台帳にある名前に限る。")
     updated_on: date = Field(description="最終更新。この定義を最後に直した日。決めの日付より古いと鮮度の違反になる。")
     basis: str | None = Field(default=None, description="判定根拠。仮説の状態をそう判定した理由。")

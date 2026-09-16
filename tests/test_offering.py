@@ -1,10 +1,15 @@
-"""機能を登記する操作のテスト。分類の出どころと、裏づけの節の実在を見る。"""
+"""機能を登記する操作と、パッケージを改訂する操作のテスト。
+
+機能の登記は、分類の出どころと裏づけの節の実在を見る。パッケージの改訂は、束ねる機能名の
+一致と仮説の状態の語、通ったときに節が差し替わって最終更新日が今日に進むことを見る。
+"""
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
-from accord.models.results import CapabilityDraft
+from accord.models.results import CapabilityDraft, PackageDraft
 from accord.repository.markdown_repository import MarkdownRepository
 from accord.services.offering import OfferingService
 from accord.vocabulary.settings import load_settings
@@ -18,6 +23,11 @@ OTHER_CATEGORIES = [
     "渡せるようにする",
     "人を増やす",
 ]
+
+# 同梱のサンプルにある名前。改訂のテストはこの節を土台にする。
+PACKAGE_NAME = "要件定義と進行管理"
+KNOWN_CAPABILITY = "要件を決める場をつくる"
+BUYER = "専任の進行役を置けない、従業員 100 名前後の会社の事業責任者"
 
 CONFIG_TEMPLATE = """[source]
 directory = "source"
@@ -133,3 +143,117 @@ def test_rejected_candidate_is_accepted_when_passed_back(settings) -> None:
     )
     assert retried.accepted is True, retried.model_dump()
     assert "裏づけの節の公開可否" in retried.recorded
+
+
+def test_revise_package_rejects_unregistered_capability(settings) -> None:
+    """機能の台帳に無い名前を束ねると、書かずに拒否し、候補と先に呼ぶ操作を返す。"""
+    before = source_digest(settings.source_dir)
+    service = OfferingService(settings)
+
+    result = service.revise_package(
+        PackageDraft(
+            name=PACKAGE_NAME,
+            capabilities=[KNOWN_CAPABILITY, "決まったことを段取りに落とさない"],
+            buyer=BUYER,
+            hypothesis_state=settings.package_hypothesis_states[1],
+        )
+    )
+
+    assert result.accepted is False
+    assert result.rejection is not None
+    assert result.rejection.constraint == "束ねる機能名の一致"
+
+    next_action = result.rejection.next_action
+    assert "決まったことを段取りに落とす" in next_action.candidates, next_action.candidates
+    assert "register_capability" in next_action.example, next_action.example
+
+    # 拒否のときは正本のバイト列が 1 つも変わらない。
+    assert source_digest(settings.source_dir) == before
+
+    # 返ってきた候補をそのまま渡し直すと、今度は受け付けられる。
+    retried = service.revise_package(
+        PackageDraft(
+            name=PACKAGE_NAME,
+            capabilities=[KNOWN_CAPABILITY, next_action.candidates[0]],
+            buyer=BUYER,
+            hypothesis_state=settings.package_hypothesis_states[1],
+        )
+    )
+    assert retried.accepted is True, retried.model_dump()
+
+
+def test_revise_package_rejects_a_hypothesis_state_outside_the_settings(settings) -> None:
+    """仮説の状態が設定の語に無いときは、書かずに拒否し、設定の語を返す。"""
+    before = source_digest(settings.source_dir)
+
+    result = OfferingService(settings).revise_package(
+        PackageDraft(
+            name=PACKAGE_NAME,
+            capabilities=[KNOWN_CAPABILITY],
+            buyer=BUYER,
+            hypothesis_state="だいたい実績あり",
+        )
+    )
+
+    assert result.accepted is False
+    assert result.rejection is not None
+    assert result.rejection.next_action.candidates == settings.package_hypothesis_states
+    assert source_digest(settings.source_dir) == before
+
+
+def test_revise_package_replaces_the_section_and_advances_the_update_date(settings) -> None:
+    """通る改訂は、その節を書き換え、最終更新日を今日に進める。"""
+    packages = settings.path_for("packages")
+    before_sections = packages.read_text(encoding="utf-8").count("\n## ")
+
+    result = OfferingService(settings).revise_package(
+        PackageDraft(
+            name=PACKAGE_NAME,
+            capabilities=[KNOWN_CAPABILITY, "決まったことを段取りに落とす"],
+            buyer=BUYER,
+            hypothesis_state=settings.package_hypothesis_states[2],
+            basis="受注 2 件がどちらも継続している。",
+        )
+    )
+
+    assert result.accepted is True, result.model_dump()
+    assert result.recorded["最終更新"] == date.today().isoformat()
+    assert result.recorded["新しい節か"] is False
+
+    # 節は増えず、中身が差し替わる。
+    text = packages.read_text(encoding="utf-8")
+    assert text.count("\n## ") == before_sections
+    assert text.count(f"\n## {PACKAGE_NAME}\n") == 1
+
+    package = next(
+        item
+        for item in MarkdownRepository(settings).load().packages
+        if item.name == PACKAGE_NAME
+    )
+    assert package.updated_on == date.today()
+    assert package.hypothesis_state == settings.package_hypothesis_states[2]
+    assert package.capabilities == [KNOWN_CAPABILITY, "決まったことを段取りに落とす"]
+    # 入力が持たない欄（崩れる条件）は、前の定義の値をそのまま残し、残したことを断る。
+    assert package.breaks_when
+    assert any("崩れる条件" in warning for warning in result.warnings), result.warnings
+
+
+def test_revise_package_adds_a_section_for_a_new_name(settings) -> None:
+    """その名前の節が無いときは、新しい節を足す。"""
+    packages = settings.path_for("packages")
+    before_sections = packages.read_text(encoding="utf-8").count("\n## ")
+
+    result = OfferingService(settings).revise_package(
+        PackageDraft(
+            name="引き継ぎまでを 1 本で受ける",
+            capabilities=[KNOWN_CAPABILITY],
+            buyer="担当者が 1 人で回している会社の事業責任者",
+            hypothesis_state=settings.package_hypothesis_states[0],
+        )
+    )
+
+    assert result.accepted is True, result.model_dump()
+    assert result.recorded["新しい節か"] is True
+    assert packages.read_text(encoding="utf-8").count("\n## ") == before_sections + 1
+    names = [item.name for item in MarkdownRepository(settings).load().packages]
+    assert "引き継ぎまでを 1 本で受ける" in names

@@ -220,10 +220,8 @@ class MaterialService:
         from accord.services.consistency import ConsistencyService
 
         report = ConsistencyService(self.settings, self.repository).inspect(channel)
-        warnings = [
-            f"{violation.constraint}: {violation.file} の{violation.location}"
-            f" — {violation.expected}"
-            for violation in report.violations
-        ]
+        # 違反を 1 行に均すときに候補を落とすと、「下の候補」の実体が材料に届かない。
+        # 1 行にする書き方は違反の型が持っているので、ここでは組み立て直さない。
+        warnings = [violation.as_note() for violation in report.violations]
         warnings.extend(report.notes)
         return warnings

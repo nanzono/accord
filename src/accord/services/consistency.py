@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-import difflib
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -27,15 +26,20 @@ from accord.models.results import (
     ConsistencyReport,
     SourceSnapshot,
     Violation,
+    close_names,
 )
 from accord.models.types import Capability, Package, Positioning, Presentation, ResumeLedger
-from accord.repository.markdown_repository import MarkdownRepository
+from accord.repository.markdown_repository import (
+    EXCEPTION_PRESENTATION_KEY,
+    MarkdownRepository,
+)
 from accord.services.material import MaterialService
 from accord.services.offering import OfferingService
 from accord.services.positioning import (
     WHOLE_SCOPE,
     PositioningService,
     applicable_positioning,
+    defect_notes,
     latest_positioning,
     unrecorded_positioning_next_step,
 )
@@ -50,23 +54,9 @@ EVIDENCE_SECTION_EXISTS = CONSTRAINT_BY_NAME["裏づけ節名の実在"].name
 PACKAGE_CAPABILITY_MATCHES = CONSTRAINT_BY_NAME["束ねる機能名の一致"].name
 NOTE_AND_SOURCE_SECTION = CONSTRAINT_BY_NAME["注記と出典の節の実在・公開可否"].name
 
-# 決めの例外の欄で、提示物の名前を持つ鍵。リポジトリが例外の行をこの鍵で組み立てる。
-EXCEPTION_PRESENTATION_KEY = "提示物"
-
 # 未反映の注記の書き方。「節の見出し — 覚え書き」で、区切りより前がその注記の入る先の節になる。
 # 区切りが無ければ、注記の全文を節の見出しとして読む。
 NOTE_SEPARATOR = "—"
-
-# 候補を探すときの緩さ。近い名前が 1 つも出ないときは、実在する名前をそのまま並べる。
-CLOSE_MATCH_CUTOFF = 0.3
-CLOSE_MATCH_COUNT = 3
-FALLBACK_COUNT = 5
-
-
-def _candidates(wanted: str, pool: list[str]) -> list[str]:
-    """実在する名前のうち、渡された名前に近いものを返す。近いものが無ければ先頭から並べる。"""
-    close = difflib.get_close_matches(wanted, pool, n=CLOSE_MATCH_COUNT, cutoff=CLOSE_MATCH_CUTOFF)
-    return close or pool[:FALLBACK_COUNT]
 
 
 def _is_listed_as_exception(positioning: Positioning, presentation: Presentation) -> bool:
@@ -123,6 +113,10 @@ class ConsistencyService:
 
         violations: list[Violation] = []
         notes: list[str] = list(target.skipped)
+
+        # 型にできなかったブロックは、検査の対象に入っていない。入っていないことを先に断る。
+        # 黙って飛ばすと、1 つ前のブロックを看板として、正しい提示物に逆向きの直し先が返る。
+        notes.extend(defect_notes(self.settings, snapshot))
 
         if snapshot.positionings:
             stale, missing_package = self._check_package_freshness(snapshot, target)
@@ -352,7 +346,7 @@ class ConsistencyService:
                             f"裏づけの節「{section}」は、職歴の枠にも受託案件にも無い見出しである。"
                             "下の候補のうち実在する見出しに書き換える。"
                         ),
-                        candidates=_candidates(section, headings),
+                        candidates=close_names(section, headings),
                     )
                 )
         return violations
@@ -378,7 +372,7 @@ class ConsistencyService:
                             "下の候補のどれかに書き換えるか、先に register_capability で"
                             "この機能を台帳に登記する。"
                         ),
-                        candidates=_candidates(wanted, names),
+                        candidates=close_names(wanted, names),
                     )
                 )
         return violations
@@ -411,7 +405,7 @@ class ConsistencyService:
                             "下の候補のうち実在する見出しに書き換える。"
                             "この事実をもう正本に書いたのなら、注記の行ごと消す。"
                         ),
-                        candidates=_candidates(section, headings),
+                        candidates=close_names(section, headings),
                     )
                 )
 
@@ -451,7 +445,7 @@ class ConsistencyService:
                             f"出典の節「{section}」は、受託案件の見出しに無い。"
                             "下の候補のうち実在する見出しに書き換える。"
                         ),
-                        candidates=_candidates(section, list(engagements)),
+                        candidates=close_names(section, list(engagements)),
                     )
                 )
                 continue
@@ -478,8 +472,7 @@ class ConsistencyService:
 # 制約の名前（正本は ontology.yaml）を鍵に、それを執行する操作と関数を引く。
 # 同じ制約が、書きの操作では拒否、読みの操作では警告、検査の操作では一覧として現れるので、
 # 操作の名前ごとに関数を持つ。1 つの操作が 2 か所で執行する制約（注記と出典の節）は 2 つ並ぶ。
-# 決めを登記する操作とパッケージを改訂する操作の中身は書きの操作の段で入るが、
-# どの関数が受け持つかはここで決まっている。
+# 書きの操作が持つ拒否と、検査が持つ検出は、同じ制約の違う顔である。
 
 ENFORCEMENT: dict[str, dict[str, tuple[Callable[..., Any], ...]]] = {
     POSITIONING_REQUIRED_FIELDS: {
