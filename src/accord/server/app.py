@@ -115,7 +115,7 @@ def create_server(settings: Settings) -> MCPServer:
         category: str,
         evidence_sections: list[str],
     ) -> WriteResult:
-        """機能の台帳に 1 行足す。分類か裏づけの節が通らなければ書かずに拒否し、候補を返す。"""
+        """機能の台帳に 1 行足す。必須欄・分類・裏づけの節が通らなければ書かずに拒否し、次の一手を返す。"""
         return offering_service.register_capability(
             CapabilityDraft(
                 name=name,

@@ -76,6 +76,7 @@ REJECTION_PATHS = {
     "決めの束がパッケージ定義に無い": lambda settings: _record(
         settings, headline_package="要件定義と進こう管理"
     ),
+    "機能の名前と説明が無い": lambda settings: _register(settings, name="", description=""),
     "機能の分類が設定の節に無い": lambda settings: _register(settings, category="思いつきの分類"),
     "機能の裏づけの節が 1 つも無い": lambda settings: _register(settings, evidence_sections=[]),
     "機能の裏づけの節が実在しない": lambda settings: _register(

@@ -11,6 +11,7 @@ from datetime import date
 from pathlib import Path
 
 from accord.models.results import PositioningDraft
+from accord.repository.markdown_repository import MarkdownRepository
 from accord.services.positioning import PositioningService
 from conftest import source_digest
 
@@ -243,3 +244,25 @@ def test_record_positioning_lists_the_scopes_it_accepts(settings) -> None:
     assert candidates[0] == "全体"
     for name in settings.channels:
         assert name in candidates, candidates
+
+
+def test_record_positioning_round_trips_a_multiline_rationale(settings) -> None:
+    """根拠に改行を含めて登記しても、書き戻して読み直すと同じ文字列に戻る。
+
+    1 欄 1 行の書き方を守るための書き戻しが、改行を空白に畳んで文字列を変えてしまわないかを見る。
+    """
+    rationale = "直近の引き合いが、\n散らばった数字を 1 か所に集める話に戻ったため。"
+
+    result = PositioningService(settings).record(
+        PositioningDraft(
+            decided_on=date(2026, 9, 16),
+            scope="全体",
+            headline_package=LATEST_HEADLINE,
+            rationale=rationale,
+        )
+    )
+
+    assert result.accepted is True, result.model_dump()
+
+    positioning = MarkdownRepository(settings).load().positionings[-1]
+    assert positioning.rationale == rationale

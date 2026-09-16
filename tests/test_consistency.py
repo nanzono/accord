@@ -150,6 +150,44 @@ def test_check_consistency_detects_dangling_pending_note(settings) -> None:
     assert any("未反映の注記が 1 件残っている" in note for note in report.notes), report.notes
 
 
+def test_check_consistency_names_a_package_section_that_lost_a_field(settings) -> None:
+    """パッケージ定義の必須欄を 1 行消しても黙って飛ばさず、どの節のどの欄が無いかを断る。
+
+    型にできなかった節そのもの（packages.md 側）を名指しする。決めの側にも「鮮度は判定できない」
+    という別の断りが出るが、直すべきは packages.md の欠けた欄である。
+    """
+    _rewrite(
+        settings.path_for("packages"),
+        "- 想定買い手: 専任の進行役を置けない、従業員 100 名前後の会社の事業責任者\n",
+        "",
+    )
+
+    report = _report(settings)
+
+    listed = "\n".join(report.notes)
+    assert settings.files["packages"] in listed, listed
+    assert HEADLINE_PACKAGE in listed, listed
+    assert "想定買い手" in listed, listed
+    assert "revise_package" in listed, listed
+
+
+def test_check_consistency_names_a_capability_row_that_lost_a_field(settings) -> None:
+    """機能の台帳の表から裏づけの節の列を消しても黙って飛ばさず、どの分類の何行目かを断る。"""
+    _rewrite(
+        settings.path_for("capabilities"),
+        "| 要件を決める場をつくる | 決まっていないことを一覧にし、決める人と決める日を置く | "
+        "ナギサ書房 刊行計画の進行管理 |",
+        "| 要件を決める場をつくる | 決まっていないことを一覧にし、決める人と決める日を置く |",
+    )
+
+    report = _report(settings)
+
+    listed = "\n".join(report.notes)
+    assert settings.files["capabilities"] in listed, listed
+    assert "決めて、進める" in listed, listed
+    assert "裏づけの節" in listed, listed
+
+
 def test_check_consistency_lists_existing_scopes_for_an_unknown_name(settings) -> None:
     """範囲の名前が実在しないときは、違反ではなく実在する範囲の一覧を返す。"""
     report = _report(settings, "shiokaze")

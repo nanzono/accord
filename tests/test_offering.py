@@ -93,6 +93,34 @@ def test_capability_categories_come_from_settings(sample_copy: Path) -> None:
     assert rejected.rejection.next_action.candidates == OTHER_CATEGORIES
 
 
+def test_register_capability_rejects_missing_required_fields(settings) -> None:
+    """機能名と説明を空にすると、書かずに拒否し、欠けた欄の名前と書き方の例を返す。"""
+    before = source_digest(settings.source_dir)
+    heading = MarkdownRepository(settings).load().section_headings()[0]
+
+    result = OfferingService(settings).register_capability(
+        CapabilityDraft(
+            name="",
+            description="",
+            category=settings.capability_categories[0],
+            evidence_sections=[heading],
+        )
+    )
+
+    assert result.accepted is False
+    assert result.rejection is not None
+    assert result.rejection.constraint == "機能の必須欄"
+
+    next_action = result.rejection.next_action
+    assert next_action.missing_fields == ["機能名", "説明"]
+    assert next_action.operation == "register_capability"
+    assert "機能名" in next_action.example
+    assert "説明" in next_action.example
+
+    # 拒否のときは正本のバイト列が 1 つも変わらない。
+    assert source_digest(settings.source_dir) == before
+
+
 def test_register_capability_rejects_unknown_evidence_section(settings) -> None:
     """実在しない節名を裏づけにすると、受け付けず、近い見出しの候補を返す。"""
     before = source_digest(settings.source_dir)

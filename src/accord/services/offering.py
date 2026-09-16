@@ -11,7 +11,6 @@ from datetime import date
 from accord.models.constraints import CONSTRAINTS
 from accord.models.ontology import field_example, missing_required_fields
 from accord.models.results import (
-    FALLBACK_COUNT,
     CapabilityDraft,
     NextAction,
     PackageDraft,
@@ -29,13 +28,15 @@ CONSTRAINT_BY_NAME = {constraint.name: constraint for constraint in CONSTRAINTS}
 EVIDENCE_SECTION_EXISTS = CONSTRAINT_BY_NAME["裏づけ節名の実在"].name
 PACKAGE_CAPABILITY_MATCHES = CONSTRAINT_BY_NAME["束ねる機能名の一致"].name
 
-# 次の 3 つは制約 7 つではなく、型 Capability と型 Package の欄の定義である
+# 次の 4 つは制約 7 つではなく、型 Capability と型 Package の欄の定義である
 # （選べる分類と、選べる仮説の状態の語は設定が持つ）。
 CAPABILITY_CATEGORY_ENUM = "機能の分類の列挙"
+CAPABILITY_REQUIRED_FIELDS = "機能の必須欄"
 PACKAGE_HYPOTHESIS_STATE_ENUM = "仮説の状態の列挙"
 PACKAGE_REQUIRED_FIELDS = "パッケージの必須欄"
 
 # 入力の欄を引くときの、型の名前。
+CAPABILITY_TYPE_NAME = "Capability"
 PACKAGE_TYPE_NAME = "Package"
 
 # 操作の名前。次の一手にそのまま載せる。
@@ -54,8 +55,27 @@ class OfferingService:
         self.repository = repository or MarkdownRepository(settings)
 
     def register_capability(self, draft: CapabilityDraft) -> WriteResult:
-        """機能の台帳に 1 行足す。分類と裏づけの節を確かめ、通らなければ書かずに拒否する。"""
+        """機能の台帳に 1 行足す。必須欄・分類・裏づけの節を確かめ、通らなければ書かずに拒否する。"""
         snapshot = self.repository.load()
+
+        missing = missing_required_fields(CAPABILITY_TYPE_NAME, draft)
+        if missing:
+            return WriteResult(
+                accepted=False,
+                rejection=Rejection(
+                    constraint=CAPABILITY_REQUIRED_FIELDS,
+                    reason=(
+                        "機能の必須の欄"
+                        + "、".join(f"「{field.label}」" for field in missing)
+                        + "が無い。名前と説明と裏づけがそろって初めて、仕事をしたと言える機能になる。"
+                    ),
+                    next_action=NextAction(
+                        operation=REGISTER_OPERATION,
+                        missing_fields=[field.label for field in missing],
+                        example="\n".join(field_example(field) for field in missing),
+                    ),
+                ),
+            )
 
         categories = self.settings.capability_categories
         if draft.category not in categories:
@@ -76,21 +96,6 @@ class OfferingService:
             )
 
         headings = snapshot.section_headings()
-        if not draft.evidence_sections:
-            return WriteResult(
-                accepted=False,
-                rejection=Rejection(
-                    constraint=EVIDENCE_SECTION_EXISTS,
-                    reason="裏づけの節が 1 つも無い。機能は、その仕事をしたと言える節を 1 つ以上指す。",
-                    next_action=NextAction(
-                        operation=REGISTER_OPERATION,
-                        missing_fields=["裏づけの節"],
-                        candidates=headings[:FALLBACK_COUNT],
-                        example="裏づけの節には、職歴の枠か受託案件の見出しをそのまま渡す。",
-                    ),
-                ),
-            )
-
         unknown = [name for name in draft.evidence_sections if name not in headings]
         if unknown:
             return WriteResult(

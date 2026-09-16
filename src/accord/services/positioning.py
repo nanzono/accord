@@ -99,17 +99,20 @@ def positioning_input_type() -> str:
 
 
 def defect_notes(settings: Settings, snapshot: SourceSnapshot) -> list[str]:
-    """型にできなかったブロックを、断りの文にする。
+    """型にできなかったブロックや節を、断りの文にする。
 
-    決めのブロックには、登記し直す手を添える。読み込みで飛ばしたことを黙っていると、
-    1 つ前のブロックが「いまの看板」として通り、正しい提示物に逆向きの直し先が返る。
+    決めとパッケージには、登記し直す書きの操作を添える（この 2 つだけ、正本を直す操作がある）。
+    それ以外の正本（機能の台帳・職歴の枠・受託案件・職務経歴書の台帳・提示物）は、直す操作を
+    持たないので、欄を書き足すことだけを案内する。読み込みで飛ばしたことを黙っていると、
+    隣か 1 つ前のブロックが「いまの正本」として通り、正しい中身に逆向きの直し先が返る。
     """
+    next_steps = {
+        settings.files["positioning"]: f"欠けた欄を書き足すか、{RECORD_OPERATION} で登記し直す。",
+        settings.files["packages"]: "欠けた欄を書き足すか、revise_package で登記し直す。",
+    }
     notes: list[str] = []
     for defect in snapshot.defects:
-        note = defect.note()
-        if defect.file == settings.files["positioning"]:
-            note += f"欠けた欄を書き足すか、{RECORD_OPERATION} で登記し直す。"
-        notes.append(note)
+        notes.append(defect.note() + next_steps.get(defect.file, "欠けた欄を書き足す。"))
     return notes
 
 

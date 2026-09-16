@@ -8,7 +8,9 @@ Markdown の在処と書き方を知るのはこの文書だけである。上�
 from __future__ import annotations
 
 from datetime import date
+from types import SimpleNamespace
 
+from accord.models.ontology import missing_required_fields
 from accord.models.results import SourceDefect, SourceSnapshot
 from accord.models.types import (
     Capability,
@@ -112,6 +114,15 @@ FORBIDDEN_PHRASES_HEADING = "禁じた言い回し"
 # 裏づけの節と出典の節が指せる正本。どちらも節の見出しで指す。
 EVIDENCE_SOURCE_KEYS = ("career", "engagements")
 
+# 必須欄の判定（missing_required_fields）を呼ぶときに引く、型の名前。
+# 決めの必須欄は _load_positionings が別の書き方で見ているので、ここには無い。
+PACKAGE_TYPE_NAME = "Package"
+CAPABILITY_TYPE_NAME = "Capability"
+CAREER_FRAME_TYPE_NAME = "CareerFrame"
+ENGAGEMENT_TYPE_NAME = "Engagement"
+PRESENTATION_TYPE_NAME = "Presentation"
+RESUME_LEDGER_TYPE_NAME = "ResumeLedger"
+
 
 def _split_list(value: str) -> list[str]:
     """「A / B」の形の欄を、値の一覧にする。空を表す語なら空の一覧を返す。"""
@@ -155,19 +166,34 @@ class MarkdownRepository:
     def load(self) -> SourceSnapshot:
         """7 種の正本を読み、型のインスタンスの集合にする。
 
-        必須の欄が欠けたブロックは型にできないので集合には入らないが、飛ばしたこと自体を
-        defects に載せて渡す。黙って飛ばすと、1 つ前のブロックが「いまの正本」として通ってしまう。
+        必須の欄が欠けたブロックや節は型にできないので集合には入らないが、飛ばしたこと自体を
+        defects に載せて渡す。黙って飛ばすと、1 つ前か隣のブロックが「いまの正本」として
+        通ってしまい、読んだ側が逆向きの直し先を受け取る。
         """
-        positionings, defects = self._load_positionings()
+        positionings, positioning_defects = self._load_positionings()
+        packages, package_defects = self._load_packages()
+        capabilities, capability_defects = self._load_capabilities()
+        career_frames, career_defects = self._load_career_frames()
+        engagements, engagement_defects = self._load_engagements()
+        presentations, presentation_defects = self._load_presentations()
+        ledger_entries, ledger_defects = self._load_ledger_entries()
         return SourceSnapshot(
             positionings=positionings,
-            packages=self._load_packages(),
-            capabilities=self._load_capabilities(),
-            career_frames=self._load_career_frames(),
-            engagements=self._load_engagements(),
-            presentations=self._load_presentations(),
-            ledger_entries=self._load_ledger_entries(),
-            defects=defects,
+            packages=packages,
+            capabilities=capabilities,
+            career_frames=career_frames,
+            engagements=engagements,
+            presentations=presentations,
+            ledger_entries=ledger_entries,
+            defects=[
+                *positioning_defects,
+                *package_defects,
+                *capability_defects,
+                *career_defects,
+                *engagement_defects,
+                *presentation_defects,
+                *ledger_defects,
+            ],
         )
 
     def _load_positionings(self) -> tuple[list[Positioning], list[SourceDefect]]:
@@ -217,39 +243,63 @@ class MarkdownRepository:
             )
         return exceptions
 
-    def _load_packages(self) -> list[Package]:
-        """パッケージ定義を読む。"""
+    def _load_packages(self) -> tuple[list[Package], list[SourceDefect]]:
+        """パッケージ定義を読む。必須の欄が欠けた節は型にできないので、飛ばしたことを断りに残す。"""
         result: list[Package] = []
+        defects: list[SourceDefect] = []
         for block in _blocks(split_sections(self._read("packages"))):
             fields = parse_definition_list(block.body)
-            values = {
-                name: fields[label] for label, name in PACKAGE_LABELS.items() if label in fields
+            values: dict[str, object] = {
+                name: fields.get(label) for label, name in PACKAGE_LABELS.items()
             }
-            for optional_name in ("basis", "source", "breaks_when"):
-                values[optional_name] = _optional(values.get(optional_name))
             values["name"] = block.heading
             values["capabilities"] = _split_list(fields.get(PACKAGE_CAPABILITIES_LABEL, ""))
-            if "buyer" not in values or "updated_on" not in values:
-                continue
-            result.append(Package(**values))
-        return result
 
-    def _load_capabilities(self) -> list[Capability]:
-        """機能の台帳を読む。節の見出しが分類、表の 1 行が機能 1 つ。"""
-        result: list[Capability] = []
-        for block in _blocks(split_sections(self._read("capabilities"))):
-            for cells in self._table_rows(block.body):
-                if len(cells) < 3:
-                    continue
-                result.append(
-                    Capability(
-                        name=cells[0],
-                        description=cells[1],
-                        category=block.heading,
-                        evidence_sections=_split_list(cells[2]),
+            missing = missing_required_fields(PACKAGE_TYPE_NAME, SimpleNamespace(**values))
+            if missing:
+                defects.append(
+                    SourceDefect(
+                        file=self.settings.files["packages"],
+                        location=f"「{block.heading}」の節",
+                        missing_fields=[field.label for field in missing],
                     )
                 )
-        return result
+                continue
+
+            for optional_name in ("basis", "source", "breaks_when"):
+                values[optional_name] = _optional(values.get(optional_name))
+            result.append(Package(**values))
+        return result, defects
+
+    def _load_capabilities(self) -> tuple[list[Capability], list[SourceDefect]]:
+        """機能の台帳を読む。節の見出しが分類、表の 1 行が機能 1 つ。
+
+        必須の欄が欠けた行（列が足りない、値が空）は型にできないので、飛ばしたことを断りに残す。
+        """
+        result: list[Capability] = []
+        defects: list[SourceDefect] = []
+        for block in _blocks(split_sections(self._read("capabilities"))):
+            for index, cells in enumerate(self._table_rows(block.body), start=1):
+                values = {
+                    "name": cells[0] if len(cells) > 0 else None,
+                    "description": cells[1] if len(cells) > 1 else None,
+                    "category": block.heading,
+                    "evidence_sections": _split_list(cells[2]) if len(cells) > 2 else [],
+                }
+                missing = missing_required_fields(
+                    CAPABILITY_TYPE_NAME, SimpleNamespace(**values)
+                )
+                if missing:
+                    defects.append(
+                        SourceDefect(
+                            file=self.settings.files["capabilities"],
+                            location=f"分類「{block.heading}」の表の{index}行目",
+                            missing_fields=[field.label for field in missing],
+                        )
+                    )
+                    continue
+                result.append(Capability(**values))
+        return result, defects
 
     @staticmethod
     def _table_rows(body: str) -> list[list[str]]:
@@ -266,84 +316,120 @@ class MarkdownRepository:
         # 先頭の行は表の見出しなので落とす。
         return rows[1:] if rows else rows
 
-    def _load_career_frames(self) -> list[CareerFrame]:
-        """職歴の枠を読む。"""
+    def _load_career_frames(self) -> tuple[list[CareerFrame], list[SourceDefect]]:
+        """職歴の枠を読む。必須の欄が欠けたブロックは型にできないので、飛ばしたことを断りに残す。"""
         result: list[CareerFrame] = []
+        defects: list[SourceDefect] = []
         for block in _blocks(split_sections(self._read("career"))):
             fields = parse_definition_list(block.body)
-            values = {
-                name: fields[label] for label, name in CAREER_LABELS.items() if label in fields
+            values: dict[str, object] = {
+                name: fields.get(label) for label, name in CAREER_LABELS.items()
             }
             values["heading"] = block.heading
-            if not {"period", "organization", "position", "disclosure", "source"} <= values.keys():
+
+            missing = missing_required_fields(CAREER_FRAME_TYPE_NAME, SimpleNamespace(**values))
+            if missing:
+                defects.append(
+                    SourceDefect(
+                        file=self.settings.files["career"],
+                        location=f"「{block.heading}」のブロック",
+                        missing_fields=[field.label for field in missing],
+                    )
+                )
                 continue
             result.append(CareerFrame(**values))
-        return result
+        return result, defects
 
-    def _load_engagements(self) -> list[Engagement]:
-        """受託案件を読む。"""
+    def _load_engagements(self) -> tuple[list[Engagement], list[SourceDefect]]:
+        """受託案件を読む。必須の欄が欠けたブロックは型にできないので、飛ばしたことを断りに残す。"""
         result: list[Engagement] = []
+        defects: list[SourceDefect] = []
         for block in _blocks(split_sections(self._read("engagements"))):
             fields = parse_definition_list(block.body)
-            values = {
-                name: fields[label] for label, name in ENGAGEMENT_LABELS.items() if label in fields
+            values: dict[str, object] = {
+                name: fields.get(label) for label, name in ENGAGEMENT_LABELS.items()
             }
             values["heading"] = block.heading
-            if not {"disclosure", "source"} <= values.keys():
+
+            missing = missing_required_fields(ENGAGEMENT_TYPE_NAME, SimpleNamespace(**values))
+            if missing:
+                defects.append(
+                    SourceDefect(
+                        file=self.settings.files["engagements"],
+                        location=f"「{block.heading}」のブロック",
+                        missing_fields=[field.label for field in missing],
+                    )
+                )
                 continue
             result.append(Engagement(**values))
-        return result
+        return result, defects
 
-    def _load_ledger_entries(self) -> list[ResumeLedger]:
-        """職務経歴書の台帳を、案件 1 件 1 ブロックで読む。"""
+    def _load_ledger_entries(self) -> tuple[list[ResumeLedger], list[SourceDefect]]:
+        """職務経歴書の台帳を、案件 1 件 1 ブロックで読む。
+
+        必須の欄が欠けたブロックは型にできないので、飛ばしたことを断りに残す。
+        """
         result: list[ResumeLedger] = []
+        defects: list[SourceDefect] = []
         for block in _blocks(split_sections(self._read("resume_ledger"))):
             fields = parse_definition_list(block.body)
-            values = {
-                name: fields[label] for label, name in LEDGER_LABELS.items() if label in fields
+            values: dict[str, object] = {
+                name: fields.get(label) for label, name in LEDGER_LABELS.items()
             }
             values["heading"] = block.heading
             values["fold_line"] = _optional(values.get("fold_line"))
-            required = {
-                "entry_number",
-                "period",
-                "scale",
-                "process",
-                "role",
-                "decisions",
-                "closing",
-                "source_section",
-            }
-            if not required <= values.keys():
+
+            missing = missing_required_fields(RESUME_LEDGER_TYPE_NAME, SimpleNamespace(**values))
+            if missing:
+                defects.append(
+                    SourceDefect(
+                        file=self.settings.files["resume_ledger"],
+                        location=f"「{block.heading}」のブロック",
+                        missing_fields=[field.label for field in missing],
+                    )
+                )
                 continue
             result.append(ResumeLedger(**values))
-        return result
+        return result, defects
 
-    def _load_presentations(self) -> list[Presentation]:
-        """提示物を読む。媒体ごとのディレクトリの下の Markdown が 1 件ずつ。"""
+    def _load_presentations(self) -> tuple[list[Presentation], list[SourceDefect]]:
+        """提示物を読む。媒体ごとのディレクトリの下の Markdown が 1 件ずつ。
+
+        必須の欄（宛先の媒体・宣言する束）が欠けたファイルは型にできないので、飛ばしたことを断りに残す。
+        """
         directory = self.settings.path_for("presentations")
         if not directory.is_dir():
-            return []
+            return [], []
 
         result: list[Presentation] = []
+        defects: list[SourceDefect] = []
         for path in sorted(directory.rglob("*.md")):
             fields = parse_definition_list(path.read_text(encoding="utf-8"))
-            values = {
-                name: fields[label]
-                for label, name in PRESENTATION_LABELS.items()
-                if label in fields
+            relative = path.relative_to(self.settings.source_dir).as_posix()
+            values: dict[str, object] = {
+                name: fields.get(label) for label, name in PRESENTATION_LABELS.items()
             }
-            if "channel" not in values or "declared_package" not in values:
+            values["path"] = relative
+
+            missing = missing_required_fields(PRESENTATION_TYPE_NAME, SimpleNamespace(**values))
+            if missing:
+                defects.append(
+                    SourceDefect(
+                        file=relative,
+                        location="先頭の欄",
+                        missing_fields=[field.label for field in missing],
+                    )
+                )
                 continue
+
             values["created_on"] = _optional(values.get("created_on"))
-            values["path"] = path.relative_to(self.settings.source_dir).as_posix()
             values["pending_notes"] = [
                 note
                 for note in fields.get("未反映の注記", "").splitlines()
                 if note.strip() and note.strip() not in EMPTY_WORDS
             ]
             result.append(Presentation(**values))
-        return result
+        return result, defects
 
     def evidence_bodies(self) -> dict[str, str]:
         """裏づけの節として指せる見出しと、その本文の対応を返す。
@@ -431,12 +517,17 @@ class MarkdownRepository:
 
     @classmethod
     def _positioning_block(cls, positioning: Positioning) -> list[str]:
-        """決め 1 件を、正本のブロックの行にする。読み戻すのは _load_positionings である。"""
+        """決め 1 件を、正本のブロックの行にする。読み戻すのは _load_positionings である。
+
+        欄の値に改行を含むとき（根拠が複数行になるときなど）は、同じラベルの行を複数回書く。
+        parse_definition_list が同じラベルの行を改行でつないで 1 つの値に戻すので、書き戻しで
+        1 行に畳んでしまうと、読み直したときの値が書いた値と食い違う。
+        """
         decided_on = positioning.decided_on.isoformat()
         lines = [f"## {decided_on} {positioning.scope}", ""]
         for label, name in POSITIONING_LABELS.items():
             value = getattr(positioning, name)
-            lines.append(f"- {label}: {cls._as_text(value)}")
+            lines.extend(f"- {label}: {line}" for line in cls._as_lines(value))
 
         exceptions = [
             cls._exception_line(entry) for entry in positioning.exceptions
@@ -508,3 +599,18 @@ class MarkdownRepository:
         if isinstance(value, date):
             return value.isoformat()
         return " ".join(str(value).split())
+
+    @staticmethod
+    def _as_lines(value: object) -> list[str]:
+        """欄の値を、正本に書く行の一覧にする（改行を含む値は複数行になる）。
+
+        値に改行が無ければ、_as_text と同じ 1 行を 1 件だけ返す。改行があるときは、行ごとに
+        別の「- ラベル: 行」として書けるように、行の一覧のまま返す（畳んで 1 行にはしない）。
+        1 行の中の余分な空白は、_as_text と同じ規則でそろえる。
+        """
+        if isinstance(value, date):
+            return [value.isoformat()]
+        text = str(value)
+        if "\n" not in text:
+            return [" ".join(text.split())]
+        return [" ".join(line.split()) for line in text.splitlines()]
