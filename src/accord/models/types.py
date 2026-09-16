@@ -78,7 +78,7 @@ class Presentation(BaseModel):
     path: str = Field(description="ファイル。正本のディレクトリからの相対パス。違反の一覧はこの名前で場所を指す。")
     channel: str = Field(description="宛先の媒体。媒体の名前。設定ファイルの一覧から取る。")
     declared_package: str = Field(description="宣言する束。この文面が名乗っているパッケージの名前。")
-    pending_notes: list[str] = Field(default_factory=list, description="未反映の注記。まだ正本に反映していない事実の覚え書き。指す節が実在することを検査する。")
+    pending_notes: list[str] = Field(default_factory=list, description="未反映の注記。まだ正本に反映していない事実の覚え書き。「節の見出し — 覚え書き」の形で書き、区切りより前がその事実の入る先の節になる。指す節が実在することを検査する。")
     created_on: date | None = Field(default=None, description="作成日")
 
 
@@ -93,5 +93,5 @@ class ResumeLedger(BaseModel):
     role: str = Field(description="役割と任され方")
     decisions: str = Field(description="自分が決めたこと")
     closing: str = Field(description="終わりの状態")
-    source_section: str = Field(description="出典の節。写し元の節の見出し（職歴の枠か受託案件）。実在と公開可否を検査する。")
+    source_section: str = Field(description="出典の節。写し元の節の見出し（受託案件）。実在と公開可否を検査する。")
     fold_line: str | None = Field(default=None, description="畳み行")

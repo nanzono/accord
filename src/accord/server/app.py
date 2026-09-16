@@ -131,7 +131,11 @@ def create_server(settings: Settings) -> MCPServer:
 
     @mcp.tool()
     def check_consistency(scope: str | None = None) -> ConsistencyReport:
-        """正本全体を制約に当て、違反の一覧を返す。正本は変えない。"""
+        """正本を制約に当て、違反の一覧を直し先つきで返す。正本は変えない。
+
+        範囲は、省略か「全体」で正本全体、媒体の名前でその媒体、提示物のファイル名でその 1 件。
+        実在しない名前を渡したときは、拒否ではなく実在する範囲の一覧が返る。
+        """
         return consistency_service.inspect(scope)
 
     @mcp.resource(ONTOLOGY_URI)

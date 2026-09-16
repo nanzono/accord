@@ -8,11 +8,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 from accord.models.constraints import CONSTRAINTS
 from accord.models.ontology import load_ontology
 from accord.server.app import create_server
+from accord.services.consistency import ENFORCEMENT, enforcement_for
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 GENERATOR = REPO_ROOT / "scripts" / "generate_models.py"
@@ -50,16 +49,11 @@ def test_generated_models_match_ontology() -> None:
     assert completed.returncode == 0, completed.stdout + completed.stderr
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "制約 7 つのうち、実装をサービスに置くのは整合検査と書きの操作 3 つの段である。"
-        "この段（決めの正本の型とサンプル）では、まだ執行の実装が揃っていない。"
-    ),
-)
 def test_every_constraint_in_yaml_has_an_implementation() -> None:
     """YAML に宣言した制約のそれぞれに、サービス側の執行の実装が名前で結び付いている。
 
+    見るのは 3 つ。制約の名前がサービスの本文に現れること、対応表が制約ごとに執行する操作を
+    すべて持つこと、そして表が指す先が本当に呼べる関数であることである。
     執行する操作を持たない制約（モジュールの分け方で守る「逆参照を書かない」）は、
     実行時のコードを持たないので対象から外す。
     """
@@ -72,3 +66,23 @@ def test_every_constraint_in_yaml_has_an_implementation() -> None:
         if constraint.enforced_by and constraint.name not in sources
     ]
     assert unimplemented == []
+
+    # 対応表の側から見て、宣言した操作に 1 つ以上の関数が結び付いているか。
+    missing = []
+    for constraint in CONSTRAINTS:
+        table = enforcement_for(constraint.name)
+        for operation in constraint.enforced_by:
+            functions = table.get(operation, ())
+            if not functions or not all(callable(function) for function in functions):
+                missing.append(f"{constraint.name} / {operation}")
+    assert missing == []
+
+    # 表の側に、正本に無い制約や操作が残っていないか（名前を変えたときの取り残しを見る）。
+    declared = {constraint.name: set(constraint.enforced_by) for constraint in CONSTRAINTS}
+    stray = [
+        f"{name} / {operation}"
+        for name, table in ENFORCEMENT.items()
+        for operation in table
+        if operation not in declared.get(name, set())
+    ]
+    assert stray == []
