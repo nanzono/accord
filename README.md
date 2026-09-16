@@ -2,6 +2,8 @@
 
 正本と、そこから派生する対外表現が食い違わないようにする、手元で動く MCP サーバー。
 
+> **English:** accord is a local MCP server that keeps one source of truth (what you can do, what you have done, how you sell it) consistent with everything derived from it (profiles, applications, résumés). Run it with `uv sync`, `uv run pytest`, `uv run accord --list`. The rest of this document is written in Japanese.
+
 ## 何を解決するか
 
 自分の仕事を売る人は、たいてい 3 つの正本を持っている。何ができるか、何をしてきたか、どう売るか。
@@ -95,3 +97,7 @@ scripts/generate_models.py 正本からモデルと制約の宣言を生成す�
 samples/                   架空の設定とデータ
 tests/                     受け入れ条件のテスト
 ```
+
+## ライセンス
+
+MIT License。全文は `LICENSE` にある。
