@@ -23,10 +23,12 @@ from accord.models.results import (
     PositioningDraft,
     PositioningView,
     Rejection,
+    SourceDefect,
     SourceSnapshot,
     Violation,
     WriteResult,
     close_names,
+    fold_names,
 )
 from accord.models.types import Positioning
 from accord.repository.markdown_repository import (
@@ -57,6 +59,12 @@ OFFERING_CLAIM_MATCHES = CONSTRAINT_BY_NAME["提示物の宣言と看板の一�
 # 前面に出す束はパッケージ定義に実在する名前に限る）。選べる媒体の名前は設定が持つ。
 POSITIONING_SCOPE_ENUM = "適用範囲の列挙"
 HEADLINE_PACKAGE_EXISTS = "前面に出す束の実在"
+
+# 束ねた断り 1 件に、代表として名前で並べる場所の数。残りは件数に畳む。
+DEFECT_SAMPLE_COUNT = 3
+
+# 束ねた断りそのものの上限。「どの正本の、どの欄が欠けたか」の組をこの数まで並べる。
+DEFECT_GROUP_LIMIT = 12
 
 
 def latest_positioning(positionings: list[Positioning], scope: str) -> Positioning | None:
@@ -99,20 +107,48 @@ def positioning_input_type() -> str:
 
 
 def defect_notes(settings: Settings, snapshot: SourceSnapshot) -> list[str]:
-    """型にできなかったブロックや節を、断りの文にする。
+    """型にできなかったブロックや節を、同じ型ごとに 1 件へ束ねた断りの文にする。
 
     決めとパッケージには、登記し直す書きの操作を添える（この 2 つだけ、正本を直す操作がある）。
     それ以外の正本（機能の台帳・職歴の枠・受託案件・職務経歴書の台帳・提示物）は、直す操作を
     持たないので、欄を書き足すことだけを案内する。読み込みで飛ばしたことを黙っていると、
     隣か 1 つ前のブロックが「いまの正本」として通り、正しい中身に逆向きの直し先が返る。
+
+    1 件ずつ並べると、同じ欠け方が数百件並んで返り値そのものが受け取る側の口に載らなくなる。
+    かといって件数だけにすると、直しに行く場所が消える。だから「どの正本の、どの欄が欠けたか」で
+    束ね、代表をいくつか名前で見せて、残りは件数に畳む。
     """
     next_steps = {
-        settings.files["positioning"]: f"欠けた欄を書き足すか、{RECORD_OPERATION} で登記し直す。",
-        settings.files["packages"]: "欠けた欄を書き足すか、revise_package で登記し直す。",
+        "positioning": f"欠けた欄を書き足すか、{RECORD_OPERATION} で登記し直す。",
+        "packages": "欠けた欄を書き足すか、revise_package で登記し直す。",
     }
-    notes: list[str] = []
+
+    groups: dict[tuple[str, tuple[str, ...]], list[SourceDefect]] = {}
     for defect in snapshot.defects:
-        notes.append(defect.note() + next_steps.get(defect.file, "欠けた欄を書き足す。"))
+        groups.setdefault((defect.source_key, tuple(defect.missing_fields)), []).append(defect)
+
+    notes: list[str] = []
+    for (source_key, missing_fields), defects in list(groups.items())[:DEFECT_GROUP_LIMIT]:
+        files = {defect.file for defect in defects}
+        places = [
+            defect.location if len(files) == 1 else f"{defect.file} の{defect.location}"
+            for defect in defects
+        ]
+        missing = "、".join(f"「{name}」" for name in missing_fields)
+        where = settings.files.get(source_key, next(iter(files), ""))
+        notes.append(
+            f"必須の欄{missing}が無いので型にできず、いまの正本として読んでいないブロックが "
+            f"{where} に {len(defects)} 件ある"
+            f"（{fold_names(places, keep=DEFECT_SAMPLE_COUNT)}）。"
+            + next_steps.get(source_key, "欠けた欄を書き足す。")
+        )
+
+    hidden = list(groups.values())[DEFECT_GROUP_LIMIT:]
+    if hidden:
+        notes.append(
+            f"ほかに {len(hidden)} 通りの欠け方が、合わせて "
+            f"{sum(len(defects) for defects in hidden)} 件ある。"
+        )
     return notes
 
 

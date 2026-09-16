@@ -10,8 +10,11 @@
 
 from __future__ import annotations
 
+import tomllib
 from datetime import date
 from pathlib import Path
+
+import pytest
 
 from accord.models.results import PositioningDraft
 from accord.repository.markdown_repository import MarkdownRepository
@@ -21,6 +24,7 @@ from accord.vocabulary.settings import (
     CHANNEL_RULES_ONE_FILE,
     DEFAULT_BLOCK_RULE,
     PHRASES_FROM_BULLETS,
+    TOP_LEVEL_KEYS,
     BlockRule,
     load_settings,
 )
@@ -373,3 +377,34 @@ def test_write_back_stays_readable_after_a_round_trip(alt_settings) -> None:
     assert latest.decided_on == date(2026, 9, 16)
     assert latest.rationale == rationale
     assert service.current().positioning == latest
+
+
+def test_unknown_top_level_section_is_rejected_with_its_name(settings) -> None:
+    """最上位に綴りを間違えた節を書くと、書いた名前と書ける名前を添えて設定の読み込みが止まる。
+
+    黙って読み飛ばすと、書いたつもりの読み方が 1 つも効かないままサーバーが立ち上がり、
+    既定の読み方で読んだ結果が返り続ける。
+    """
+    path: Path = settings.config_path
+    path.write_text(
+        path.read_text(encoding="utf-8") + "\n[reeding]\nstrip_label_note = true\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError) as caught:
+        load_settings(path)
+
+    message = str(caught.value)
+    assert "reeding" in message, message
+    for name in ("reading", "source", "vocabulary"):
+        assert name in message, message
+
+
+def test_the_three_known_top_level_sections_are_accepted(alt_settings) -> None:
+    """最上位が source・vocabulary・reading の 3 つだけの設定は、いままでどおり読める。"""
+    document = tomllib.loads(alt_settings.config_path.read_text(encoding="utf-8"))
+
+    assert set(document) == {"source", "vocabulary", "reading"}
+    assert set(document) <= set(TOP_LEVEL_KEYS)
+    # 読み直しても例外にならず、同じ設定が返る。
+    assert load_settings(alt_settings.config_path) == alt_settings

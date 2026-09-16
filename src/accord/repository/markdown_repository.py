@@ -12,7 +12,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from accord.models.ontology import missing_required_fields
-from accord.models.results import SourceDefect, SourceSnapshot
+from accord.models.results import SkippedHeading, SourceDefect, SourceSnapshot
 from accord.models.types import (
     Capability,
     CareerFrame,
@@ -147,6 +147,30 @@ def _split_list(value: str) -> list[str]:
     return items
 
 
+def _skip_reasons(section: Section, above: list[str], rule: BlockRule) -> list[str]:
+    """その節が、読み方のどの絞りに当たって外れたかを並べる。1 つも当たらなければ空の一覧。
+
+    絞りは select_blocks の 5 つと同じで、判定の順も同じである。当たったものを全部返すのは、
+    設定のどの鍵を広げれば読めるようになるかを、理由の文だけで言い切るためである。
+    """
+    reasons: list[str] = []
+    if section.level not in set(rule.heading_levels):
+        levels = " / ".join(str(item) for item in rule.heading_levels)
+        reasons.append(f"深さ {section.level} が heading_levels（{levels}）に無い")
+    if rule.under_headings and not any(name in rule.under_headings for name in above):
+        parents = "、".join(above) if above else "上位の見出しなし"
+        wanted = " / ".join(rule.under_headings)
+        reasons.append(f"上位の見出し（{parents}）に under_headings（{wanted}）の名前が無い")
+    skipped = [name for name in (section.heading, *above) if name in rule.skip_headings]
+    if skipped:
+        reasons.append(f"skip_headings に挙げた見出し（{' / '.join(skipped)}）の中にある")
+    if rule.heading_prefix and not section.heading.startswith(rule.heading_prefix):
+        reasons.append(f"heading_prefix「{rule.heading_prefix}」で始まっていない")
+    if rule.skip_sections_without_fields and not read_fields(section, rule):
+        reasons.append("欄を 1 つも持たないので、束ねるための見出しとして読み飛ばしている")
+    return reasons
+
+
 def _optional(value: str | None) -> str | None:
     """空を表す語を None にそろえる。"""
     if value is None or value.strip() in EMPTY_WORDS:
@@ -217,7 +241,41 @@ class MarkdownRepository:
                 *presentation_defects,
                 *ledger_defects,
             ],
+            skipped_headings=self._skipped_headings(),
         )
+
+    def _skipped_headings(self) -> list[SkippedHeading]:
+        """裏づけと出典が指せる 2 種について、読み方の絞りで外れた見出しを集める。
+
+        指された見出しが読めていないとき、「どこにも無い」のか「実在するが読み取り範囲の外」なのかで
+        直し先が正反対になる。その言い分けの材料をここで作る。同じ見出しが 2 種の両方で外れたときは
+        両方入れ、探す側は先に見つかったほうを使う。
+        """
+        found: list[SkippedHeading] = []
+        for key in EVIDENCE_SOURCE_KEYS:
+            rule = self._rule(key)
+            ancestors: list[tuple[int, str]] = []
+            for section in split_sections(self._read(key)):
+                while ancestors and ancestors[-1][0] >= section.level:
+                    ancestors.pop()
+                above = [heading for _, heading in ancestors]
+                if not section.heading:
+                    # 見出しの無い先頭の塊は、読み方の絞りに当たる対象ではない。
+                    continue
+                ancestors.append((section.level, section.heading))
+                reasons = _skip_reasons(section, above, rule)
+                if not reasons:
+                    continue
+                found.append(
+                    SkippedHeading(
+                        source_key=key,
+                        heading=section.heading,
+                        level=section.level,
+                        parents=above,
+                        reason="、".join(reasons),
+                    )
+                )
+        return found
 
     def _load_positionings(self) -> tuple[list[Positioning], list[SourceDefect]]:
         """売り方の決めを、1 決め 1 ブロックで読む。
@@ -237,6 +295,8 @@ class MarkdownRepository:
                         file=self.settings.files["positioning"],
                         location=f"「{block.heading}」のブロック",
                         missing_fields=missing,
+                        source_key="positioning",
+                        heading=block.heading,
                     )
                 )
                 continue
@@ -287,6 +347,8 @@ class MarkdownRepository:
                         file=self.settings.files["packages"],
                         location=f"「{block.heading}」の節",
                         missing_fields=[field.label for field in missing],
+                        source_key="packages",
+                        heading=block.heading,
                     )
                 )
                 continue
@@ -322,6 +384,8 @@ class MarkdownRepository:
                             file=self.settings.files["capabilities"],
                             location=f"分類「{block.heading}」の表の{index}行目",
                             missing_fields=[field.label for field in missing],
+                            source_key="capabilities",
+                            heading=block.heading,
                         )
                     )
                     continue
@@ -347,6 +411,8 @@ class MarkdownRepository:
                         file=self.settings.files["career"],
                         location=f"「{block.heading}」のブロック",
                         missing_fields=[field.label for field in missing],
+                        source_key="career",
+                        heading=block.heading,
                     )
                 )
                 continue
@@ -372,6 +438,8 @@ class MarkdownRepository:
                         file=self.settings.files["engagements"],
                         location=f"「{block.heading}」のブロック",
                         missing_fields=[field.label for field in missing],
+                        source_key="engagements",
+                        heading=block.heading,
                     )
                 )
                 continue
@@ -406,6 +474,8 @@ class MarkdownRepository:
                         file=self.settings.files["resume_ledger"],
                         location=f"「{block.heading}」のブロック",
                         missing_fields=[field.label for field in missing],
+                        source_key="resume_ledger",
+                        heading=block.heading,
                     )
                 )
                 continue
@@ -462,6 +532,7 @@ class MarkdownRepository:
                         file=relative,
                         location="先頭の欄",
                         missing_fields=[field.label for field in missing],
+                        source_key="presentations",
                     )
                 )
                 continue

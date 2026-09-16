@@ -37,6 +37,9 @@ FILE_KEYS = (*SOURCE_KEYS, PRESENTATION_RULES_KEY)
 # 正本の書き方を書く節の名前。この節が無ければ、すべての鍵が既定値になる。
 READING_KEY = "reading"
 
+# 設定ファイルの最上位に書ける節の名前。これ以外の名前は、設定を読んだ瞬間に止める。
+TOP_LEVEL_KEYS = ("source", "vocabulary", READING_KEY)
+
 # 欄のラベルの読み替えを書く、書き方の節の中の表の名前。
 LABEL_ALIASES_KEY = "labels"
 
@@ -98,6 +101,8 @@ class ReadingRules:
     forbidden_phrases_heading: str = "禁じた言い回し"
     forbidden_phrases_any_level: bool = False
     forbidden_phrases_from: str = PHRASES_FROM_BULLETS
+    # 設定ファイルに実際に書かれていた読み方の鍵。返り値の足跡にそのまま載せる。
+    applied_keys: tuple[str, ...] = ()
 
     def rule_for(self, key: str) -> BlockRule:
         """正本の役割の名前から、その正本の読み方を返す。書いていなければ既定の読み方。"""
@@ -176,6 +181,21 @@ def _reject_unknown_keys(table: dict, allowed: set[str], where: str, config_path
         )
 
 
+def _reject_unknown_top_level(document: dict, config_path: Path) -> None:
+    """設定ファイルの最上位に、知らない節が書かれていないかを見る。
+
+    綴りを間違えた節を黙って読み飛ばすと、書いたつもりの置き場も語彙も読み方も効かないまま
+    サーバーが立ち上がり、既定の見本を読んだ結果が返り続ける。書いた名前と書ける名前を添えて、
+    設定を読んだ瞬間に止める（節でない最上位の鍵も同じ扱いにする）。
+    """
+    unknown = sorted(key for key in document if key not in TOP_LEVEL_KEYS)
+    if unknown:
+        raise ValueError(
+            f"設定の最上位に知らない節がある: {'、'.join(unknown)}"
+            f"（書ける節: {'、'.join(sorted(TOP_LEVEL_KEYS))}）: {config_path}"
+        )
+
+
 def _one_of(value: object, choices: tuple[str, ...], where: str, config_path: Path) -> str:
     """選べる語が決まっている鍵の値を確かめる。"""
     text = str(value)
@@ -207,6 +227,19 @@ def _block_rule(table: dict, common: dict, where: str, config_path: Path) -> Blo
     return BlockRule(**values)
 
 
+def _applied_reading_keys(table: dict) -> tuple[str, ...]:
+    """設定ファイルに実際に書かれていた読み方の鍵を、点でつないだ道の並びにする。
+
+    並びは [reading] の直下を先に、続けて正本ごとの節を FILE_KEYS の順に置き、同じ節の中は
+    鍵の名前の辞書順にする。呼ぶたびに同じ並びになるようにするためである。
+    """
+    applied = [f"{READING_KEY}.{key}" for key in sorted(table) if key not in FILE_KEYS]
+    for key in FILE_KEYS:
+        section = table.get(key, {})
+        applied += [f"{READING_KEY}.{key}.{name}" for name in sorted(section)]
+    return tuple(applied)
+
+
 def load_reading_rules(document: dict, config_path: Path) -> ReadingRules:
     """設定の「書き方」の節を読む。節が無ければ、すべて既定値（第 1 版と同じ読み方）を返す。"""
     table = document.get(READING_KEY, {})
@@ -236,7 +269,7 @@ def load_reading_rules(document: dict, config_path: Path) -> ReadingRules:
         )
         blocks[key] = _block_rule(section, common, f"{READING_KEY}.{key}", config_path)
 
-    values: dict = {"blocks": blocks}
+    values: dict = {"blocks": blocks, "applied_keys": _applied_reading_keys(table)}
     presentations = table.get("presentations", {})
     if "directories" in presentations:
         values[PRESENTATION_KEYS["directories"]] = tuple(
@@ -272,6 +305,8 @@ def load_settings(path: Path | None = None) -> Settings:
 
     with config_path.open("rb") as handle:
         document = tomllib.load(handle)
+
+    _reject_unknown_top_level(document, config_path)
 
     source_table = document.get("source", {})
     directory = str(source_table.get("directory", "source"))

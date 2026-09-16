@@ -8,7 +8,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from accord.services.consistency import ConsistencyService
+import accord
+from accord.services.consistency import NOTE_LIMIT, ConsistencyService, limit_notes
 from conftest import source_digest
 
 # 写しに仕込む違反。サンプルの正本にある文字列を、そのまま置き換える形で書く。
@@ -28,6 +29,32 @@ EXCEPTION_ENTRY = (
     "- 例外: presentations/tsukikusa/profile.md — 媒体側の審査待ちで、次の更新まで旧い束のまま残す",
 )
 
+# 第 2 のサンプルが持つ、正本に実在するが読み取り範囲の外にある見出しと、その居場所。
+OUT_OF_RANGE_SECTION = "社外の勉強会の運営"
+OUT_OF_RANGE_PARENT = "職歴の外の活動"
+OUT_OF_RANGE_LEVEL = 3
+OUT_OF_RANGE_RULE_KEY = "under_headings"
+
+# 第 2 のサンプルの受託案件のブロックと、そこから 1 行消す必須の欄。
+UNREADABLE_SECTION = "ナギサ書房 刊行計画の進行管理"
+UNREADABLE_FIELD = "公開可否"
+DROP_DISCLOSURE = (
+    "- 公開可否: 公開可\n- 出所: 契約書と、月次の議事録（2025-04 以降）",
+    "- 出所: 契約書と、月次の議事録（2025-04 以降）",
+)
+
+# 裏づけの節と台帳の出典の節を、別の見出しに向け直すための置き換え。
+POINT_EVIDENCE_AT = ("| ナギサ書房 刊行計画の進行管理 |", f"| {OUT_OF_RANGE_SECTION} |")
+POINT_LEDGER_AT = (
+    "- 出典の節: テラミナ物流 配送データの置き場づくり",
+    f"- 出典の節: {OUT_OF_RANGE_SECTION}",
+)
+
+# 欄を 1 つも持たない提示物を写しに置くときの、件数と中身。
+FIELDLESS_PRESENTATION_COUNT = 40
+FIELDLESS_PRESENTATION_BODY = "# 下書き\n\n本文だけで、欄を 1 つも持たない。\n"
+
+EVIDENCE_SECTION_EXISTS = "裏づけ節名の実在"
 HEADLINE_PACKAGE = "要件定義と進行管理"
 STALE_PACKAGE_FRESHNESS = "パッケージ定義の鮮度"
 OUTDATED_OFFERING_CLAIM = "提示物の宣言と看板の一致"
@@ -49,6 +76,18 @@ def _rewrite(path: Path, old: str, new: str, *, last: bool = False) -> None:
 def _report(settings, scope: str | None = None):
     """写しの正本に検査を当てる。"""
     return ConsistencyService(settings).inspect(scope)
+
+
+def _flood_with_fieldless_presentations(settings) -> None:
+    """欄を 1 つも持たない Markdown を、写しの提示物の置き場に並べる。
+
+    同じ型の断りをたくさん出す入力を、実データを指さずに作るための仕掛けである。
+    """
+    directory = settings.path_for("presentations") / "tsukikusa"
+    for index in range(FIELDLESS_PRESENTATION_COUNT):
+        (directory / f"draft_{index:02d}.md").write_text(
+            FIELDLESS_PRESENTATION_BODY, encoding="utf-8"
+        )
 
 
 def test_check_consistency_finds_nothing_in_the_shipped_samples(settings) -> None:
@@ -268,3 +307,141 @@ def test_check_consistency_names_a_positioning_block_that_lost_a_field(settings)
     assert outdated, "1 つ前の決めを基準にした違反は出る（断りと組で読む）"
     assert all("2026-06-01" in item.expected for item in outdated)
     assert report.notes, "違反だけを返して、読めなかったブロックを黙っていない"
+
+
+# ---------------------------------------------------------------- 足跡
+
+
+def test_report_carries_the_config_path_and_version_and_source_location(settings) -> None:
+    """検査の戻り値が、読んだ設定ファイルと、動いているソースの置き場と版を持ち帰る。
+
+    版番号だけでは、入れ直していない古い環境と直したばかりのソースを見分けられない。
+    どちらのコードが動いたかは、ソースの置き場で見分ける。
+    """
+    report = _report(settings)
+
+    provenance = report.provenance
+    assert provenance is not None, report.model_dump()
+    assert provenance.config_path == str(settings.config_path.resolve())
+    assert provenance.module_path == str(Path(accord.__file__).resolve().parent)
+    assert provenance.version != ""
+
+    # JSON にしたときも、設定の場所とソースの置き場が文字として読める。
+    as_json = report.model_dump_json()
+    assert as_json.count(provenance.config_path) >= 1
+    assert as_json.count(provenance.module_path) >= 1
+
+
+def test_reading_keys_say_default_when_the_config_has_no_reading_section(settings) -> None:
+    """読み方の節を持たない設定では、適用した読み方が「既定」の 1 件になる。"""
+    report = _report(settings)
+
+    assert report.provenance is not None
+    assert report.provenance.reading == ["既定"]
+
+
+def test_reading_keys_list_every_key_written_in_the_config(alt_settings) -> None:
+    """読み方の節を持つ設定では、設定に実際に書かれた鍵が道の形で並ぶ。"""
+    report = _report(alt_settings)
+
+    assert report.provenance is not None
+    applied = report.provenance.reading
+    assert len(applied) >= 10, applied
+    for key in (
+        "reading.career.heading_levels",
+        "reading.presentations.directories",
+        "reading.labels",
+    ):
+        assert key in applied, applied
+
+
+# ---------------------------------------------------------------- 注記の束ね
+
+
+def test_defects_of_the_same_kind_become_one_note_with_a_count(settings) -> None:
+    """同じ正本の同じ欄が欠けた断りは、代表と件数を持つ 1 件の注記に束ねられる。"""
+    _flood_with_fieldless_presentations(settings)
+
+    report = _report(settings)
+
+    bundled = [note for note in report.notes if "型にできず" in note]
+    assert len(bundled) == 1, report.notes
+    assert str(FIELDLESS_PRESENTATION_COUNT) in bundled[0], bundled[0]
+    assert "ほかに 37 件" in bundled[0], bundled[0]
+
+
+def test_notes_never_exceed_the_limit(settings) -> None:
+    """断りの数は上限を超えず、打ち切った分は件数の 1 行に畳まれる。"""
+    _flood_with_fieldless_presentations(settings)
+
+    assert len(_report(settings).notes) <= NOTE_LIMIT
+
+    # 打ち切りそのものは、上限より 1 件多い並びを渡して見る。
+    folded = limit_notes([f"断り {index}" for index in range(NOTE_LIMIT + 1)])
+    assert len(folded) == NOTE_LIMIT
+    assert "ほかに 2 件" in folded[-1], folded[-1]
+
+
+# ---------------------------------------------------------------- 範囲の外と、欠けた欄
+
+
+def test_evidence_section_outside_the_reading_range_is_named_as_such(alt_settings) -> None:
+    """正本に実在するが読み取り範囲の外にある節を裏づけに指すと、そう言い分けて直し方を出す。
+
+    「無い」とだけ返すと、名前の合っている側を書き換える誘導になる。だから候補は出さず、
+    深さと上位の見出しと、外れた絞りの鍵の名前を expected に書く。
+    """
+    _rewrite(alt_settings.path_for("capabilities"), *POINT_EVIDENCE_AT)
+
+    report = _report(alt_settings)
+
+    outside = [v for v in report.violations if v.constraint == EVIDENCE_SECTION_EXISTS]
+    assert len(outside) == 1, [v.model_dump() for v in report.violations]
+    violation = outside[0]
+    assert "読み取り範囲の外" in violation.expected, violation.expected
+    assert str(OUT_OF_RANGE_LEVEL) in violation.expected, violation.expected
+    assert OUT_OF_RANGE_PARENT in violation.expected, violation.expected
+    assert OUT_OF_RANGE_RULE_KEY in violation.expected, violation.expected
+    assert violation.candidates == []
+
+
+def test_evidence_section_in_an_unreadable_block_points_at_the_missing_field(
+    alt_settings,
+) -> None:
+    """欄が欠けて読めていないブロックを裏づけに指すと、欠けた欄そのものを直し先に出す。"""
+    _rewrite(alt_settings.path_for("career"), *DROP_DISCLOSURE)
+
+    report = _report(alt_settings)
+
+    evidence = [v for v in report.violations if v.constraint == EVIDENCE_SECTION_EXISTS]
+    assert evidence, [v.model_dump() for v in report.violations]
+    for violation in evidence:
+        assert UNREADABLE_SECTION in violation.expected, violation.expected
+        assert UNREADABLE_FIELD in violation.expected, violation.expected
+        assert violation.candidates == []
+
+    # 同じ検査の断りにも、そのブロックが欄の欠けで読めていないことが出ている。
+    listed = "\n".join(report.notes)
+    assert UNREADABLE_SECTION in listed, listed
+    assert UNREADABLE_FIELD in listed, listed
+
+
+def test_ledger_source_section_outside_the_reading_range_is_named_as_such(alt_settings) -> None:
+    """台帳の出典の節でも、読み取り範囲の外にある見出しを同じ形で言い分ける。"""
+    _rewrite(alt_settings.path_for("resume_ledger"), *POINT_LEDGER_AT)
+
+    report = _report(alt_settings)
+
+    ledger = [
+        v
+        for v in report.violations
+        if v.constraint == NOTE_AND_SOURCE_SECTION
+        and v.file == alt_settings.files["resume_ledger"]
+    ]
+    assert len(ledger) == 1, [v.model_dump() for v in report.violations]
+    violation = ledger[0]
+    assert "読み取り範囲の外" in violation.expected, violation.expected
+    assert str(OUT_OF_RANGE_LEVEL) in violation.expected, violation.expected
+    assert OUT_OF_RANGE_PARENT in violation.expected, violation.expected
+    assert OUT_OF_RANGE_RULE_KEY in violation.expected, violation.expected
+    assert violation.candidates == []

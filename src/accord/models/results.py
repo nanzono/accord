@@ -45,6 +45,19 @@ def close_names(wanted: str, pool: list[str]) -> list[str]:
     return close or pool[:FALLBACK_COUNT]
 
 
+def fold_names(names: list[str], keep: int = 5) -> str:
+    """名前の並びを「A / B / C ほかに 12 件」の形の 1 つの文字列にする。
+
+    数が増えるほど長くなる並びを本文に埋めると、返り値そのものが受け取る側の口に載らなくなる。
+    先頭のいくつかだけを名前で見せ、残りは件数に畳む。畳む分が無ければ件数の断りは付けない。
+    """
+    head = " / ".join(names[:keep])
+    rest = len(names) - keep
+    if rest > 0:
+        return f"{head} ほかに {rest} 件"
+    return head
+
+
 class NextAction(BaseModel):
     """拒否のときに返す「次に何をすべきか」。何が悪いかだけで終わらせないための欄。"""
 
@@ -173,9 +186,31 @@ class Material(BaseModel):
     )
 
 
-class ConsistencyReport(BaseModel):
-    """整合検査の返り値。違反の一覧と、違反ではない断りを持つ。"""
+class Provenance(BaseModel):
+    """この検査が、どの設定を、どの読み方で、どの版の accord で走ったか。
 
+    版番号だけでは足りない。入れ直していない古い環境と、直したばかりのソースが、同じ版番号を
+    名乗ることがあるからである。見分けがつくのは、実際に動いているソースの置き場である。
+    """
+
+    config_path: str = Field(description="読んだ設定ファイルの絶対パス")
+    reading: list[str] = Field(
+        default_factory=list, description="適用した [reading] の鍵。1 つも無ければ「既定」"
+    )
+    version: str = Field(default="", description="accord の版")
+    module_path: str = Field(description="実際に動いている accord のソースの置き場（絶対パス）")
+
+
+class ConsistencyReport(BaseModel):
+    """整合検査の返り値。違反の一覧と、違反ではない断りを持つ。
+
+    足跡（provenance）を欄の宣言の先頭に置くのは、JSON にしたときに先頭に出るのが宣言の順
+    だからである。読んだ側が、まず「どの設定を、どのソースが読んだか」を目にする形にする。
+    """
+
+    provenance: Provenance | None = Field(
+        default=None, description="どの設定を、どの読み方で、どの版の accord が読んだか"
+    )
     scope: str = Field(default="全体", description="検査した範囲")
     violations: list[Violation] = Field(default_factory=list, description="違反の一覧")
     notes: list[str] = Field(default_factory=list, description="違反ではない断り")
@@ -192,14 +227,25 @@ class SourceDefect(BaseModel):
     file: str = Field(description="そのブロックがあるファイル")
     location: str = Field(description="ファイルの中のどこか（節の見出し）")
     missing_fields: list[str] = Field(description="欠けている欄の名前")
+    source_key: str = Field(default="", description="どの正本のブロックか（正本の役割の名前）")
+    heading: str = Field(
+        default="", description="そのブロックの見出し。ファイル 1 枚を丸ごと読む提示物では空"
+    )
 
-    def note(self) -> str:
-        """断りの 1 行にする。どのファイルのどのブロックに、どの欄が無いかを書く。"""
-        missing = "、".join(f"「{name}」" for name in self.missing_fields)
-        return (
-            f"{self.file} の{self.location}は、必須の欄{missing}が無いので型にできず、"
-            "いまの正本として読んでいない。"
-        )
+
+class SkippedHeading(BaseModel):
+    """正本のファイルにあるが、その正本の読み方では読んでいない見出し 1 つ。
+
+    指された見出しが読めていないとき、それが「どこにも無い」のか「実在するが読み取り範囲の
+    外にある」のかで、直し先が正反対になる。前者は指す側の名前を直し、後者は設定の絞りを
+    広げるか正本の節を動かす。その言い分けをするために、外れた見出しを居場所つきで持ち帰る。
+    """
+
+    source_key: str = Field(description="どの正本の読み方で外れたか（career / engagements）")
+    heading: str = Field(description="外れた見出しの文字列")
+    level: int = Field(description="見出しの深さ")
+    parents: list[str] = Field(default_factory=list, description="その見出しの上にある見出し（浅い順）")
+    reason: str = Field(description="どの絞りに当たって外れたか")
 
 
 class SourceSnapshot(BaseModel):
@@ -214,6 +260,9 @@ class SourceSnapshot(BaseModel):
     ledger_entries: list[ResumeLedger] = Field(default_factory=list)
     defects: list[SourceDefect] = Field(
         default_factory=list, description="必須の欄が欠けていて型にできなかったブロック"
+    )
+    skipped_headings: list[SkippedHeading] = Field(
+        default_factory=list, description="正本にあるが、その正本の読み方では読んでいない見出し"
     )
 
     def section_headings(self) -> list[str]:

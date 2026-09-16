@@ -98,13 +98,25 @@ for v in report.violations:
 
 ## 自分のデータで使う
 
-`samples/accord.toml` をコピーして書き換え、起動時に指定します。
+`samples/accord.toml` をコピーして書き換え、起動時に指定します。設定ファイルに書くのは、Markdown の置き場と、自分の言葉（媒体の名前、スキルの分類、パッケージの状態を表す語。たとえば「仮説のみ・検証中・実績あり」）です。
+
+起動のしかたは 2 通りあります。**手元に置いた accord をそのまま動かす**なら、次の形です。
 
 ```
-uv run accord --config /path/to/your/accord.toml
+uv run --project /path/to/accord accord --config /path/to/your/accord.toml
 ```
 
-設定ファイルに書くのは、Markdown の置き場と、自分の言葉（媒体の名前、スキルの分類、パッケージの状態を表す語。たとえば「仮説のみ・検証中・実績あり」）です。Markdown の形はサンプルを見るのが早く、たとえば売り込み方の記録は次の形です。
+`--project` で指した場所のソースが毎回そのまま動くので、accord のコードを直したら次の起動から反映されます。手元で直しながら使うなら、こちらを選んでください。
+
+**版を固定して入れて使う**なら、次の形です。
+
+```
+uvx --from /path/to/accord accord --config /path/to/your/accord.toml
+```
+
+こちらには落とし穴があります。`uvx` は指したパスから組み立てた環境を version（`pyproject.toml` に書いた版番号）で覚えるので、版を上げないかぎり、ソースを直しても前の版が動き続けます。`--refresh` や `--reinstall` を付けても戻りません。
+
+Markdown の形はサンプルを見るのが早く、たとえば売り込み方の記録は次の形です。
 
 ```markdown
 ## 2026-09-10 全体
@@ -124,12 +136,14 @@ Claude Code から使うときは、プロジェクトの `.mcp.json` に次の�
 {
   "mcpServers": {
     "accord": {
-      "command": "uvx",
-      "args": ["--from", "/path/to/accord", "accord", "--config", "/path/to/your/accord.toml"]
+      "command": "uv",
+      "args": ["run", "--project", "/path/to/accord", "accord", "--config", "/path/to/your/accord.toml"]
     }
   }
 }
 ```
+
+思ったとおりの結果が出ないときは、`check_consistency` の戻り値の先頭（`provenance`）を見てください。読んだ設定ファイルの場所、適用した読み方の指定、いま動いているソースの置き場と版が出るので、古いままの accord が動いていないかをその場で見分けられます。
 
 ## データの型とルール
 

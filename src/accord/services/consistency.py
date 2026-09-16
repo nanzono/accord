@@ -16,17 +16,21 @@
 
 from __future__ import annotations
 
+import importlib.metadata
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from accord.models.constraints import CONSTRAINTS
 from accord.models.results import (
     PRIVATE_DISCLOSURE_PREFIX,
     ConsistencyReport,
+    Provenance,
     SourceSnapshot,
     Violation,
     close_names,
+    fold_names,
 )
 from accord.models.types import Capability, Package, Positioning, Presentation, ResumeLedger
 from accord.repository.markdown_repository import (
@@ -43,7 +47,7 @@ from accord.services.positioning import (
     latest_positioning,
     unrecorded_positioning_next_step,
 )
-from accord.vocabulary.settings import Settings
+from accord.vocabulary.settings import READING_KEY, Settings
 
 # 制約は名前で参照する。名前を正本（ontology.yaml）で変えたら、ここで鍵が見つからず落ちる。
 CONSTRAINT_BY_NAME = {constraint.name: constraint for constraint in CONSTRAINTS}
@@ -57,6 +61,119 @@ NOTE_AND_SOURCE_SECTION = CONSTRAINT_BY_NAME["注記と出典の節の実在・�
 # 未反映の注記の書き方。「節の見出し — 覚え書き」で、区切りより前がその注記の入る先の節になる。
 # 区切りが無ければ、注記の全文を節の見出しとして読む。
 NOTE_SEPARATOR = "—"
+
+# 返り値に載せる断りの数の上限。違反には上限を置かない（1 件ずつ直す対象なので、減らすと直し漏れる）。
+NOTE_LIMIT = 30
+
+# 名前の並びを本文に埋めるときに、名前で見せる数。残りは件数に畳む。
+NAME_SAMPLE_COUNT = 5
+
+# 見出しが読めていないことを言う 3 か所の、文の頭に置く語。
+EVIDENCE_LABEL = "裏づけの節"
+LEDGER_SOURCE_LABEL = "出典の節"
+PENDING_NOTE_LABEL = "注記が指す節"
+
+# 「どこにも無い」ときの文の後半。照らす相手も次の一手も呼ぶ場所ごとに違うので、語で引く。
+MISSING_HEADING_TEXT = {
+    EVIDENCE_LABEL: (
+        "は、職歴の枠にも受託案件にも無い見出しである。下の候補のうち実在する見出しに書き換える。"
+    ),
+    LEDGER_SOURCE_LABEL: (
+        "は、受託案件の見出しに無い。下の候補のうち実在する見出しに書き換える。"
+    ),
+    PENDING_NOTE_LABEL: (
+        "は、受託案件の見出しに無い。下の候補のうち実在する見出しに書き換える。"
+        "この事実をもう正本に書いたのなら、注記の行ごと消す。"
+    ),
+}
+
+
+def provenance_of(settings: Settings) -> Provenance:
+    """この検査が、どの設定を、どの読み方で、どの版とどの置き場の accord で走ったかを作る。
+
+    設定を読む層は型を知らない状態に保たれ、型の器の層は設定を知らない状態に保たれている。
+    両方を見てよいのはサービス層だけなので、足跡の組み立てはここに置く。
+    """
+    try:
+        version = importlib.metadata.version("accord")
+    except importlib.metadata.PackageNotFoundError:
+        version = "不明（未導入）"
+    return Provenance(
+        config_path=str(settings.config_path.resolve()),
+        reading=list(settings.reading.applied_keys) or ["既定"],
+        version=version,
+        # 動いている accord のパッケージの置き場。ここでパッケージを import しないのは、
+        # パッケージ単位の読み込みを禁じる構造の検査に当たるからである。
+        module_path=str(Path(__file__).resolve().parents[1]),
+    )
+
+
+def limit_notes(notes: list[str]) -> list[str]:
+    """断りの数を上限で打ち切る。打ち切った分は、件数と次の一手の 1 行に畳む。
+
+    束ねても、束の種類そのものは入力次第で増える。最後に 1 か所で止めることで、
+    返り値の大きさが入力の大きさに引きずられないようにする。
+    """
+    if len(notes) <= NOTE_LIMIT:
+        return notes
+    rest = len(notes) - (NOTE_LIMIT - 1)
+    return notes[: NOTE_LIMIT - 1] + [
+        f"ほかに {rest} 件の断りを省いた。範囲を絞って check_consistency を呼ぶと、"
+        "その範囲の断りを全部見られる。"
+    ]
+
+
+def explain_heading(
+    settings: Settings,
+    snapshot: SourceSnapshot,
+    label: str,
+    wanted: str,
+    pool: list[str],
+) -> tuple[bool, str, list[str]]:
+    """指された見出しが読めているかと、読めていないときの直し方の文と候補を返す。
+
+    「無い」の一言で片づけると、正本に実在する見出しを指したときに、合っている側を書き換える
+    誘導になる。だから 4 通りに分ける——読めた、欄が欠けて読めていない、読み取り範囲の外に実在する、
+    どこにも無い。名前が合っている 2 つでは候補を出さない。候補は「そのまま渡し直せば通る名前」に
+    限る決めなので、名前が合っているところに候補を並べると、直し先を取り違えさせる。
+    """
+    if wanted in pool:
+        return True, "", []
+
+    for defect in snapshot.defects:
+        if defect.heading != wanted:
+            continue
+        missing = "、".join(f"「{name}」" for name in defect.missing_fields)
+        return (
+            False,
+            f"{label}「{wanted}」は {defect.file} に実在するが、必須の欄{missing}が無いので"
+            "型にできず、いまの正本として読んでいない。直すのはこのファイルではなく、"
+            f"{defect.file} の「{wanted}」に{missing}の行を足すことである。",
+            [],
+        )
+
+    for skipped in snapshot.skipped_headings:
+        if skipped.heading != wanted:
+            continue
+        where = settings.files.get(skipped.source_key, skipped.source_key)
+        if skipped.parents:
+            parents = "、".join(f"「{name}」" for name in skipped.parents)
+            place = f"深さ {skipped.level} の見出しで、{parents}の下にある"
+        else:
+            place = f"深さ {skipped.level} の見出しである"
+        return (
+            False,
+            f"{label}「{wanted}」は {where} に実在する（{place}）が、"
+            f"いまの読み取り範囲の外にある——{skipped.reason}。直し方は 2 つで、"
+            f"設定の [{READING_KEY}.{skipped.source_key}] の絞りを広げてこの節を読めるようにするか、"
+            "正本のこの節を読み取り範囲の中へ移す。",
+            [],
+        )
+
+    tail = MISSING_HEADING_TEXT.get(
+        label, "は、いまの正本に読めている見出しに無い。下の候補のうち実在する見出しに書き換える。"
+    )
+    return False, f"{label}「{wanted}」{tail}", close_names(wanted, pool)
 
 
 def _is_listed_as_exception(positioning: Positioning, presentation: Presentation) -> bool:
@@ -107,8 +224,9 @@ class ConsistencyService:
 
         if target is None:
             return ConsistencyReport(
+                provenance=provenance_of(self.settings),
                 scope=scope or WHOLE_SCOPE,
-                notes=self._unknown_scope_notes(snapshot, str(scope)),
+                notes=limit_notes(self._unknown_scope_notes(snapshot, str(scope))),
             )
 
         violations: list[Violation] = []
@@ -135,7 +253,12 @@ class ConsistencyService:
 
         violations.extend(self._check_ledger_source_sections(snapshot, target))
 
-        return ConsistencyReport(scope=target.label, violations=violations, notes=notes)
+        return ConsistencyReport(
+            provenance=provenance_of(self.settings),
+            scope=target.label,
+            violations=violations,
+            notes=limit_notes(notes),
+        )
 
     # ------------------------------------------------------------ 範囲
 
@@ -238,7 +361,8 @@ class ConsistencyService:
         """範囲の名前が実在しないときの断り。拒否ではなく、実在する範囲の一覧を返す。"""
         return [
             f"範囲「{scope}」は、媒体の名前にも提示物のファイル名にも無い。",
-            "実在する範囲: " + " / ".join(self._existing_scopes(snapshot)),
+            "実在する範囲: "
+            + fold_names(self._existing_scopes(snapshot), keep=NAME_SAMPLE_COUNT),
             "上の名前のどれかをそのまま範囲に渡して、もう一度 check_consistency を呼ぶ。",
         ]
 
@@ -271,7 +395,7 @@ class ConsistencyService:
                 notes.append(
                     f"{positioning.decided_on} の決め（適用範囲 {positioning.scope}）が前面に出す束"
                     f"「{positioning.headline_package}」がパッケージ定義に無いので、鮮度は判定できない。"
-                    f"実在する束: {' / '.join(packages)}。"
+                    f"実在する束: {fold_names(list(packages), keep=NAME_SAMPLE_COUNT)}。"
                     "束の名前を直して record_positioning で決めを登記し直す。"
                 )
                 continue
@@ -335,18 +459,18 @@ class ConsistencyService:
 
         for capability in target.capabilities:
             for section in capability.evidence_sections:
-                if section in headings:
+                readable, expected, candidates = explain_heading(
+                    self.settings, snapshot, EVIDENCE_LABEL, section, headings
+                )
+                if readable:
                     continue
                 violations.append(
                     Violation(
                         constraint=EVIDENCE_SECTION_EXISTS,
                         file=self.settings.files["capabilities"],
                         location=f"分類「{capability.category}」の機能「{capability.name}」の裏づけの節",
-                        expected=(
-                            f"裏づけの節「{section}」は、職歴の枠にも受託案件にも無い見出しである。"
-                            "下の候補のうち実在する見出しに書き換える。"
-                        ),
-                        candidates=close_names(section, headings),
+                        expected=expected,
+                        candidates=candidates,
                     )
                 )
         return violations
@@ -393,25 +517,24 @@ class ConsistencyService:
             for note in presentation.pending_notes:
                 remaining.append(presentation.path)
                 section = _note_target(note)
-                if section in headings:
+                readable, expected, candidates = explain_heading(
+                    self.settings, snapshot, PENDING_NOTE_LABEL, section, headings
+                )
+                if readable:
                     continue
                 violations.append(
                     Violation(
                         constraint=NOTE_AND_SOURCE_SECTION,
                         file=presentation.path,
                         location=f"「未反映の注記」の行「{note}」",
-                        expected=(
-                            f"注記が指す節「{section}」は、受託案件の見出しに無い。"
-                            "下の候補のうち実在する見出しに書き換える。"
-                            "この事実をもう正本に書いたのなら、注記の行ごと消す。"
-                        ),
-                        candidates=close_names(section, headings),
+                        expected=expected,
+                        candidates=candidates,
                     )
                 )
 
         notes: list[str] = []
         if remaining:
-            where = "、".join(dict.fromkeys(remaining))
+            where = fold_names(list(dict.fromkeys(remaining)), keep=NAME_SAMPLE_COUNT)
             notes.append(
                 f"未反映の注記が {len(remaining)} 件残っている（{where}）。"
                 "注記の中身を正本に書き、書いたら提示物の注記の行を消す。"
@@ -432,24 +555,24 @@ class ConsistencyService:
 
         for entry in target.ledger_entries:
             section = entry.source_section
-            engagement = engagements.get(section)
             location = f"案件番号 {entry.entry_number}（{entry.heading}）の「出典の節」の行"
 
-            if engagement is None:
+            readable, expected, candidates = explain_heading(
+                self.settings, snapshot, LEDGER_SOURCE_LABEL, section, list(engagements)
+            )
+            if not readable:
                 violations.append(
                     Violation(
                         constraint=NOTE_AND_SOURCE_SECTION,
                         file=self.settings.files["resume_ledger"],
                         location=location,
-                        expected=(
-                            f"出典の節「{section}」は、受託案件の見出しに無い。"
-                            "下の候補のうち実在する見出しに書き換える。"
-                        ),
-                        candidates=close_names(section, list(engagements)),
+                        expected=expected,
+                        candidates=candidates,
                     )
                 )
                 continue
 
+            engagement = engagements[section]
             if engagement.disclosure.startswith(PRIVATE_DISCLOSURE_PREFIX):
                 violations.append(
                     Violation(
