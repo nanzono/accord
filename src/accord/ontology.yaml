@@ -76,7 +76,7 @@ types:
         label: 束ねる機能
         type: text_list
         required: true
-        description: 束ねる機能の名前。機能の台帳にある名前に限る。
+        description: 束ねる機能の名前。機能の台帳にある名前に限る。複数あるときは半角のスラッシュ「/」で区切る。
       - name: updated_on
         label: 最終更新
         type: date
@@ -122,7 +122,7 @@ types:
         label: 裏づけの節
         type: text_list
         required: true
-        description: 職歴の枠か受託案件の見出し。1 つ以上。実在する見出しに限る。
+        description: 職歴の枠か受託案件の見出し。1 つ以上。複数あるときは半角のスラッシュ「/」で区切る（例「見出し A / 見出し B」）。ほかの記号でつなぐと、つないだ全体が 1 つの見出しとして読まれ、実在しないと判定される。実在する見出しに限る。
 
   - name: CareerFrame
     label: 職歴の枠

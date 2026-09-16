@@ -28,7 +28,7 @@ class Package(BaseModel):
     name: str = Field(description="パッケージ名。決めと提示物が名前で指す先。")
     buyer: str = Field(description="想定買い手。誰に売るか。")
     hypothesis_state: str = Field(description="仮説の状態。選べる語は設定ファイルの package_hypothesis_states が持つ一覧に限る。")
-    capabilities: list[str] = Field(description="束ねる機能。束ねる機能の名前。機能の台帳にある名前に限る。")
+    capabilities: list[str] = Field(description="束ねる機能。束ねる機能の名前。機能の台帳にある名前に限る。複数あるときは半角のスラッシュ「/」で区切る。")
     updated_on: date = Field(description="最終更新。この定義を最後に直した日。決めの日付より古いと鮮度の違反になる。")
     basis: str | None = Field(default=None, description="判定根拠。仮説の状態をそう判定した理由。")
     source: str | None = Field(default=None, description="出典。判定の元にした正本の節。")
@@ -41,7 +41,7 @@ class Capability(BaseModel):
     name: str = Field(description="機能名。パッケージが束ねるときに指す名前。")
     description: str = Field(description="説明。その仕事が何をするかの 1 行。")
     category: str = Field(description="分類。機能の台帳の節の名前。選べる語は設定ファイルから読む。")
-    evidence_sections: list[str] = Field(description="裏づけの節。職歴の枠か受託案件の見出し。1 つ以上。実在する見出しに限る。")
+    evidence_sections: list[str] = Field(description="裏づけの節。職歴の枠か受託案件の見出し。1 つ以上。複数あるときは半角のスラッシュ「/」で区切る（例「見出し A / 見出し B」）。ほかの記号でつなぐと、つないだ全体が 1 つの見出しとして読まれ、実在しないと判定される。実在する見出しに限る。")
 
 
 class CareerFrame(BaseModel):
