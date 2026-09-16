@@ -32,6 +32,16 @@ def settings(sample_copy: Path) -> Settings:
     return load_settings(sample_copy / "accord.toml")
 
 
+@pytest.fixture
+def alt_settings(sample_copy: Path) -> Settings:
+    """写したサンプルのうち、書き方の違う第 2 の正本を指す設定を返す。
+
+    中身は第 1 版のサンプルと同じで、書き方だけが違う。同じ呼び出しが同じ結果を返すことを、
+    書き方の違いだけを変数にして確かめられる。
+    """
+    return load_settings(sample_copy / "accord_alt.toml")
+
+
 def source_digest(source_dir: Path) -> dict[str, str]:
     """正本のディレクトリ配下の全ファイルについて、中身のバイト列の指紋を取る。
 

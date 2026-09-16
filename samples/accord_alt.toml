@@ -1,0 +1,97 @@
+# accord の設定の見本（書き方の違う正本を読む例）。
+#
+# samples/accord.toml と同じ人・同じ案件の正本を指すが、正本の書き方だけが違う。
+# 見出しの深さ、欄を箇条書きで書くか表で書くか、欄のラベルの言い方が違っても、
+# [reading] の節で読み方を合わせれば同じ結果になることを示すための見本である。
+#
+# この見本が指す正本は、すべて架空の人物と架空の案件でできている。
+
+[source]
+# 正本のディレクトリ。この設定ファイルから見た相対の場所で書く。
+directory = "source_alt"
+
+[source.files]
+# 正本 7 種のファイル名。職歴の枠と受託案件は 1 つのファイルに同居していて、
+# 見出しの深さで分けて読む（下の [reading.career] と [reading.engagements] を見る）。
+positioning = "positioning.md"
+packages = "product/packages.md"
+capabilities = "product/features.md"
+career = "career_master.md"
+engagements = "career_master.md"
+resume_ledger = "keirekisho/daicho.md"
+# 提示物は媒体ごとのディレクトリの下にある。どのディレクトリを見るかは
+# [reading.presentations] の directories が決めるので、ここは正本のディレクトリそのものを指す。
+presentations = "."
+
+# 見せ方の正本。媒体ごとの規約はここではなく、各媒体のディレクトリの channel.md にある。
+presentation_rules = "misekata_master.md"
+
+[vocabulary]
+# 媒体の名前。決めの適用範囲と、提示物の宛先に使う。
+channels = ["tsukikusa", "nagiho"]
+
+# 機能の台帳の節の名前。機能を登記するときの分類は、この一覧の語に限る。
+capability_categories = [
+    "データの置き場をつくる",
+    "数字を読める形にする",
+    "決めて、進める",
+    "引き継げる形にする",
+    "人と体制をつくる",
+]
+
+# パッケージの仮説の状態の語。
+package_hypothesis_states = ["仮説のみ", "検証中", "実績あり"]
+
+[reading]
+# 正本の書き方。この節をまるごと書かなければ、samples/accord.toml と同じに読む。
+
+# 欄のラベルの末尾の括弧書き（但し書き）を落としてから読む。
+# 「成果（定量は本人の記録から）」は「成果」として読まれる。
+strip_label_note = true
+
+[reading.labels]
+# 正本のラベルと、accord が読む欄のラベルの読み替え。
+# 1 つのラベルを複数の欄に読み替えると、同じ値がその欄すべてに入る。
+"期間 / 所属・立場" = ["期間", "所属", "立場"]
+"業種・規模" = ["業種", "規模"]
+"技術スタック" = ["技術"]
+"課題・背景" = ["課題"]
+
+[reading.packages]
+# パッケージでない節を 1 つ持つので、その節は読まない。
+skip_headings = ["初期投入の出典と、まだ決めていないこと"]
+
+[reading.career]
+# 職歴の枠は深さ 3 の見出し。同じ深さに職歴でない節があるので、職歴の節の下だけを読む。
+heading_levels = [3]
+under_headings = ["職歴・案件（新しい順）"]
+
+[reading.engagements]
+# 受託案件は、職歴の枠の下の深さ 4 と 5 の見出し。
+# 欄を 1 つも持たない見出し（案件を束ねるためだけの見出し）は読み飛ばす。
+heading_levels = [4, 5]
+under_headings = ["職歴・案件（新しい順）"]
+skip_sections_without_fields = true
+
+[reading.resume_ledger]
+# 台帳の案件は「案件1｜…」の形の見出しで、欄は 2 列の表に書く。
+# 案件番号は欄ではなく、見出しの「案件」に続く数字から読む。
+heading_prefix = "案件"
+fields_from_table = true
+bare_labels = ["畳み行"]
+entry_number_from_heading = true
+
+[reading.presentations]
+# 提示物を探すディレクトリ。媒体ごとのディレクトリの下には、提示物でないファイルも同居する。
+directories = ["tsukikusa", "nagiho"]
+# 宣言する束の行を持つ Markdown だけを提示物として読む。
+require_declaration = true
+
+[reading.presentation_rules]
+# 媒体の規約は、媒体ごとのファイルにある。
+channel_rules_from = "per_channel_file"
+channel_rules_file = "{channel}/channel.md"
+# 禁じた言い回しの節は、名前が違い、深さも 2 ではなく、中身が表になっている。
+forbidden_phrases_heading = "本人が禁じた言い回し"
+forbidden_phrases_any_level = true
+forbidden_phrases_from = "table"

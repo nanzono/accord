@@ -8,6 +8,7 @@ Markdown の在処と書き方を知るのはこの文書だけである。上�
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
 from types import SimpleNamespace
 
 from accord.models.ontology import missing_required_fields
@@ -25,10 +26,20 @@ from accord.repository.sections import (
     Section,
     bullet_items,
     find_section,
-    parse_definition_list,
+    leading_number,
+    read_fields,
+    select_blocks,
     split_sections,
+    strip_note,
+    table_blocks,
 )
-from accord.vocabulary.settings import PRESENTATION_RULES_KEY, Settings
+from accord.vocabulary.settings import (
+    CHANNEL_RULES_PER_CHANNEL_FILE,
+    PHRASES_FROM_TABLE,
+    PRESENTATION_RULES_KEY,
+    BlockRule,
+    Settings,
+)
 
 # 正本の欄の見出し（Markdown 側のラベル）と、型の欄の名前の対応。
 POSITIONING_LABELS = {
@@ -108,8 +119,8 @@ EMPTY_MARK = "なし"
 # 機能の台帳の表の見出し。節を新しく作るときに書き出す。
 CAPABILITY_TABLE_HEADER = ("| 機能名 | 説明 | 裏づけの節 |", "|---|---|---|")
 
-# 見せ方の正本の、媒体によらない節の見出し。媒体ごとの節の見出しは、媒体の名前そのものである。
-FORBIDDEN_PHRASES_HEADING = "禁じた言い回し"
+# 媒体ごとの規約のファイルの場所に書く、媒体の名前が入るところの印。
+CHANNEL_PLACEHOLDER = "{channel}"
 
 # 裏づけの節と出典の節が指せる正本。どちらも節の見出しで指す。
 EVIDENCE_SOURCE_KEYS = ("career", "engagements")
@@ -143,11 +154,6 @@ def _optional(value: str | None) -> str | None:
     return value.strip()
 
 
-def _blocks(sections: list[Section], level: int = 2) -> list[Section]:
-    """指定した深さの見出しを持つ節だけを取り出す。"""
-    return [section for section in sections if section.level == level and section.heading]
-
-
 class MarkdownRepository:
     """正本のディレクトリを 1 つ受け取り、その中の Markdown を読み書きする。"""
 
@@ -162,6 +168,23 @@ class MarkdownRepository:
         if not path.is_file():
             return ""
         return path.read_text(encoding="utf-8")
+
+    def _rule(self, key: str) -> BlockRule:
+        """正本 1 種の読み方を返す。設定に書き方の節が無ければ、第 1 版と同じ読み方になる。"""
+        return self.settings.reading.rule_for(key)
+
+    def _blocks(self, key: str) -> tuple[list[Section], BlockRule]:
+        """正本 1 種を読み、その正本の読み方で選んだ節と、読み方そのものを返す。
+
+        職歴の枠と受託案件のように、1 つのファイルを 2 種の正本として読むこともある。
+        設定の `[source.files]` に同じファイル名を書き、見出しの深さで分ける。
+        """
+        rule = self._rule(key)
+        return select_blocks(split_sections(self._read(key)), rule), rule
+
+    def _blocks_in(self, key: str, text: str) -> list[Section]:
+        """書き戻す前の文字列を、その正本の読み方で節に切る。"""
+        return select_blocks(split_sections(text), self._rule(key))
 
     def load(self) -> SourceSnapshot:
         """7 種の正本を読み、型のインスタンスの集合にする。
@@ -204,8 +227,9 @@ class MarkdownRepository:
         """
         result: list[Positioning] = []
         defects: list[SourceDefect] = []
-        for block in _blocks(split_sections(self._read("positioning"))):
-            fields = parse_definition_list(block.body)
+        blocks, rule = self._blocks("positioning")
+        for block in blocks:
+            fields = read_fields(block, rule)
             missing = [label for label in POSITIONING_LABELS if label not in fields]
             if missing:
                 defects.append(
@@ -247,8 +271,9 @@ class MarkdownRepository:
         """パッケージ定義を読む。必須の欄が欠けた節は型にできないので、飛ばしたことを断りに残す。"""
         result: list[Package] = []
         defects: list[SourceDefect] = []
-        for block in _blocks(split_sections(self._read("packages"))):
-            fields = parse_definition_list(block.body)
+        blocks, rule = self._blocks("packages")
+        for block in blocks:
+            fields = read_fields(block, rule)
             values: dict[str, object] = {
                 name: fields.get(label) for label, name in PACKAGE_LABELS.items()
             }
@@ -278,8 +303,10 @@ class MarkdownRepository:
         """
         result: list[Capability] = []
         defects: list[SourceDefect] = []
-        for block in _blocks(split_sections(self._read("capabilities"))):
-            for index, cells in enumerate(self._table_rows(block.body), start=1):
+        blocks, _ = self._blocks("capabilities")
+        for block in blocks:
+            rows = [cells for table in table_blocks(block.body) for cells in table]
+            for index, cells in enumerate(rows, start=1):
                 values = {
                     "name": cells[0] if len(cells) > 0 else None,
                     "description": cells[1] if len(cells) > 1 else None,
@@ -301,27 +328,13 @@ class MarkdownRepository:
                 result.append(Capability(**values))
         return result, defects
 
-    @staticmethod
-    def _table_rows(body: str) -> list[list[str]]:
-        """本文から表の行を拾う。見出しの行と区切りの行は落とす。"""
-        rows: list[list[str]] = []
-        for line in body.splitlines():
-            stripped = line.strip()
-            if not stripped.startswith("|"):
-                continue
-            cells = [cell.strip() for cell in stripped.strip("|").split("|")]
-            if not cells or all(set(cell) <= {"-", ":"} for cell in cells):
-                continue
-            rows.append(cells)
-        # 先頭の行は表の見出しなので落とす。
-        return rows[1:] if rows else rows
-
     def _load_career_frames(self) -> tuple[list[CareerFrame], list[SourceDefect]]:
         """職歴の枠を読む。必須の欄が欠けたブロックは型にできないので、飛ばしたことを断りに残す。"""
         result: list[CareerFrame] = []
         defects: list[SourceDefect] = []
-        for block in _blocks(split_sections(self._read("career"))):
-            fields = parse_definition_list(block.body)
+        blocks, rule = self._blocks("career")
+        for block in blocks:
+            fields = read_fields(block, rule)
             values: dict[str, object] = {
                 name: fields.get(label) for label, name in CAREER_LABELS.items()
             }
@@ -344,8 +357,9 @@ class MarkdownRepository:
         """受託案件を読む。必須の欄が欠けたブロックは型にできないので、飛ばしたことを断りに残す。"""
         result: list[Engagement] = []
         defects: list[SourceDefect] = []
-        for block in _blocks(split_sections(self._read("engagements"))):
-            fields = parse_definition_list(block.body)
+        blocks, rule = self._blocks("engagements")
+        for block in blocks:
+            fields = read_fields(block, rule)
             values: dict[str, object] = {
                 name: fields.get(label) for label, name in ENGAGEMENT_LABELS.items()
             }
@@ -371,13 +385,19 @@ class MarkdownRepository:
         """
         result: list[ResumeLedger] = []
         defects: list[SourceDefect] = []
-        for block in _blocks(split_sections(self._read("resume_ledger"))):
-            fields = parse_definition_list(block.body)
+        blocks, rule = self._blocks("resume_ledger")
+        for block in blocks:
+            fields = read_fields(block, rule)
             values: dict[str, object] = {
                 name: fields.get(label) for label, name in LEDGER_LABELS.items()
             }
             values["heading"] = block.heading
             values["fold_line"] = _optional(values.get("fold_line"))
+            if rule.entry_number_from_heading:
+                # 案件番号を欄ではなく見出しの数字で持つ書き方。欄があればそちらを優先しない。
+                number = leading_number(block.heading, rule.heading_prefix)
+                if number:
+                    values["entry_number"] = number
 
             missing = missing_required_fields(RESUME_LEDGER_TYPE_NAME, SimpleNamespace(**values))
             if missing:
@@ -392,24 +412,48 @@ class MarkdownRepository:
             result.append(ResumeLedger(**values))
         return result, defects
 
+    def _presentation_files(self) -> list[Path]:
+        """提示物として読む Markdown を集める。
+
+        置き場の一覧が設定にあれば、その一覧のディレクトリの下だけをたどる。無ければ、
+        設定が提示物として指したディレクトリの下を全部たどる（第 1 版と同じ）。
+        媒体ディレクトリの下に、提示物でないファイルが同居している正本があるためである。
+        """
+        names = self.settings.reading.presentation_directories
+        roots = (
+            [self.settings.source_dir / name for name in names]
+            if names
+            else [self.settings.path_for("presentations")]
+        )
+        found: list[Path] = []
+        for root in roots:
+            if root.is_dir():
+                found.extend(sorted(root.rglob("*.md")))
+        return found
+
     def _load_presentations(self) -> tuple[list[Presentation], list[SourceDefect]]:
         """提示物を読む。媒体ごとのディレクトリの下の Markdown が 1 件ずつ。
 
         必須の欄（宛先の媒体・宣言する束）が欠けたファイルは型にできないので、飛ばしたことを断りに残す。
+        ただし、宣言の行を持つものだけを提示物として読む設定のときは、宣言を持たないファイルを
+        提示物と見なさないので、断りにも残さない。
         """
-        directory = self.settings.path_for("presentations")
-        if not directory.is_dir():
-            return [], []
-
         result: list[Presentation] = []
         defects: list[SourceDefect] = []
-        for path in sorted(directory.rglob("*.md")):
-            fields = parse_definition_list(path.read_text(encoding="utf-8"))
+        rule = self._rule("presentations")
+        require_declaration = self.settings.reading.require_presentation_declaration
+
+        for path in self._presentation_files():
+            document = Section(level=0, heading="", body=path.read_text(encoding="utf-8"))
+            fields = read_fields(document, rule)
             relative = path.relative_to(self.settings.source_dir).as_posix()
             values: dict[str, object] = {
                 name: fields.get(label) for label, name in PRESENTATION_LABELS.items()
             }
             values["path"] = relative
+
+            if require_declaration and not values.get("declared_package"):
+                continue
 
             missing = missing_required_fields(PRESENTATION_TYPE_NAME, SimpleNamespace(**values))
             if missing:
@@ -439,27 +483,69 @@ class MarkdownRepository:
         """
         bodies: dict[str, str] = {}
         for key in EVIDENCE_SOURCE_KEYS:
-            for section in _blocks(split_sections(self._read(key))):
+            blocks, _ = self._blocks(key)
+            for section in blocks:
                 bodies.setdefault(section.heading, section.body)
         return bodies
 
     def _presentation_rule_sections(self) -> list[Section]:
         """見せ方の正本を節に切り分ける。ファイルが無ければ空の一覧を返す。"""
-        return _blocks(split_sections(self._read(PRESENTATION_RULES_KEY)))
+        blocks, _ = self._blocks(PRESENTATION_RULES_KEY)
+        return blocks
 
     def channel_rules(self, channel: str) -> list[str]:
-        """見せ方の正本のうち、その媒体の節の箇条書きを返す。
+        """その媒体の規約（文字数の上限、書き出しの決まり）を箇条書きの一覧で返す。
 
-        媒体の規約（文字数の上限、書き出しの決まり）と、その媒体での見せ方の決めが、
-        1 つの節に並ぶ。節が無ければ空の一覧を返す。
+        置き場は 2 通りある。見せ方の正本 1 つの中の、媒体の名前の節から読む書き方と、
+        媒体ごとのファイルから読む書き方である。どちらかは設定が決める。
+        節もファイルも無ければ空の一覧を返す。
         """
+        rules = self.settings.reading
+        if rules.channel_rules_from == CHANNEL_RULES_PER_CHANNEL_FILE:
+            path = self.settings.source_dir / rules.channel_rules_file.replace(
+                CHANNEL_PLACEHOLDER, channel
+            )
+            if not path.is_file():
+                return []
+            return bullet_items(path.read_text(encoding="utf-8"))
+
         section = find_section(self._presentation_rule_sections(), channel)
         return bullet_items(section.body) if section is not None else []
 
+    def _forbidden_phrases_section(self) -> Section | None:
+        """禁じた言い回しの節を、見出しの名前で探す。
+
+        見出しに但し書きの括弧が付く正本があるので、括弧書きを落としてから比べる。
+        深さを問わずに探すかどうかは設定が決める。問わない設定のときは、どの深さの
+        見出しでも名前が合えばその節を返す。
+        """
+        rules = self.settings.reading
+        sections = split_sections(self._read(PRESENTATION_RULES_KEY))
+        if not rules.forbidden_phrases_any_level:
+            sections = select_blocks(sections, self._rule(PRESENTATION_RULES_KEY))
+
+        wanted = strip_note(rules.forbidden_phrases_heading)
+        for section in sections:
+            if section.heading and strip_note(section.heading) == wanted:
+                return section
+        return None
+
     def forbidden_phrases(self) -> list[str]:
-        """見せ方の正本の、媒体によらない節から、禁じた言い回しを返す。"""
-        section = find_section(self._presentation_rule_sections(), FORBIDDEN_PHRASES_HEADING)
-        return bullet_items(section.body) if section is not None else []
+        """見せ方の正本の、媒体によらない節から、禁じた言い回しを返す。
+
+        中身は、節の最初の表の 1 列目か、節の最初の箇条書きの塊のどちらかで、設定が決める。
+        最初の 1 つに限るのは、同じ節に別の話の表や箇条書きが続けて置かれている正本があり、
+        全部を拾うと禁じた言い回しでないものが混ざるからである。
+        """
+        section = self._forbidden_phrases_section()
+        if section is None:
+            return []
+        if self.settings.reading.forbidden_phrases_from == PHRASES_FROM_TABLE:
+            tables = table_blocks(section.body)
+            if not tables:
+                return []
+            return [cells[0] for cells in tables[0] if cells and cells[0]]
+        return bullet_items(section.body, first_block=True)
 
     # ------------------------------------------------------------ 書き戻す
 
@@ -471,7 +557,7 @@ class MarkdownRepository:
 
         row = self._capability_row(capability)
         target = None
-        for section in _blocks(split_sections(text)):
+        for section in self._blocks_in("capabilities", text):
             if section.heading == capability.category:
                 target = section
                 break
@@ -520,7 +606,7 @@ class MarkdownRepository:
         """決め 1 件を、正本のブロックの行にする。読み戻すのは _load_positionings である。
 
         欄の値に改行を含むとき（根拠が複数行になるときなど）は、同じラベルの行を複数回書く。
-        parse_definition_list が同じラベルの行を改行でつないで 1 つの値に戻すので、書き戻しで
+        read_fields が同じラベルの行を改行でつないで 1 つの値に戻すので、書き戻しで
         1 行に畳んでしまうと、読み直したときの値が書いた値と食い違う。
         """
         decided_on = positioning.decided_on.isoformat()
@@ -563,7 +649,7 @@ class MarkdownRepository:
         target = next(
             (
                 section
-                for section in _blocks(split_sections(text))
+                for section in self._blocks_in("packages", text)
                 if section.heading == package.name
             ),
             None,
