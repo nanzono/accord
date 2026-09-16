@@ -1,0 +1,35 @@
+[project]
+name = "accord"
+version = "0.1.0"
+description = "正本と、そこから派生する対外表現の一致を守る、手元で動く MCP サーバー"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "mcp>=2.2,<3",
+    "pydantic>=2",
+    "pyyaml>=6",
+]
+
+[project.scripts]
+accord = "accord.__main__:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/accord"]
+
+# 同梱のサンプル（設定の見本と架空の正本）を、導入した先でも読めるように配る。
+# 置き場は導入後に accord/samples/ になる。開発中の木では samples/ のままで、
+# 既定の設定ファイルの探し方は src/accord/vocabulary/settings.py が両方を見る。
+[tool.hatch.build.targets.wheel.force-include]
+"samples" = "accord/samples"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

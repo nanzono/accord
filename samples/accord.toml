@@ -1,0 +1,37 @@
+# accord の設定の見本。
+#
+# 正本の置き場と、固有の語彙（媒体の名前、機能の分類の節、パッケージの仮説の状態の語）を
+# ここに書く。コードにはこれらの値を直書きしない。別の人が使うときは、このファイルを
+# 自分の語彙で書き換え、起動時に `accord --config <このファイル>` で指す。
+#
+# この見本が指す正本は、すべて架空の人物と架空の案件でできている。
+
+[source]
+# 正本のディレクトリ。この設定ファイルから見た相対の場所で書く。
+directory = "source"
+
+[source.files]
+# 正本 7 種のファイル名。提示物だけはディレクトリで、媒体ごとの下位ディレクトリを持つ。
+positioning = "positioning.md"
+packages = "packages.md"
+capabilities = "capabilities.md"
+career = "career.md"
+engagements = "engagements.md"
+resume_ledger = "resume_ledger.md"
+presentations = "presentations"
+
+[vocabulary]
+# 媒体の名前。決めの適用範囲と、提示物の宛先に使う。
+channels = ["tsukikusa", "nagiho"]
+
+# 機能の台帳の節の名前。機能を登記するときの分類は、この一覧の語に限る。
+capability_categories = [
+    "データの置き場をつくる",
+    "数字を読める形にする",
+    "決めて、進める",
+    "引き継げる形にする",
+    "人と体制をつくる",
+]
+
+# パッケージの仮説の状態の語。
+package_hypothesis_states = ["仮説のみ", "検証中", "実績あり"]

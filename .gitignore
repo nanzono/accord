@@ -1,0 +1,13 @@
+# Python の作業環境と、実行のたびにできるもの。リポジトリには入れない。
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# 配布物を作ったときにできるもの。
+dist/
+build/
+*.egg-info/
+
+# 編集の道具が置くもの。
+.DS_Store

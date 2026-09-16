@@ -1,0 +1,385 @@
+# accord の型・関係・制約の正本。
+#
+# この 1 ファイルが正本で、Pydantic のモデル（models/types.py）と制約の宣言
+# （models/constraints.py）は scripts/generate_models.py がここから生成する。
+# 生成物を手で直してはいけない。直すのはこのファイルで、直したら生成器を回す。
+#
+# 数はこのファイルが正本で（由来は README の「設計の要点」）、
+# 型 7 つ・関係 6 種（辺は 7 本）・制約 7 つに 1 対 1 で対応する。
+# 資源 accord://ontology はこのファイルの中身を返す。
+
+version: 1
+
+# ---------------------------------------------------------------- 型（7）
+#
+# field の type に書ける値は 5 つ。
+#   text        文字列 1 つ            -> str
+#   date        日付                   -> datetime.date
+#   text_list   文字列の一覧           -> list[str]
+#   mapping     名前と値の組の一覧     -> list[dict[str, str]]
+#   flag        真偽                   -> bool
+# required: true の欄は生成したモデルで必須になる。
+
+types:
+  - name: Positioning
+    label: 売り方の決め
+    description: どのパッケージを前面に出すかの判断。1 決め 1 ブロックで積み、過去のブロックは書き換えない。
+    source: positioning
+    fields:
+      - name: decided_on
+        label: 日付
+        type: date
+        required: true
+        description: この決めを決めた日。パッケージ定義の鮮度は、この日付と比べて判定する。
+      - name: scope
+        label: 適用範囲
+        type: text
+        required: true
+        description: 媒体の名前か「全体」。媒体の名前は設定ファイルの一覧から取る。
+      - name: headline_package
+        label: 前面に出す束
+        type: text
+        required: true
+        description: 看板にするパッケージの名前。パッケージ定義に実在する名前に限る。
+      - name: rationale
+        label: 根拠
+        type: text
+        required: true
+        description: なぜこの束を前面に出すのかの説明。
+      - name: exceptions
+        label: 例外
+        type: mapping
+        required: false
+        description: この決めに反してよい提示物の名前と、その理由の組。宣言の一致の検査はここに書いた提示物を飛ばす。
+
+  - name: Package
+    label: パッケージ
+    description: 機能を束ねて誰に売るかを定めた売り物の単位。
+    source: packages
+    fields:
+      - name: name
+        label: パッケージ名
+        type: text
+        required: true
+        description: 決めと提示物が名前で指す先。
+      - name: buyer
+        label: 想定買い手
+        type: text
+        required: true
+        description: 誰に売るか。
+      - name: hypothesis_state
+        label: 仮説の状態
+        type: text
+        required: true
+        description: 仮説のみ・検証中・実績あり。選べる語は設定ファイルから読む。
+      - name: capabilities
+        label: 束ねる機能
+        type: text_list
+        required: true
+        description: 束ねる機能の名前。機能の台帳にある名前に限る。
+      - name: updated_on
+        label: 最終更新
+        type: date
+        required: true
+        description: この定義を最後に直した日。決めの日付より古いと鮮度の違反になる。
+      - name: basis
+        label: 判定根拠
+        type: text
+        required: false
+        description: 仮説の状態をそう判定した理由。
+      - name: source
+        label: 出典
+        type: text
+        required: false
+        description: 判定の元にした正本の節。
+      - name: breaks_when
+        label: 崩れる条件
+        type: text
+        required: false
+        description: この束が売り物として成り立たなくなる条件。
+
+  - name: Capability
+    label: 機能
+    description: 提供できる仕事 1 つ。裏づけの節を持つ。
+    source: capabilities
+    fields:
+      - name: name
+        label: 機能名
+        type: text
+        required: true
+        description: パッケージが束ねるときに指す名前。
+      - name: description
+        label: 説明
+        type: text
+        required: true
+        description: その仕事が何をするかの 1 行。
+      - name: category
+        label: 分類
+        type: text
+        required: true
+        description: 機能の台帳の節の名前。選べる語は設定ファイルから読む。
+      - name: evidence_sections
+        label: 裏づけの節
+        type: text_list
+        required: true
+        description: 職歴の枠か受託案件の見出し。1 つ以上。実在する見出しに限る。
+
+  - name: CareerFrame
+    label: 職歴の枠
+    description: 会社 1 社ぶん、またはフリーランス 1 期ぶんの職歴。
+    source: career
+    fields:
+      - name: heading
+        label: 見出し
+        type: text
+        required: true
+        description: 節の見出し。裏づけの節と出典の節はこの文字列で指す。
+      - name: period
+        label: 期間
+        type: text
+        required: true
+      - name: organization
+        label: 所属
+        type: text
+        required: true
+      - name: position
+        label: 立場
+        type: text
+        required: true
+      - name: summary
+        label: やったこと
+        type: text
+        required: false
+      - name: outcome
+        label: 成果
+        type: text
+        required: false
+      - name: technologies
+        label: 技術
+        type: text
+        required: false
+      - name: disclosure
+        label: 公開可否
+        type: text
+        required: true
+        description: 外に出してよいかどうか。公開不可の節は材料の取り出しが落とす。
+      - name: source
+        label: 出所
+        type: text
+        required: true
+        description: この記述の元にした素材。
+
+  - name: Engagement
+    label: 受託案件
+    description: クライアント 1 社ぶんの仕事、または横断のトピック。
+    source: engagements
+    fields:
+      - name: heading
+        label: 見出し
+        type: text
+        required: true
+        description: 節の見出し。裏づけの節と出典の節はこの文字列で指す。
+      - name: industry
+        label: 業種
+        type: text
+        required: false
+      - name: scale
+        label: 規模
+        type: text
+        required: false
+      - name: problem
+        label: 課題
+        type: text
+        required: false
+      - name: actions
+        label: やったこと
+        type: text
+        required: false
+      - name: outcome
+        label: 成果
+        type: text
+        required: false
+      - name: technologies
+        label: 技術
+        type: text
+        required: false
+      - name: disclosure
+        label: 公開可否
+        type: text
+        required: true
+        description: 外に出してよいかどうか。公開不可の節は材料の取り出しが落とす。
+      - name: source
+        label: 出所
+        type: text
+        required: true
+        description: この記述の元にした素材。
+
+  - name: Presentation
+    label: 提示物
+    description: 媒体の画面や添付に貼る文面。どのパッケージを名乗るかを宣言する。
+    source: presentations
+    fields:
+      - name: path
+        label: ファイル
+        type: text
+        required: true
+        description: 正本のディレクトリからの相対パス。違反の一覧はこの名前で場所を指す。
+      - name: channel
+        label: 宛先の媒体
+        type: text
+        required: true
+        description: 媒体の名前。設定ファイルの一覧から取る。
+      - name: declared_package
+        label: 宣言する束
+        type: text
+        required: true
+        description: この文面が名乗っているパッケージの名前。
+      - name: pending_notes
+        label: 未反映の注記
+        type: text_list
+        required: false
+        description: まだ正本に反映していない事実の覚え書き。指す節が実在することを検査する。
+      - name: created_on
+        label: 作成日
+        type: date
+        required: false
+
+  - name: ResumeLedger
+    label: 職務経歴書の台帳
+    description: 職務経歴書の元になる正本の、案件 1 件ぶんのブロック。台帳全体はこのブロックの並びで持つ。
+    source: resume_ledger
+    fields:
+      - name: entry_number
+        label: 案件番号
+        type: text
+        required: true
+        description: 台帳の中での通し番号。違反の一覧はこの番号で場所を指す。
+      - name: heading
+        label: 見出し
+        type: text
+        required: true
+      - name: period
+        label: 期間
+        type: text
+        required: true
+      - name: scale
+        label: 規模
+        type: text
+        required: true
+      - name: process
+        label: 担当工程
+        type: text
+        required: true
+      - name: role
+        label: 役割と任され方
+        type: text
+        required: true
+      - name: decisions
+        label: 自分が決めたこと
+        type: text
+        required: true
+      - name: closing
+        label: 終わりの状態
+        type: text
+        required: true
+      - name: source_section
+        label: 出典の節
+        type: text
+        required: true
+        description: 写し元の節の見出し（職歴の枠か受託案件）。実在と公開可否を検査する。
+      - name: fold_line
+        label: 畳み行
+        type: text
+        required: false
+
+# ---------------------------------------------------------------- 関係（6 種・辺 7 本）
+#
+# 裏づけだけが相手の型を 2 つ持つので、種は 6、辺は 7 本になる。
+
+relations:
+  - name: 前面に出す
+    from: Positioning
+    to: [Package]
+    cardinality: 決め 1 件につきパッケージ 1 つ
+    description: 決めが、その時点で看板にするパッケージを 1 つ指す。
+
+  - name: 束ねる
+    from: Package
+    to: [Capability]
+    cardinality: パッケージ 1 つにつき機能 1 つ以上
+    description: パッケージが、売り物として束ねる機能を指す。
+
+  - name: 裏づけ
+    from: Capability
+    to: [CareerFrame, Engagement]
+    cardinality: 機能 1 つにつき節 1 つ以上
+    description: 機能が、その仕事をしたと言える事実の節を指す。相手の型ごとに 1 本ずつ数えるので辺は 2 本。
+
+  - name: 宣言する
+    from: Presentation
+    to: [Package]
+    cardinality: 提示物 1 件につきパッケージ 1 つ
+    description: 外に出す文面が、名乗っているパッケージを指す。
+
+  - name: 未反映の注記
+    from: Presentation
+    to: [Engagement]
+    cardinality: 提示物 1 件につき注記 0 件以上
+    description: 文面に書いたが正本にまだ反映していない事実が、どの節に入るはずかを指す。
+
+  - name: 出典の節
+    from: ResumeLedger
+    to: [Engagement]
+    cardinality: 台帳の案件 1 件につき節 1 つ
+    description: 台帳の案件が、どの節から写したかを指す。職歴の枠の見出しを指すこともある。
+
+# ---------------------------------------------------------------- 制約（7）
+#
+# appears_as は、この制約がどの顔で現れるか。
+#   拒否  書きの操作が入力を受け付けず、代わりの手を返す
+#   検出  検査の操作が違反の一覧に挙げる（読みの操作では警告になる）
+#   構造  実行時ではなく、モジュールの分け方と正本の書き方で守る
+# enforced_by に書いた操作の名前で、サービスの実装がこの制約を参照する。
+
+constraints:
+  - name: 決めの必須欄
+    watches: 売り方の決めに、日付・適用範囲・前面に出す束・根拠の 4 欄が揃っているか。
+    enforced_by: [record_positioning]
+    appears_as: 拒否
+    next_action: 欠けた欄の名前と、その欄の書き方の例を返す。
+
+  - name: パッケージ定義の鮮度
+    watches: パッケージ定義の最終更新が、適用される決めの日付より古くないか。
+    enforced_by: [record_positioning, check_consistency]
+    appears_as: 検出
+    next_action: 定義ファイルの名前と、決めの日付と最終更新日の両方を返す。
+
+  - name: 提示物の宣言と看板の一致
+    watches: 提示物が宣言する束が、適用される決めの前面に出す束と一致するか。決めの例外欄に書いた提示物は見ない。
+    enforced_by: [record_positioning, check_consistency]
+    appears_as: 検出
+    next_action: 提示物のファイル名と、いまの看板のパッケージ名を返す。
+
+  - name: 裏づけ節名の実在
+    watches: 機能の裏づけの節名が、職歴の枠か受託案件の見出しとして実在するか。
+    enforced_by: [register_capability, check_consistency]
+    appears_as: 拒否
+    next_action: 実在する見出しのうち、近いものを候補として返す。
+
+  - name: 束ねる機能名の一致
+    watches: パッケージが束ねる機能名が、機能の台帳にあるか。
+    enforced_by: [revise_package, check_consistency]
+    appears_as: 拒否
+    next_action: 近い機能名の候補と、先に register_capability を呼ぶことを返す。
+
+  - name: 注記と出典の節の実在・公開可否
+    watches: 提示物の未反映の注記が指す節と、職務経歴書の台帳の出典の節が実在し、公開可の節に限るか。
+    enforced_by: [check_consistency, assemble_material]
+    appears_as: 検出
+    next_action: 実在する節の候補を返す。公開不可の節は材料から落とし、落とした節の名前を警告に書く。
+
+  - name: 逆参照を書かない
+    watches: 下の層の正本が上の層を指さないこと。事実の節がパッケージや決めを指す書き方を正本に入れない。
+    enforced_by: []
+    appears_as: 構造
+    next_action: 参照は上の層から下の層へ 1 方向で書く。逆に辿りたいときは検査の操作で数える。
