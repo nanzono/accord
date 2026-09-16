@@ -30,6 +30,7 @@ career = "career.md"
 engagements = "engagements.md"
 resume_ledger = "resume_ledger.md"
 presentations = "presentations"
+presentation_rules = "presentation_rules.md"
 
 [vocabulary]
 channels = ["tsukikusa", "nagiho"]

@@ -22,13 +22,23 @@ from dataclasses import dataclass
 from typing import Any
 
 from accord.models.constraints import CONSTRAINTS
-from accord.models.ontology import load_ontology
-from accord.models.results import ConsistencyReport, SourceSnapshot, Violation
+from accord.models.results import (
+    PRIVATE_DISCLOSURE_PREFIX,
+    ConsistencyReport,
+    SourceSnapshot,
+    Violation,
+)
 from accord.models.types import Capability, Package, Positioning, Presentation, ResumeLedger
 from accord.repository.markdown_repository import MarkdownRepository
 from accord.services.material import MaterialService
 from accord.services.offering import OfferingService
-from accord.services.positioning import PositioningService
+from accord.services.positioning import (
+    WHOLE_SCOPE,
+    PositioningService,
+    applicable_positioning,
+    latest_positioning,
+    unrecorded_positioning_next_step,
+)
 from accord.vocabulary.settings import Settings
 
 # 制約は名前で参照する。名前を正本（ontology.yaml）で変えたら、ここで鍵が見つからず落ちる。
@@ -40,22 +50,12 @@ EVIDENCE_SECTION_EXISTS = CONSTRAINT_BY_NAME["裏づけ節名の実在"].name
 PACKAGE_CAPABILITY_MATCHES = CONSTRAINT_BY_NAME["束ねる機能名の一致"].name
 NOTE_AND_SOURCE_SECTION = CONSTRAINT_BY_NAME["注記と出典の節の実在・公開可否"].name
 
-# 適用範囲の「全体」。媒体の名前は設定から読むが、この語だけは型の欄の定義（適用範囲は
-# 媒体の名前か「全体」）が持つ構造の語なので、設定ではなくここに置く。
-WHOLE_SCOPE = "全体"
-
 # 決めの例外の欄で、提示物の名前を持つ鍵。リポジトリが例外の行をこの鍵で組み立てる。
 EXCEPTION_PRESENTATION_KEY = "提示物"
 
 # 未反映の注記の書き方。「節の見出し — 覚え書き」で、区切りより前がその注記の入る先の節になる。
 # 区切りが無ければ、注記の全文を節の見出しとして読む。
 NOTE_SEPARATOR = "—"
-
-# 公開可否の欄が、外に出せないことを表すときの書き出し。
-PRIVATE_DISCLOSURE_PREFIX = "公開不可"
-
-# 決めの入力の型を組み立てるときに引く、型の名前。
-POSITIONING_TYPE_NAME = "Positioning"
 
 # 候補を探すときの緩さ。近い名前が 1 つも出ないときは、実在する名前をそのまま並べる。
 CLOSE_MATCH_CUTOFF = 0.3
@@ -67,22 +67,6 @@ def _candidates(wanted: str, pool: list[str]) -> list[str]:
     """実在する名前のうち、渡された名前に近いものを返す。近いものが無ければ先頭から並べる。"""
     close = difflib.get_close_matches(wanted, pool, n=CLOSE_MATCH_COUNT, cutoff=CLOSE_MATCH_CUTOFF)
     return close or pool[:FALLBACK_COUNT]
-
-
-def _latest(positionings: list[Positioning], scope: str) -> Positioning | None:
-    """適用範囲がその語に一致する決めのうち、いちばん新しい 1 件を返す。
-
-    同じ日付が並んだときは、正本の後ろにあるブロックを新しいものとして扱う（決めは下に足すため）。
-    """
-    matching = [(index, item) for index, item in enumerate(positionings) if item.scope == scope]
-    if not matching:
-        return None
-    return max(matching, key=lambda pair: (pair[1].decided_on, pair[0]))[1]
-
-
-def _applicable(positionings: list[Positioning], channel: str) -> Positioning | None:
-    """その媒体に適用される決め。媒体を指した決めが無ければ「全体」の最新の 1 件。"""
-    return _latest(positionings, channel) or _latest(positionings, WHOLE_SCOPE)
 
 
 def _is_listed_as_exception(positioning: Positioning, presentation: Presentation) -> bool:
@@ -102,21 +86,6 @@ def _note_target(note: str) -> str:
     """未反映の注記から、その注記が指す節の見出しを取り出す。"""
     head = note.split(NOTE_SEPARATOR, 1)[0]
     return head.strip()
-
-
-def _positioning_input_type() -> str:
-    """決めを登記する操作の入力の型を、型の正本から 1 行にする。
-
-    欄の名前と必須の別を手で書き写すと、正本を直したときに食い違う。だから正本から引く。
-    """
-    for entry in load_ontology().types:
-        if entry.name != POSITIONING_TYPE_NAME:
-            continue
-        return "、".join(
-            f"{field.label}（{field.type}・{'必須' if field.required else '任意'}）"
-            for field in entry.fields
-        )
-    return ""
 
 
 @dataclass(frozen=True)
@@ -211,7 +180,7 @@ class ConsistencyService:
 
     def _channel_scope(self, snapshot: SourceSnapshot, channel: str) -> InspectionScope:
         """媒体 1 つを範囲にとる。その媒体に適用される決めから、束と機能までを辿る。"""
-        positioning = _applicable(snapshot.positionings, channel)
+        positioning = applicable_positioning(snapshot.positionings, channel)
         positionings = (positioning,) if positioning is not None else ()
 
         headline = {item.headline_package for item in positionings}
@@ -238,8 +207,11 @@ class ConsistencyService:
     def _applicable_positionings(self, snapshot: SourceSnapshot) -> tuple[Positioning, ...]:
         """いま効いている決めを集める。「全体」の最新と、媒体ごとの最新である。"""
         found: list[Positioning] = []
-        candidates = [_latest(snapshot.positionings, WHOLE_SCOPE)]
-        candidates += [_applicable(snapshot.positionings, name) for name in self.settings.channels]
+        candidates = [latest_positioning(snapshot.positionings, WHOLE_SCOPE)]
+        candidates += [
+            applicable_positioning(snapshot.positionings, name)
+            for name in self.settings.channels
+        ]
         for item in candidates:
             if item is not None and item not in found:
                 found.append(item)
@@ -281,7 +253,7 @@ class ConsistencyService:
         return [
             f"決めが未登記なので、「{PACKAGE_FRESHNESS}」と「{OFFERING_CLAIM_MATCHES}」は"
             "判定を保留した。比べる相手（いまの看板と、その決めの日付）が無いためである。",
-            "先に決めを登記する（record_positioning）。入力の型: " + _positioning_input_type(),
+            unrecorded_positioning_next_step(),
         ]
 
     # ------------------------------------------------------------ 制約ごとの執行
@@ -336,7 +308,7 @@ class ConsistencyService:
         violations: list[Violation] = []
 
         for presentation in target.presentations:
-            positioning = _applicable(snapshot.positionings, presentation.channel)
+            positioning = applicable_positioning(snapshot.positionings, presentation.channel)
             if positioning is None:
                 continue
             if _is_listed_as_exception(positioning, presentation):

@@ -13,7 +13,7 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# 正本のファイルの役割の名前。設定ファイルの [source.files] はこの 7 つを埋める。
+# 正本のファイルの役割の名前。型 7 つに 1 対 1 で対応する。
 SOURCE_KEYS = (
     "positioning",
     "packages",
@@ -23,6 +23,14 @@ SOURCE_KEYS = (
     "resume_ledger",
     "presentations",
 )
+
+# 見せ方の正本の役割の名前。
+# 見せ方（媒体の規約・語り口の決め・禁じた言い回し）は accord の境界の外なので、型には持たない。
+# 持つのは置き場だけで、材料の取り出しが、宛先の媒体の節と禁じた言い回しの節をそのまま渡す。
+PRESENTATION_RULES_KEY = "presentation_rules"
+
+# 設定の [source.files] が埋める鍵の全体。正本 7 種に、見せ方の正本を 1 つ足したもの。
+FILE_KEYS = (*SOURCE_KEYS, PRESENTATION_RULES_KEY)
 
 
 @dataclass(frozen=True)
@@ -82,7 +90,7 @@ def load_settings(path: Path | None = None) -> Settings:
     source_dir = (config_path.parent / directory).resolve()
 
     files_table = source_table.get("files", {})
-    missing = [key for key in SOURCE_KEYS if key not in files_table]
+    missing = [key for key in FILE_KEYS if key not in files_table]
     if missing:
         raise ValueError(f"設定の [source.files] に {'、'.join(missing)} が無い: {config_path}")
 
@@ -91,7 +99,7 @@ def load_settings(path: Path | None = None) -> Settings:
     return Settings(
         config_path=config_path,
         source_dir=source_dir,
-        files={key: str(files_table[key]) for key in SOURCE_KEYS},
+        files={key: str(files_table[key]) for key in FILE_KEYS},
         channels=_require_list(vocabulary_table, "channels", config_path),
         capability_categories=_require_list(
             vocabulary_table, "capability_categories", config_path

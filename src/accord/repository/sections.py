@@ -15,6 +15,9 @@ HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t]*$")
 # 定義の行。「- ラベル: 値」の形で、正本の欄はこの書き方で持つ。
 DEFINITION_RE = re.compile(r"^[-*][ \t]+([^:：]+)[:：][ \t]*(.*)$")
 
+# 箇条書きの行。「- 中身」の形で、ラベルを持たない並びはこの書き方で持つ。
+BULLET_RE = re.compile(r"^[-*][ \t]+(.+?)[ \t]*$")
+
 
 @dataclass
 class Section:
@@ -92,6 +95,20 @@ def find_section(sections: list[Section], heading: str) -> Section | None:
         if section.heading == heading:
             return section
     return None
+
+
+def bullet_items(body: str) -> list[str]:
+    """節の本文から「- 中身」の行だけを拾い、中身の一覧にする。
+
+    ラベルを持たない並び（媒体の規約、禁じた言い回し）を読むために使う。
+    箇条書きでない行は、その節に添えた説明なので落とす。
+    """
+    items: list[str] = []
+    for line in body.splitlines():
+        match = BULLET_RE.match(line.strip())
+        if match is not None:
+            items.append(match.group(1).strip())
+    return items
 
 
 def parse_definition_list(body: str) -> dict[str, str]:

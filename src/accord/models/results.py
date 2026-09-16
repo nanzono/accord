@@ -23,6 +23,11 @@ from accord.models.types import (
     ResumeLedger,
 )
 
+# 公開可否の欄が、外に出せないことを表すときの書き出し。
+# 欄には理由まで書けるので（「公開不可（在籍先の名前を出さない約束があるため）」）、
+# 語の一致ではなく書き出しで見る。この 1 か所を、検査も材料の取り出しも読む。
+PRIVATE_DISCLOSURE_PREFIX = "公開不可"
+
 
 class NextAction(BaseModel):
     """拒否のときに返す「次に何をすべきか」。何が悪いかだけで終わらせないための欄。"""
@@ -174,3 +179,11 @@ class SourceSnapshot(BaseModel):
             if engagement.heading == heading:
                 return engagement.disclosure
         return None
+
+    def is_private(self, heading: str) -> bool:
+        """その見出しの節が公開不可か。
+
+        見出しが実在しないときは False を返す。実在しないことは、公開可否とは別の制約で見るからである。
+        """
+        disclosure = self.disclosure_of(heading)
+        return disclosure is not None and disclosure.startswith(PRIVATE_DISCLOSURE_PREFIX)

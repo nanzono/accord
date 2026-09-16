@@ -21,10 +21,12 @@ from accord.models.types import (
 )
 from accord.repository.sections import (
     Section,
+    bullet_items,
+    find_section,
     parse_definition_list,
     split_sections,
 )
-from accord.vocabulary.settings import Settings
+from accord.vocabulary.settings import PRESENTATION_RULES_KEY, Settings
 
 # 正本の欄の見出し（Markdown 側のラベル）と、型の欄の名前の対応。
 POSITIONING_LABELS = {
@@ -89,6 +91,12 @@ EMPTY_WORDS = {"", "なし", "無し", "-", "—"}
 
 # 機能の台帳の表の見出し。節を新しく作るときに書き出す。
 CAPABILITY_TABLE_HEADER = ("| 機能名 | 説明 | 裏づけの節 |", "|---|---|---|")
+
+# 見せ方の正本の、媒体によらない節の見出し。媒体ごとの節の見出しは、媒体の名前そのものである。
+FORBIDDEN_PHRASES_HEADING = "禁じた言い回し"
+
+# 裏づけの節と出典の節が指せる正本。どちらも節の見出しで指す。
+EVIDENCE_SOURCE_KEYS = ("career", "engagements")
 
 
 def _split_list(value: str) -> list[str]:
@@ -296,6 +304,36 @@ class MarkdownRepository:
             ]
             result.append(Presentation(**values))
         return result
+
+    def evidence_bodies(self) -> dict[str, str]:
+        """裏づけの節として指せる見出しと、その本文の対応を返す。
+
+        型に射影した欄ではなく本文をそのまま渡すのは、文面を書く側が読むのは節の中身だからである。
+        同じ見出しが 2 つの正本にあるときは、先に読んだほう（職歴の枠）を残す。
+        """
+        bodies: dict[str, str] = {}
+        for key in EVIDENCE_SOURCE_KEYS:
+            for section in _blocks(split_sections(self._read(key))):
+                bodies.setdefault(section.heading, section.body)
+        return bodies
+
+    def _presentation_rule_sections(self) -> list[Section]:
+        """見せ方の正本を節に切り分ける。ファイルが無ければ空の一覧を返す。"""
+        return _blocks(split_sections(self._read(PRESENTATION_RULES_KEY)))
+
+    def channel_rules(self, channel: str) -> list[str]:
+        """見せ方の正本のうち、その媒体の節の箇条書きを返す。
+
+        媒体の規約（文字数の上限、書き出しの決まり）と、その媒体での見せ方の決めが、
+        1 つの節に並ぶ。節が無ければ空の一覧を返す。
+        """
+        section = find_section(self._presentation_rule_sections(), channel)
+        return bullet_items(section.body) if section is not None else []
+
+    def forbidden_phrases(self) -> list[str]:
+        """見せ方の正本の、媒体によらない節から、禁じた言い回しを返す。"""
+        section = find_section(self._presentation_rule_sections(), FORBIDDEN_PHRASES_HEADING)
+        return bullet_items(section.body) if section is not None else []
 
     # ------------------------------------------------------------ 書き戻す
 
