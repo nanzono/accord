@@ -5,8 +5,13 @@
 # 生成物を手で直してはいけない。直すのはこのファイルで、直したら生成器を回す。
 #
 # 数はこのファイルが正本で（由来は README の「設計の要点」）、
-# 型 8 つ・関係 8 種（辺は 11 本）・制約 11 つに 1 対 1 で対応する。
+# 型 8 つ・関係 8 種（辺は 11 本）・制約 12 つに 1 対 1 で対応する。
 # 資源 accord://ontology はこのファイルの中身を返す。
+#
+# 指される側の 5 つの型（職歴の枠・受託案件・公開記録・機能・パッケージ）は、欄 id を持つ。
+# 正本どうしの結びはこの id で書き、見出しや名前は人が読む表示名として残る。
+# 見出しを書き換えても参照が切れないこと、区切りを間違えた値を機械が断定できることが、
+# 文字列の写しではなく id で結ぶ理由である。
 
 version: 1
 
@@ -40,7 +45,7 @@ types:
         label: 前面に出す束
         type: text
         required: true
-        description: 看板にするパッケージの名前。パッケージ定義に実在する名前に限る。
+        description: 看板にするパッケージの ID。パッケージ定義に実在する ID に限る。
       - name: rationale
         label: 根拠
         type: text
@@ -57,11 +62,16 @@ types:
     description: 機能を束ねて誰に売るかを定めた売り物の単位。
     source: packages
     fields:
+      - name: id
+        label: ID
+        type: text
+        required: true
+        description: このパッケージを指すときに使う識別子。英小文字・数字・ハイフンで 3〜40 字、先頭と末尾は英数字、正本全体で重ならない値にする。
       - name: name
         label: パッケージ名
         type: text
         required: true
-        description: 決めと提示物が名前で指す先。
+        description: 人が読む表示名。決めと提示物が指すときは名前ではなく ID を使う。
       - name: buyer
         label: 想定買い手
         type: text
@@ -76,7 +86,7 @@ types:
         label: 束ねる機能
         type: text_list
         required: true
-        description: 束ねる機能の名前。機能の台帳にある名前に限る。複数あるときは半角のスラッシュ「/」で区切る。
+        description: 束ねる機能の ID。機能の台帳にある ID に限る。複数あるときは半角のスラッシュ「/」で区切る（例「id-a / id-b」）。ID にスラッシュは入らないので、区切りと値を取り違えない。
       - name: updated_on
         label: 最終更新
         type: date
@@ -103,11 +113,16 @@ types:
     description: 提供できる仕事 1 つ。裏づけの節を持つ。
     source: capabilities
     fields:
+      - name: id
+        label: ID
+        type: text
+        required: true
+        description: この機能を指すときに使う識別子。英小文字・数字・ハイフンで 3〜40 字、先頭と末尾は英数字、正本全体で重ならない値にする。台帳の表では 1 列目に置く。
       - name: name
         label: 機能名
         type: text
         required: true
-        description: パッケージが束ねるときに指す名前。
+        description: 人が読む表示名。パッケージが束ねるときは名前ではなく ID を使う。
       - name: description
         label: 説明
         type: text
@@ -122,18 +137,23 @@ types:
         label: 裏づけの節
         type: text_list
         required: true
-        description: 職歴の枠か受託案件の見出し。1 つ以上。複数あるときは半角のスラッシュ「/」で区切る（例「見出し A / 見出し B」）。ほかの記号でつなぐと、つないだ全体が 1 つの見出しとして読まれ、実在しないと判定される。実在する見出しに限る。
+        description: 職歴の枠か受託案件か公開記録の ID。1 つ以上。複数あるときは半角のスラッシュ「/」で区切る（例「id-a / id-b」）。ほかの記号でつなぐと、つないだ全体が 1 つの値として読まれ、ID の形式に合わないと判定される。実在する ID に限る。
 
   - name: CareerFrame
     label: 職歴の枠
     description: 会社 1 社ぶん、またはフリーランス 1 期ぶんの職歴。
     source: career
     fields:
+      - name: id
+        label: ID
+        type: text
+        required: true
+        description: この枠を指すときに使う識別子。英小文字・数字・ハイフンで 3〜40 字、先頭と末尾は英数字、正本全体で重ならない値にする。
       - name: heading
         label: 見出し
         type: text
         required: true
-        description: 節の見出し。裏づけの節と出典の節はこの文字列で指す。
+        description: 節の見出し。人が読む表示名で、指すときは見出しではなく ID を使う（見出しは自由に書き換えてよい）。
       - name: period
         label: 期間
         type: text
@@ -174,11 +194,16 @@ types:
     description: クライアント 1 社ぶんの仕事、または横断のトピック。
     source: engagements
     fields:
+      - name: id
+        label: ID
+        type: text
+        required: true
+        description: この案件を指すときに使う識別子。英小文字・数字・ハイフンで 3〜40 字、先頭と末尾は英数字、正本全体で重ならない値にする。
       - name: heading
         label: 見出し
         type: text
         required: true
-        description: 節の見出し。裏づけの節と出典の節はこの文字列で指す。
+        description: 節の見出し。人が読む表示名で、指すときは見出しではなく ID を使う（見出しは自由に書き換えてよい）。
       - name: industry
         label: 業種
         type: text
@@ -219,11 +244,16 @@ types:
     description: 外から確かめられる公開の成果物 1 件。リポジトリ・登壇・記事・書籍・第三者の掲載など。1 件 1 ブロックで積む。
     source: public_records
     fields:
+      - name: id
+        label: ID
+        type: text
+        required: true
+        description: この 1 件を指すときに使う識別子。英小文字・数字・ハイフンで 3〜40 字、先頭と末尾は英数字、正本全体で重ならない値にする。
       - name: name
         label: 名前
         type: text
         required: true
-        description: この 1 件を言い表す名前。機能の裏づけの節は、この文字列で指す。
+        description: この 1 件を言い表す、人が読む表示名。機能の裏づけが指すときは名前ではなく ID を使う。
       - name: kind
         label: 種類
         type: text
@@ -253,7 +283,7 @@ types:
         label: 由来の節
         type: text
         required: false
-        description: 職歴の枠か受託案件の見出し。無ければ空でよい。
+        description: 職歴の枠か受託案件の ID。無ければ空でよい。
       - name: source
         label: 出所
         type: text
@@ -279,12 +309,12 @@ types:
         label: 宣言する束
         type: text
         required: true
-        description: この文面が名乗っているパッケージの名前。
+        description: この文面が名乗っているパッケージの ID。
       - name: pending_notes
         label: 未反映の注記
         type: text_list
         required: false
-        description: まだ正本に反映していない事実の覚え書き。「節の見出し — 覚え書き」の形で書き、区切りより前がその事実の入る先の節になる。指す節が実在することを検査する。
+        description: まだ正本に反映していない事実の覚え書き。「受託案件の ID — 覚え書き」の形で書き、区切りより前がその事実の入る先の節の ID になる。指す ID が実在することを検査する。
       - name: created_on
         label: 作成日
         type: date
@@ -332,7 +362,7 @@ types:
         label: 出典の節
         type: text
         required: true
-        description: 写し元の節の見出し（受託案件）。実在と公開可否を検査する。
+        description: 写し元の節の ID（受託案件）。実在と公開可否を検査する。
       - name: fold_line
         label: 畳み行
         type: text
@@ -391,7 +421,7 @@ relations:
     cardinality: 台帳の案件 1 件につき節 1 つ
     description: 台帳の案件が、どの受託案件の節から写したかを指す。
 
-# ---------------------------------------------------------------- 制約（11）
+# ---------------------------------------------------------------- 制約（12）
 #
 # appears_as は、この制約がどの顔で現れるか。
 #   拒否  書きの操作が入力を受け付けず、代わりの手を返す
@@ -418,26 +448,32 @@ constraints:
     appears_as: 検出
     next_action: 提示物のファイル名と、いまの看板のパッケージ名を返す。
 
+  - name: ID の形式と一意性
+    watches: 指される側の 5 つの型（職歴の枠・受託案件・公開記録・機能・パッケージ）の ID が、英小文字・数字・ハイフンで 3〜40 字・先頭と末尾は英数字の形に合い、正本全体で重ならないか。
+    enforced_by: [check_consistency, register_capability, revise_package, register_public_record]
+    appears_as: 拒否
+    next_action: 形式に合わない ID は直し方を、重なった ID は同じ ID を持つ場所を両方返す。
+
   - name: 裏づけ節名の実在
-    watches: 機能の裏づけの節名が、職歴の枠か受託案件の見出しか、公開記録の名前として実在するか。
+    watches: 機能の裏づけに書いた ID が、職歴の枠・受託案件・公開記録の ID として実在するか。
     enforced_by: [register_capability, check_consistency]
     appears_as: 拒否
-    next_action: 実在する見出しのうち、近いものを候補として返す。
+    next_action: 実在する ID のうち近いものを候補として返し、文に表示名を添える。
 
   - name: 束ねる機能名の一致
-    watches: パッケージが束ねる機能名が、機能の台帳にあるか。
+    watches: パッケージが束ねる機能の ID が、機能の台帳にあるか。
     enforced_by: [revise_package, check_consistency]
     appears_as: 拒否
-    next_action: 近い機能名の候補と、先に register_capability を呼ぶことを返す。
+    next_action: 近い機能の ID の候補と、先に register_capability を呼ぶことを返す。
 
   - name: 注記と出典の節の実在・公開可否
-    watches: 提示物の未反映の注記が指す節と、職務経歴書の台帳の出典の節が実在し、公開可の節に限るか。
+    watches: 提示物の未反映の注記が指す ID と、職務経歴書の台帳の出典の節の ID が実在し、公開可の節に限るか。
     enforced_by: [check_consistency, assemble_material]
     appears_as: 検出
-    next_action: 実在する節の候補を返す。公開不可の節は材料から落とし、落とした節の名前を警告に書く。
+    next_action: 実在する節の ID の候補を返す。公開不可の節は材料から落とし、落とした節の名前を警告に書く。
 
   - name: 公開記録の必須欄
-    watches: 公開記録に、名前・種類・日付・発行元か主催・役割の 5 欄が揃っているか。
+    watches: 公開記録に、ID・名前・種類・日付・発行元か主催・役割の 6 欄が揃っているか。
     enforced_by: [register_public_record]
     appears_as: 拒否
     next_action: 欠けた欄の名前と、その欄の書き方の例を返す。
@@ -449,10 +485,10 @@ constraints:
     next_action: 設定が持つ語の一覧を返す。
 
   - name: 由来の節の実在
-    watches: 公開記録の由来の節が、職歴の枠か受託案件の見出しとして実在するか。
+    watches: 公開記録の由来の節に書いた ID が、職歴の枠か受託案件の ID として実在するか。
     enforced_by: [register_public_record, check_consistency]
     appears_as: 拒否
-    next_action: 実在する見出しのうち、近いものを候補として返す。
+    next_action: 実在する ID のうち近いものを候補として返し、文に表示名を添える。
 
   - name: 提示物の URL と公開記録の一致
     watches: 提示物の本文に貼った URL が、正本の公開記録の URL にあるか。経路の書き方だけが違うものも見る。

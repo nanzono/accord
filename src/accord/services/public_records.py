@@ -13,12 +13,16 @@ from __future__ import annotations
 from accord.models.constraints import CONSTRAINTS
 from accord.models.ontology import field_example, missing_required_fields
 from accord.models.results import (
+    ID_FORMAT_TEXT,
     NextAction,
     PublicRecordDraft,
     Rejection,
     SourceSnapshot,
     WriteResult,
+    candidate_text,
     close_names,
+    id_rejection,
+    is_id,
 )
 from accord.models.types import PublicRecord
 from accord.repository.markdown_repository import EMPTY_WORDS, MarkdownRepository
@@ -34,8 +38,9 @@ CONSTRAINT_BY_NAME = {constraint.name: constraint for constraint in CONSTRAINTS}
 PUBLIC_RECORD_REQUIRED_FIELDS = CONSTRAINT_BY_NAME["公開記録の必須欄"].name
 PUBLIC_RECORD_VOCABULARY = CONSTRAINT_BY_NAME["公開記録の種類と役割の語彙"].name
 ORIGIN_SECTION_EXISTS = CONSTRAINT_BY_NAME["由来の節の実在"].name
+ID_FORMAT_AND_UNIQUENESS = CONSTRAINT_BY_NAME["ID の形式と一意性"].name
 
-# 次の 1 つは制約 11 つではなく、設定に置き場が書かれているかどうかである。
+# 次の 1 つは制約 12 つではなく、設定に置き場が書かれているかどうかである。
 # 公開記録の置き場は書かなくてよい鍵なので、書いていない正本では登記そのものが成り立たない。
 PUBLIC_RECORDS_FILE_SETTING = "公開記録の置き場の設定"
 
@@ -60,6 +65,7 @@ class PublicRecordService:
             return WriteResult(accepted=False, rejection=rejection)
 
         record = PublicRecord(
+            id=str(draft.id).strip(),
             name=str(draft.name),
             kind=str(draft.kind),
             published_on=str(draft.published_on),
@@ -78,8 +84,8 @@ class PublicRecordService:
     def _rejection(self, draft: PublicRecordDraft) -> Rejection | None:
         """入力を制約に当てる。通れば None を返し、通らなければ次の一手つきの拒否を返す。
 
-        見る順は、置き場が設定にあるか、必須の欄、種類の語彙、役割の語彙、由来の節の実在である。
-        1 つ目に当たった時点で返すので、正本は 1 バイトも変わらない。
+        見る順は、置き場が設定にあるか、必須の欄、ID の形式と一意性、種類の語彙、役割の語彙、
+        由来の節の実在である。1 つ目に当たった時点で返すので、正本は 1 バイトも変わらない。
         """
         if not self.settings.has_file(PUBLIC_RECORDS_KEY):
             return self._missing_file_rejection()
@@ -101,11 +107,18 @@ class PublicRecordService:
                 ),
             )
 
+        snapshot: SourceSnapshot = self.repository.load()
+        id_problem = id_rejection(
+            ID_FORMAT_AND_UNIQUENESS, REGISTER_OPERATION, str(draft.id or ""), snapshot.labels()
+        )
+        if id_problem is not None:
+            return id_problem
+
         vocabulary = self._vocabulary_rejection(draft)
         if vocabulary is not None:
             return vocabulary
 
-        return self._origin_section_rejection(draft)
+        return self._origin_section_rejection(draft, snapshot)
 
     def _missing_file_rejection(self) -> Rejection:
         """公開記録の置き場が設定に無いときの拒否。足す鍵 3 つを名前で返す。"""
@@ -152,23 +165,32 @@ class PublicRecordService:
             )
         return None
 
-    def _origin_section_rejection(self, draft: PublicRecordDraft) -> Rejection | None:
-        """由来の節が、職歴の枠か受託案件の見出しとして実在するかを見る。空なら見ない。"""
+    def _origin_section_rejection(
+        self, draft: PublicRecordDraft, snapshot: SourceSnapshot
+    ) -> Rejection | None:
+        """由来の節の ID が、職歴の枠か受託案件の ID として実在するかを見る。空なら見ない。"""
         origin = _value(draft.origin_section)
         if origin is None:
             return None
 
-        snapshot: SourceSnapshot = self.repository.load()
         headings = snapshot.section_headings()
         if origin in headings:
             return None
 
+        trouble = (
+            f"由来の節「{origin}」は ID の形に合わない（{ID_FORMAT_TEXT}）。"
+            "見出しをそのまま渡しているなら、その節の ID に置き換える。"
+            if not is_id(origin)
+            else f"由来の節「{origin}」は、職歴の枠にも受託案件にも無い ID である。"
+        )
+        labels = snapshot.labels()
+        candidates = close_names(origin, headings, labels)
         return Rejection(
             constraint=ORIGIN_SECTION_EXISTS,
-            reason=f"由来の節「{origin}」は、職歴の枠にも受託案件にも無い見出しである。",
+            reason=trouble + candidate_text(candidates, labels),
             next_action=NextAction(
                 operation=REGISTER_OPERATION,
-                candidates=close_names(origin, headings),
+                candidates=candidates,
                 example=(
                     f"上の候補をそのまま由来の節に渡して、もう一度 {REGISTER_OPERATION} を呼ぶ。"
                     "元になった仕事が正本に無いなら、由来の節は空のままでよい。"

@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import difflib
+import re
 from datetime import date
 from typing import Any
 
@@ -30,20 +31,91 @@ from accord.models.types import (
 # 語の一致ではなく書き出しで見る。この 1 か所を、検査も材料の取り出しも読む。
 PRIVATE_DISCLOSURE_PREFIX = "公開不可"
 
+# 正本どうしの結びに使う ID の形。英小文字・数字・ハイフンで 3〜40 字、先頭と末尾は英数字。
+# 形を決めるのはこの 1 か所で、検査も書きの操作も候補の出し方も、ここを読む。
+ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$")
+
+# ID の形を人に伝えるときの 1 行。違反の文にも拒否の文にも、同じ言い方で載せる。
+ID_FORMAT_TEXT = "英小文字・数字・ハイフンで 3〜40 字、先頭と末尾は英数字"
+
+# 候補の並びを文に載せるときの書き出し。この語で、文が候補を挙げ済みかどうかも見分ける。
+CANDIDATE_PREFIX = "候補: "
+
+
+def is_id(value: str) -> bool:
+    """その文字列が ID の形に合っているか。"""
+    return bool(ID_PATTERN.match(value.strip()))
+
+
+def labelled(identifier: str, labels: dict[str, str] | None = None) -> str:
+    """ID 1 つを「ID（表示名）」の 1 つの文字列にする。表示名が引けなければ ID だけを返す。
+
+    人が読む文に ID だけを出すと、受け取った側は「どの節のことか」を正本を開いて確かめる
+    羽目になる。だから文の中では表示名を添える。候補の欄そのものは ID だけで持つ（そのまま
+    渡し直せば通る値に限る、という決めのため）ので、この関数を通すのは文を組むときだけである。
+    """
+    label = (labels or {}).get(identifier, "")
+    if not label or label == identifier:
+        return identifier
+    return f"{identifier}（{label}）"
+
+
+def candidate_text(candidates: list[str], labels: dict[str, str] | None = None) -> str:
+    """候補の ID の並びを「候補: id（表示名） / …」の 1 つの文にする。候補が無ければ空文字。
+
+    候補の欄は ID だけを持つので、そのままでは読む人にどの節のことか伝わらない。文の側で
+    表示名を添える場所をここ 1 か所に集め、検査の違反も書きの操作の拒否も同じ文を使う。
+    """
+    if not candidates:
+        return ""
+    return CANDIDATE_PREFIX + " / ".join(labelled(item, labels) for item in candidates)
+
+
 # 近い名前を探すときの緩さ。近いものが 1 つも出ないときは、実在する名前をそのまま並べる。
 CLOSE_MATCH_CUTOFF = 0.3
 CLOSE_MATCH_COUNT = 3
 FALLBACK_COUNT = 5
 
 
-def close_names(wanted: str, pool: list[str]) -> list[str]:
-    """実在する名前のうち、渡された名前に近いものを返す。近いものが無ければ先頭から並べる。
+def close_names(
+    wanted: str, pool: list[str], labels: dict[str, str] | None = None
+) -> list[str]:
+    """実在する値のうち、渡された値に近いものを返す。近いものが無ければ先頭から並べる。
 
-    候補は「そのまま渡し直せば通る名前」に限る、という決めなので、探す先は必ず実在する名前の
-    一覧である。拒否も検査も同じ候補の出し方をするように、この 1 か所を全員が呼ぶ。
+    探す先は必ず実在する値の一覧である。拒否も検査も同じ候補の出し方をするように、
+    この 1 か所を全員が呼ぶ。
+
+    labels を渡すと、pool は ID の一覧として扱う。返すのは ID だけで（そのまま渡し直せば
+    通る値に限るため）、表示名は文の側に candidate_text が添える。
+    近さの照合は、渡された値が ID の形なら ID どうしで、そうでなければ表示名どうしで行う。
+    見出しを書いた人には ID の綴りの近さが効かず、ID を書き間違えた人には表示名の近さが
+    効かないので、渡された値の形で照合の相手を選び分ける。
     """
-    close = difflib.get_close_matches(wanted, pool, n=CLOSE_MATCH_COUNT, cutoff=CLOSE_MATCH_CUTOFF)
-    return close or pool[:FALLBACK_COUNT]
+    if labels is None:
+        close = difflib.get_close_matches(
+            wanted, pool, n=CLOSE_MATCH_COUNT, cutoff=CLOSE_MATCH_CUTOFF
+        )
+        return close or pool[:FALLBACK_COUNT]
+
+    if is_id(wanted):
+        found = difflib.get_close_matches(
+            wanted, pool, n=CLOSE_MATCH_COUNT, cutoff=CLOSE_MATCH_CUTOFF
+        )
+    else:
+        # 表示名で照合し、当たった表示名を ID に戻す。同じ表示名が 2 つの ID に付くことは
+        # 無い前提を置かず、正本の並びの順で最初に見つかったものを返す。
+        names = [labels.get(identifier, identifier) for identifier in pool]
+        close = difflib.get_close_matches(
+            wanted, names, n=CLOSE_MATCH_COUNT, cutoff=CLOSE_MATCH_CUTOFF
+        )
+        found = []
+        for name in close:
+            for identifier in pool:
+                if labels.get(identifier, identifier) == name and identifier not in found:
+                    found.append(identifier)
+                    break
+
+    return list(found or pool[:FALLBACK_COUNT])
 
 
 def fold_names(names: list[str], keep: int = 5) -> str:
@@ -136,6 +208,49 @@ class Rejection(BaseModel):
     next_action: NextAction = Field(description="次に何をすべきか")
 
 
+def id_rejection(
+    constraint: str, operation: str, identifier: str, taken: dict[str, str]
+) -> Rejection | None:
+    """書きの操作が受け取った ID を、形式と一意性に当てる。通れば None を返す。
+
+    ID を持つ項目を書く操作は 3 つあり、どれも同じ形と同じ一意性を見る。判定を 3 か所に書くと、
+    片方だけを直したときに、書きで通った ID が検査で違反になる。だからこの 1 か所に集める。
+    taken は、すでに使われている ID と、その ID を持つ項目の表示名の対応である。
+    """
+    value = (identifier or "").strip()
+    if not is_id(value):
+        examples = list(taken)[:FALLBACK_COUNT]
+        return Rejection(
+            constraint=constraint,
+            reason=(
+                f"ID「{value}」は形に合わない（{ID_FORMAT_TEXT}）。"
+                "正本にすでにある ID を例にすると "
+                + " / ".join(labelled(name, taken) for name in examples)
+                + "。"
+            ),
+            next_action=NextAction(
+                operation=operation,
+                candidates=examples,
+                example="ID は「teramina-delivery」のように、意味の分かる短い語をハイフンでつなぐ。",
+            ),
+        )
+
+    if value in taken:
+        return Rejection(
+            constraint=constraint,
+            reason=(
+                f"ID「{value}」は、すでに「{taken[value]}」が使っている。"
+                "ID は正本全体で 1 つの項目にしか付けられない。"
+            ),
+            next_action=NextAction(
+                operation=operation,
+                candidates=[],
+                example="まだどの項目も使っていない ID を渡して呼び直す。",
+            ),
+        )
+    return None
+
+
 class WriteResult(BaseModel):
     """書きの操作の返り値。受け付けたときも拒否したときも、この型で返る。"""
 
@@ -166,10 +281,12 @@ class Violation(BaseModel):
         違反を型のまま持たない返り値（材料の警告、登記のあとの報告）が、この 1 行を使う。
         候補まで載せるのは、文だけを読む側に「下の候補」の実体が届かないと、
         直し先を探しに正本を開く羽目になるからである。
+        文がもう候補を挙げているとき（ID で結ぶ検査は、表示名を添えた候補の文を expected に
+        持つ）は重ねない。同じ並びが 2 度出ると、どちらが正しいのか読む側が決められなくなる。
         """
         text = f"{self.constraint}: {self.file} の{self.location} — {self.expected}"
-        if self.candidates:
-            text += "候補: " + " / ".join(self.candidates)
+        if self.candidates and CANDIDATE_PREFIX not in self.expected:
+            text += candidate_text(self.candidates)
         return text
 
 
@@ -193,6 +310,7 @@ class PositioningDraft(BaseModel):
 class CapabilityDraft(BaseModel):
     """機能を登記する操作の入力。"""
 
+    id: str = ""
     name: str
     description: str
     category: str
@@ -202,6 +320,7 @@ class CapabilityDraft(BaseModel):
 class PublicRecordDraft(BaseModel):
     """公開記録を登記する操作の入力。欠けた欄を見つけるため、どの欄も空を許して受ける。"""
 
+    id: str | None = None
     name: str | None = None
     kind: str | None = None
     published_on: str | None = None
@@ -215,6 +334,7 @@ class PublicRecordDraft(BaseModel):
 class PackageDraft(BaseModel):
     """パッケージを改訂する操作の入力。"""
 
+    id: str = ""
     name: str
     capabilities: list[str] = Field(default_factory=list)
     buyer: str = ""
@@ -247,7 +367,8 @@ class Material(BaseModel):
     package: Package | None = Field(default=None, description="看板のパッケージ")
     capabilities: list[Capability] = Field(default_factory=list, description="束ねる機能")
     evidence: list[dict[str, str]] = Field(
-        default_factory=list, description="各機能の裏づけの節（公開可のものだけ。見出しと本文）"
+        default_factory=list,
+        description="各機能の裏づけの節（公開可のものだけ。表示名・ID・公開可否・本文）",
     )
     public_records: list[PublicRecord] = Field(
         default_factory=list, description="束ねる機能の裏づけになっている公開記録"
@@ -304,6 +425,10 @@ class SourceDefect(BaseModel):
     heading: str = Field(
         default="", description="そのブロックの見出し。ファイル 1 枚を丸ごと読む提示物では空"
     )
+    id: str = Field(
+        default="",
+        description="そのブロックの ID。ID の行そのものが欠けているブロックと、提示物では空",
+    )
 
 
 class SkippedHeading(BaseModel):
@@ -316,6 +441,9 @@ class SkippedHeading(BaseModel):
 
     source_key: str = Field(description="どの正本の読み方で外れたか（career / engagements）")
     heading: str = Field(description="外れた見出しの文字列")
+    id: str = Field(
+        default="", description="外れた節の ID。ID の行を持たない節では空"
+    )
     level: int = Field(description="見出しの深さ")
     parents: list[str] = Field(default_factory=list, description="その見出しの上にある見出し（浅い順）")
     reason: str = Field(description="どの絞りに当たって外れたか")
@@ -343,33 +471,56 @@ class SourceSnapshot(BaseModel):
     )
 
     def section_headings(self) -> list[str]:
-        """由来の節と出典の節が指せる見出しを、職歴の枠と受託案件から集める。"""
-        return [frame.heading for frame in self.career_frames] + [
-            engagement.heading for engagement in self.engagements
+        """由来の節と出典の節が指せる ID を、職歴の枠と受託案件から集める。"""
+        return [frame.id for frame in self.career_frames] + [
+            engagement.id for engagement in self.engagements
         ]
 
     def evidence_targets(self) -> list[str]:
-        """裏づけの節が指せる名前。職歴の枠・受託案件の見出しに、公開記録の名前を足したもの。
+        """裏づけが指せる ID。職歴の枠・受託案件の ID に、公開記録の ID を足したもの。
 
-        並びは職歴の枠・受託案件・公開記録の順にする。同じ名前が重なったとき、先に見つかるのが
-        職歴の枠と受託案件になるようにするためである（本文を引く evidence_bodies と同じ流儀）。
+        並びは職歴の枠・受託案件・公開記録の順にする。ID は正本全体で一意なので、この並びで
+        勝ち負けが決まることは無く、並びは候補を出すときの見え方だけを決める。
         """
-        return self.section_headings() + [record.name for record in self.public_records]
+        return self.section_headings() + [record.id for record in self.public_records]
 
-    def disclosure_of(self, heading: str) -> str | None:
-        """見出しに対応する節の公開可否を返す。見出しが無ければ None。"""
+    def labels(self) -> dict[str, str]:
+        """ID から人が読む表示名を引く対応表。指される側の 5 つの型を全部入れる。
+
+        違反の文も候補も、ID だけでは読んだ人にどの節のことか伝わらない。ID を表示名に
+        戻す場所をこの 1 か所に集める。
+        """
+        found: dict[str, str] = {}
         for frame in self.career_frames:
-            if frame.heading == heading:
+            found.setdefault(frame.id, frame.heading)
+        for engagement in self.engagements:
+            found.setdefault(engagement.id, engagement.heading)
+        for record in self.public_records:
+            found.setdefault(record.id, record.name)
+        for capability in self.capabilities:
+            found.setdefault(capability.id, capability.name)
+        for package in self.packages:
+            found.setdefault(package.id, package.name)
+        return found
+
+    def label_of(self, identifier: str) -> str:
+        """ID 1 つの表示名を返す。引けなければ ID をそのまま返す。"""
+        return self.labels().get(identifier, identifier)
+
+    def disclosure_of(self, section_id: str) -> str | None:
+        """ID に対応する節の公開可否を返す。ID が無ければ None。"""
+        for frame in self.career_frames:
+            if frame.id == section_id:
                 return frame.disclosure
         for engagement in self.engagements:
-            if engagement.heading == heading:
+            if engagement.id == section_id:
                 return engagement.disclosure
         return None
 
-    def is_private(self, heading: str) -> bool:
-        """その見出しの節が公開不可か。
+    def is_private(self, section_id: str) -> bool:
+        """その ID の節が公開不可か。
 
-        見出しが実在しないときは False を返す。実在しないことは、公開可否とは別の制約で見るからである。
+        ID が実在しないときは False を返す。実在しないことは、公開可否とは別の制約で見るからである。
         """
-        disclosure = self.disclosure_of(heading)
+        disclosure = self.disclosure_of(section_id)
         return disclosure is not None and disclosure.startswith(PRIVATE_DISCLOSURE_PREFIX)

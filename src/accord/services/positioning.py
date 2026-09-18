@@ -27,8 +27,10 @@ from accord.models.results import (
     SourceSnapshot,
     Violation,
     WriteResult,
+    candidate_text,
     close_names,
     fold_names,
+    labelled,
 )
 from accord.models.types import Positioning
 from accord.repository.markdown_repository import (
@@ -55,8 +57,8 @@ POSITIONING_REQUIRED_FIELDS = CONSTRAINT_BY_NAME["決めの必須欄"].name
 PACKAGE_FRESHNESS = CONSTRAINT_BY_NAME["パッケージ定義の鮮度"].name
 OFFERING_CLAIM_MATCHES = CONSTRAINT_BY_NAME["提示物の宣言と看板の一致"].name
 
-# 次の 2 つは制約 7 つではなく、型 Positioning の欄の定義である（適用範囲は媒体の名前か「全体」、
-# 前面に出す束はパッケージ定義に実在する名前に限る）。選べる媒体の名前は設定が持つ。
+# 次の 2 つは制約 12 つではなく、型 Positioning の欄の定義である（適用範囲は媒体の名前か「全体」、
+# 前面に出す束はパッケージ定義に実在する ID に限る）。選べる媒体の名前は設定が持つ。
 POSITIONING_SCOPE_ENUM = "適用範囲の列挙"
 HEADLINE_PACKAGE_EXISTS = "前面に出す束の実在"
 
@@ -221,14 +223,17 @@ class PositioningService:
             )
 
         package = next(
-            (item for item in snapshot.packages if item.name == positioning.headline_package),
+            (item for item in snapshot.packages if item.id == positioning.headline_package),
             None,
         )
         if package is None:
+            listed = " / ".join(
+                labelled(item.id, {item.id: item.name}) for item in snapshot.packages
+            )
             warnings.append(
-                f"決めが前面に出す束「{positioning.headline_package}」が、パッケージ定義に無い。"
-                f"実在する束: {' / '.join(item.name for item in snapshot.packages)}。"
-                f"束の名前を直して {RECORD_OPERATION} で決めを登記し直す。"
+                f"決めが前面に出す束「{positioning.headline_package}」が、"
+                f"パッケージ定義に無い ID である。実在する束: {listed}。"
+                f"束の ID を直して {RECORD_OPERATION} で決めを登記し直す。"
             )
 
         return PositioningView(positioning=positioning, package=package, warnings=warnings)
@@ -318,16 +323,19 @@ class PositioningService:
                 ),
             )
 
-        names = [item.name for item in snapshot.packages]
+        names = [item.id for item in snapshot.packages]
         if draft.headline_package not in names:
+            labels = snapshot.labels()
+            candidates = close_names(str(draft.headline_package), names, labels)
             return Rejection(
                 constraint=HEADLINE_PACKAGE_EXISTS,
                 reason=(
-                    f"前面に出す束「{draft.headline_package}」は、パッケージ定義に無い名前である。"
+                    f"前面に出す束「{draft.headline_package}」は、パッケージ定義に無い ID である。"
+                    + candidate_text(candidates, labels)
                 ),
                 next_action=NextAction(
                     operation=RECORD_OPERATION,
-                    candidates=close_names(str(draft.headline_package), names),
+                    candidates=candidates,
                     example=(
                         "上の候補をそのまま前面に出す束に渡して、"
                         f"もう一度 {RECORD_OPERATION} を呼ぶ。"

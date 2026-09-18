@@ -3,7 +3,7 @@
 # tsukikusa のプロフィール
 
 - 宛先の媒体: tsukikusa
-- 宣言する束: 要件定義と進行管理
+- 宣言する束: requirements-and-progress
 - 作成日: 2026-09-12
 - 未反映の注記: なし
 

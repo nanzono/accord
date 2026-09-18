@@ -257,7 +257,7 @@ def test_type_table_lists_every_label() -> None:
 
 
 def test_rule_table_lists_every_constraint_with_appears_as() -> None:
-    """ルールの表に、11 つの制約名それぞれを 1 列目に持つ行があり、その行に appears_as の語が含まれる。"""
+    """ルールの表に、12 の制約名それぞれを 1 列目に持つ行があり、その行に appears_as の語が含まれる。"""
     ontology = load_ontology()
     diffs = diff_rule_table(_real_readme_text(), ontology)
     assert not diffs, "\n".join(diffs)

@@ -13,9 +13,10 @@ from accord.models.results import MaterialRequest
 from accord.services.material import MaterialService
 from conftest import source_digest
 
+# 決めも提示物もパッケージを ID で指すので、ID と見出し（表示名）の両方を持つ。
 CHANNEL = "tsukikusa"
-HEADLINE_PACKAGE = "要件定義と進行管理"
-OTHER_PACKAGE = "データの置き場づくり"
+HEADLINE_PACKAGE = "requirements-and-progress"
+OTHER_PACKAGE = "data-platform-setup"
 
 # 公開不可にする受託案件と、その節の本文にしか出てこない言い回し。
 PRIVATE_SECTION = "ナギサ書房 刊行計画の進行管理"
@@ -59,14 +60,17 @@ def test_assemble_material_returns_the_headline_bundle_and_its_evidence(settings
     assert material.channel == CHANNEL
     assert material.positioning is not None
     assert material.package is not None
-    assert material.package.name == HEADLINE_PACKAGE
-    # 束ねる機能が、パッケージ定義の並びで揃っている。
-    assert [item.name for item in material.capabilities] == list(material.package.capabilities)
-    # 裏づけの節が、見出しと本文で入っている。
+    assert material.package.id == HEADLINE_PACKAGE
+    # 束ねる機能が、パッケージ定義の並び（ID の並び）で揃っている。
+    assert [item.id for item in material.capabilities] == list(material.package.capabilities)
+    # 裏づけの節が、表示名と ID と本文で入っている。
     assert material.evidence
     for entry in material.evidence:
         assert entry["見出し"]
+        assert entry["ID"]
         assert entry["本文"]
+        # 見出しは人が読む表示名で、ID とは別物である。
+        assert entry["見出し"] != entry["ID"]
     # 読みの操作なので、正本は 1 バイトも変わらない。
     assert source_digest(settings.source_dir) == before
 
@@ -107,8 +111,8 @@ def test_assemble_material_accepts_a_package_name_that_exists(settings) -> None:
     material = _material(settings, package=OTHER_PACKAGE)
 
     assert material.package is not None
-    assert material.package.name == OTHER_PACKAGE
-    assert [item.name for item in material.capabilities] == list(material.package.capabilities)
+    assert material.package.id == OTHER_PACKAGE
+    assert [item.id for item in material.capabilities] == list(material.package.capabilities)
 
 
 def test_assemble_material_says_to_record_the_positioning_first(settings) -> None:
@@ -195,6 +199,7 @@ UNUSED_RECORD_NAME = "配送の置き場づくりを書いた個人の記事"
 UNUSED_RECORD = f"""
 ## {UNUSED_RECORD_NAME}
 
+- ID: warehouse-note-article
 - 種類: 記事
 - 日付: 2023-06
 - URL: https://example.com/notes/warehouse
@@ -223,7 +228,7 @@ def test_material_carries_the_public_records_behind_the_headline_capabilities(se
     behind = {
         name for capability in material.capabilities for name in capability.evidence_sections
     }
-    assert all(record.name in behind for record in material.public_records)
+    assert all(record.id in behind for record in material.public_records)
     # 公開記録は節ではないので、裏づけの節の一覧には混ざらない。
     assert CARRIED_RECORD not in [entry["見出し"] for entry in material.evidence]
     # 媒体の規約も同じ返り値に載っているので、どの欄に入れるかをここだけで決められる。

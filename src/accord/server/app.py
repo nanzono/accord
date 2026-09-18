@@ -84,7 +84,11 @@ def create_server(settings: Settings) -> MCPServer:
         package: str | None = None,
         opportunity: str | None = None,
     ) -> Material:
-        """媒体向けの文面を書くための材料を取り出す。公開不可の節は落として警告に書く。"""
+        """媒体向けの文面を書くための材料を取り出す。公開不可の節は落として警告に書く。
+
+        package を渡すときは、パッケージ定義に実在する ID（パッケージ名ではない）を渡す。
+        返る裏づけには、人が読む見出しと ID の両方が入る。
+        """
         return material_service.assemble(
             MaterialRequest(channel=channel, package=package, opportunity=opportunity)
         )
@@ -99,8 +103,9 @@ def create_server(settings: Settings) -> MCPServer:
     ) -> WriteResult:
         """売り方の決めを 1 ブロック登記する。必須の欄が欠けていれば書かずに拒否する。
 
-        日付は `2026-09-16` の形で渡す。登記が通ると、その場でパッケージ定義の鮮度と、
-        旧い束を宣言する提示物の件数（ファイル名つき）が返る。
+        日付は `2026-09-16` の形で渡す。headline_package は、パッケージ定義に実在する ID
+        （英小文字・数字・ハイフン）で、パッケージ名ではない。登記が通ると、その場で
+        パッケージ定義の鮮度と、旧い束を宣言する提示物の件数（ファイル名つき）が返る。
         """
         return positioning_service.record(
             PositioningDraft(
@@ -114,14 +119,21 @@ def create_server(settings: Settings) -> MCPServer:
 
     @mcp.tool()
     def register_capability(
+        id: str,
         name: str,
         description: str,
         category: str,
         evidence_sections: list[str],
     ) -> WriteResult:
-        """機能の台帳に 1 行足す。必須欄・分類・裏づけの節が通らなければ書かずに拒否し、次の一手を返す。"""
+        """機能の台帳に 1 行足す。必須欄・分類・ID・裏づけが通らなければ書かずに拒否し、次の一手を返す。
+
+        id は人が振る短い識別子（英小文字・数字・ハイフンで 3〜40 字、正本全体で重ならない値）。
+        evidence_sections には、職歴の枠・受託案件・公開記録の ID を渡す（見出しや名前ではない）。
+        拒否のときに返る候補はそのまま渡し直せる ID で、どの節のことかは拒否の文が表示名で添える。
+        """
         return offering_service.register_capability(
             CapabilityDraft(
+                id=id,
                 name=name,
                 description=description,
                 category=category,
@@ -131,6 +143,7 @@ def create_server(settings: Settings) -> MCPServer:
 
     @mcp.tool()
     def register_public_record(
+        id: str,
         name: str,
         kind: str,
         published_on: str,
@@ -142,11 +155,14 @@ def create_server(settings: Settings) -> MCPServer:
     ) -> WriteResult:
         """公開記録（登壇・記事・リポジトリなど）を 1 ブロック登記する。必須の欄が欠けていれば書かずに拒否する。
 
-        日付は `2020-03-10` の形で渡す。月までしか分からないときは `2020-03`、年だけなら `2020`。
-        URL を持たない紙媒体のものは、URL を省いて渡す。
+        id は人が振る短い識別子（英小文字・数字・ハイフンで 3〜40 字、正本全体で重ならない値）で、
+        機能の裏づけはこの ID でこの 1 件を指す。origin_section には、職歴の枠か受託案件の ID を
+        渡す（見出しではない）。日付は `2020-03-10` の形で渡す。月までしか分からないときは
+        `2020-03`、年だけなら `2020`。URL を持たない紙媒体のものは、URL を省いて渡す。
         """
         return public_record_service.register(
             PublicRecordDraft(
+                id=id,
                 name=name,
                 kind=kind,
                 published_on=published_on,
@@ -160,6 +176,7 @@ def create_server(settings: Settings) -> MCPServer:
 
     @mcp.tool()
     def revise_package(
+        id: str,
         name: str,
         capabilities: list[str],
         buyer: str,
@@ -167,12 +184,15 @@ def create_server(settings: Settings) -> MCPServer:
         basis: str | None = None,
         source: str | None = None,
     ) -> WriteResult:
-        """パッケージ定義を改訂する。台帳に無い機能名を束ねようとすれば書かずに拒否する。
+        """パッケージ定義を改訂する。台帳に無い機能の ID を束ねようとすれば書かずに拒否する。
 
+        id は人が振る短い識別子（英小文字・数字・ハイフンで 3〜40 字、正本全体で重ならない値）で、
+        決めと提示物はこの ID でこの束を指す。capabilities には機能の ID を渡す（機能名ではない）。
         通ると、その節を書き換えて最終更新日を今日に進める。節が無ければ新しく足す。
         """
         return offering_service.revise_package(
             PackageDraft(
+                id=id,
                 name=name,
                 capabilities=list(capabilities),
                 buyer=buyer,

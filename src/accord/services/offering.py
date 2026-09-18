@@ -11,13 +11,17 @@ from datetime import date
 from accord.models.constraints import CONSTRAINTS
 from accord.models.ontology import field_example, missing_required_fields
 from accord.models.results import (
+    ID_FORMAT_TEXT,
     CapabilityDraft,
     NextAction,
     PackageDraft,
     Rejection,
     SourceSnapshot,
     WriteResult,
+    candidate_text,
     close_names,
+    id_rejection,
+    is_id,
 )
 from accord.models.types import Capability, Package
 from accord.repository.markdown_repository import MarkdownRepository
@@ -27,6 +31,7 @@ from accord.vocabulary.settings import Settings
 CONSTRAINT_BY_NAME = {constraint.name: constraint for constraint in CONSTRAINTS}
 EVIDENCE_SECTION_EXISTS = CONSTRAINT_BY_NAME["裏づけ節名の実在"].name
 PACKAGE_CAPABILITY_MATCHES = CONSTRAINT_BY_NAME["束ねる機能名の一致"].name
+ID_FORMAT_AND_UNIQUENESS = CONSTRAINT_BY_NAME["ID の形式と一意性"].name
 
 # 次の 4 つは制約 7 つではなく、型 Capability と型 Package の欄の定義である
 # （選べる分類と、選べる仮説の状態の語は設定が持つ）。
@@ -58,8 +63,9 @@ class OfferingService:
         self.repository = repository or MarkdownRepository(settings)
 
     def register_capability(self, draft: CapabilityDraft) -> WriteResult:
-        """機能の台帳に 1 行足す。必須欄・分類・裏づけの節を確かめ、通らなければ書かずに拒否する。"""
+        """機能の台帳に 1 行足す。必須欄・分類・ID・裏づけを確かめ、通らなければ書かずに拒否する。"""
         snapshot = self.repository.load()
+        labels = snapshot.labels()
 
         missing = missing_required_fields(CAPABILITY_TYPE_NAME, draft)
         if missing:
@@ -98,26 +104,43 @@ class OfferingService:
                 ),
             )
 
+        id_problem = id_rejection(
+            ID_FORMAT_AND_UNIQUENESS, REGISTER_OPERATION, draft.id, labels
+        )
+        if id_problem is not None:
+            return WriteResult(accepted=False, rejection=id_problem)
+
         headings = snapshot.evidence_targets()
         unknown = [name for name in draft.evidence_sections if name not in headings]
         if unknown:
+            trouble = (
+                f"裏づけの節「{unknown[0]}」は ID の形に合わない（{ID_FORMAT_TEXT}）。"
+                "見出しや名前をそのまま渡しているなら、その節の ID に置き換える。"
+                if not is_id(unknown[0])
+                else (
+                    f"裏づけの節「{unknown[0]}」は、"
+                    "職歴の枠にも受託案件にも公開記録にも無い ID である。"
+                )
+            )
+            candidates = close_names(unknown[0], headings, labels)
             return WriteResult(
                 accepted=False,
                 rejection=Rejection(
                     constraint=EVIDENCE_SECTION_EXISTS,
-                    reason=(
-                        f"裏づけの節「{unknown[0]}」は、"
-                        "職歴の枠にも受託案件にも公開記録にも無い名前である。"
-                    ),
+                    reason=trouble + candidate_text(candidates, labels),
                     next_action=NextAction(
                         operation=REGISTER_OPERATION,
-                        candidates=close_names(unknown[0], headings),
-                        example=f"上の候補をそのまま裏づけの節に渡して、もう一度 {REGISTER_OPERATION} を呼ぶ。",
+                        candidates=candidates,
+                        example=(
+                            "上の候補をそのまま裏づけの節に渡して、"
+                            f"もう一度 {REGISTER_OPERATION} を呼ぶ。"
+                        ),
                     ),
                 ),
             )
 
         capability = Capability(
+            id=draft.id.strip(),
             name=draft.name,
             description=draft.description,
             category=draft.category,
@@ -127,14 +150,15 @@ class OfferingService:
 
         # 公開記録は定義により公開されているものなので、公開可否の欄を持たない。
         # 「不明」と並べると外に出せないものと読めるので、公開記録であることをそのまま書く。
-        record_names = {record.name for record in snapshot.public_records}
+        # 鍵は ID だが、読む人に伝わるのは表示名なので「表示名（ID）」で並べる。
+        record_ids = {record.id for record in snapshot.public_records}
         disclosure = {
-            heading: (
+            f"{labels.get(section_id, section_id)}（{section_id}）": (
                 PUBLIC_RECORD_DISCLOSURE
-                if heading in record_names
-                else snapshot.disclosure_of(heading) or "不明"
+                if section_id in record_ids
+                else snapshot.disclosure_of(section_id) or "不明"
             )
-            for heading in capability.evidence_sections
+            for section_id in capability.evidence_sections
         }
         warnings = [
             f"裏づけの節「{heading}」は {state} なので、対外の文面には出せない。"
@@ -169,6 +193,7 @@ class OfferingService:
         carried, warnings = self._carried_over(previous, draft)
 
         package = Package(
+            id=draft.id.strip(),
             name=draft.name,
             buyer=draft.buyer,
             hypothesis_state=draft.hypothesis_state,
@@ -195,7 +220,10 @@ class OfferingService:
     def _package_rejection(
         self, snapshot: SourceSnapshot, draft: PackageDraft
     ) -> Rejection | None:
-        """改訂の入力を制約に当てる。通れば None を返し、通らなければ次の一手つきの拒否を返す。"""
+        """改訂の入力を制約に当てる。通れば None を返し、通らなければ次の一手つきの拒否を返す。
+
+        見る順は、必須の欄、ID の形式と一意性、仮説の状態の語彙、束ねる機能の実在である。
+        """
         missing = missing_required_fields(PACKAGE_TYPE_NAME, draft)
         if missing:
             return Rejection(
@@ -212,6 +240,19 @@ class OfferingService:
                 ),
             )
 
+        # 改訂は名前の節を丸ごと差し替えるので、その節が前から持っていた ID は重なりに数えない。
+        previous = next((item for item in snapshot.packages if item.name == draft.name), None)
+        labels = {
+            identifier: label
+            for identifier, label in snapshot.labels().items()
+            if previous is None or identifier != previous.id
+        }
+        id_problem = id_rejection(
+            ID_FORMAT_AND_UNIQUENESS, REVISE_OPERATION, draft.id, labels
+        )
+        if id_problem is not None:
+            return id_problem
+
         states = self.settings.package_hypothesis_states
         if draft.hypothesis_state not in states:
             return Rejection(
@@ -227,17 +268,25 @@ class OfferingService:
                 ),
             )
 
-        names = [item.name for item in snapshot.capabilities]
+        names = [item.id for item in snapshot.capabilities]
         unknown = [name for name in draft.capabilities if name not in names]
         if unknown:
+            trouble = (
+                f"束ねる機能「{unknown[0]}」は ID の形に合わない（{ID_FORMAT_TEXT}）。"
+                "機能名をそのまま渡しているなら、その機能の ID に置き換える。"
+                if not is_id(unknown[0])
+                else f"束ねる機能「{unknown[0]}」は、機能の台帳に無い ID である。"
+            )
+            candidates = close_names(unknown[0], names, snapshot.labels())
             return Rejection(
                 constraint=PACKAGE_CAPABILITY_MATCHES,
-                reason=f"束ねる機能「{unknown[0]}」は、機能の台帳に無い名前である。",
+                reason=trouble + candidate_text(candidates, snapshot.labels()),
                 next_action=NextAction(
                     operation=REVISE_OPERATION,
-                    candidates=close_names(unknown[0], names),
+                    candidates=candidates,
                     example=(
-                        f"上の候補をそのまま束ねる機能に渡して、もう一度 {REVISE_OPERATION} を呼ぶ。"
+                        "上の候補をそのまま束ねる機能に渡して、"
+                        f"もう一度 {REVISE_OPERATION} を呼ぶ。"
                         f"まだ台帳に無い仕事を束ねるなら、先に機能を登記する（{REGISTER_OPERATION}）。"
                     ),
                 ),

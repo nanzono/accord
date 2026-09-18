@@ -13,7 +13,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from accord.models.results import CapabilityDraft, MaterialRequest, PackageDraft, PositioningDraft
+from accord.models.results import (
+    CapabilityDraft,
+    MaterialRequest,
+    PackageDraft,
+    PositioningDraft,
+)
 from accord.repository.markdown_repository import MarkdownRepository
 from accord.services.consistency import ConsistencyService
 from accord.services.material import MaterialService
@@ -21,10 +26,12 @@ from accord.services.offering import OfferingService
 from accord.services.positioning import PositioningService
 from conftest import source_digest
 
+# 決めも提示物もパッケージを ID で指すので、ID と見出し（表示名）の両方を持つ。
 CHANNEL = "tsukikusa"
-HEADLINE_PACKAGE = "要件定義と進行管理"
-OTHER_PACKAGE = "データの置き場づくり"
-KNOWN_CAPABILITY = "要件を決める場をつくる"
+HEADLINE_PACKAGE = "requirements-and-progress"
+HEADLINE_PACKAGE_NAME = "要件定義と進行管理"
+OTHER_PACKAGE = "data-platform-setup"
+KNOWN_CAPABILITY = "requirements-forum"
 BUYER = "専任の進行役を置けない、従業員 100 名前後の会社の事業責任者"
 
 # 第 2 の正本に仕込む違反。書き方が違うので、置き換える文字列も第 1 版とは違う。
@@ -36,9 +43,10 @@ EXCEPTION_ENTRY = (
 )
 DANGLING_NOTE = (
     "- 未反映の注記: なし",
-    "- 未反映の注記: ナギサ書房 刊行計画のしんこう管理 — 週 1 回の確認の場を隔週に変えた",
+    "- 未反映の注記: nagisa-publishng — 週 1 回の確認の場を隔週に変えた",
 )
 # 公開不可にする受託案件（深さ 5 の節）と、その節の本文にしか出てこない言い回し。
+PRIVATE_SECTION_ID = "nagisa-publishing"
 PRIVATE_SECTION = "ナギサ書房 刊行計画の進行管理"
 PRIVATE_BODY_PHRASE = "刊行の予定が部署ごとに持たれていて"
 MAKE_PRIVATE = (
@@ -80,7 +88,8 @@ def test_alt_sample_loads_every_type_without_defects(alt_settings) -> None:
 
     assert [defect.model_dump() for defect in snapshot.defects] == []
     assert len(snapshot.positionings) == 2
-    assert [item.name for item in snapshot.packages] == [HEADLINE_PACKAGE, OTHER_PACKAGE]
+    assert [item.id for item in snapshot.packages] == [HEADLINE_PACKAGE, OTHER_PACKAGE]
+    assert [item.name for item in snapshot.packages][0] == HEADLINE_PACKAGE_NAME
     assert len(snapshot.capabilities) == 7
     # 職歴の枠は深さ 3、受託案件は深さ 4 と 5。同じ 1 つのファイルから読み分ける。
     assert len(snapshot.career_frames) == 2
@@ -159,10 +168,11 @@ def test_alt_register_capability_rejects_unknown_evidence_section(alt_settings) 
 
     result = OfferingService(alt_settings).register_capability(
         CapabilityDraft(
+            id="collect-delivery-records",
             name="配送の実績を 1 か所に集める",
             description="拠点ごとに分かれた実績を 1 つの置き場に入れる",
             category=alt_settings.capability_categories[0],
-            evidence_sections=["テラミナ物流 配送データの置き揚づくり"],
+            evidence_sections=["teramina-deliver"],
         )
     )
 
@@ -181,8 +191,9 @@ def test_alt_revise_package_rejects_unregistered_capability(alt_settings) -> Non
 
     result = OfferingService(alt_settings).revise_package(
         PackageDraft(
-            name=HEADLINE_PACKAGE,
-            capabilities=[KNOWN_CAPABILITY, "決まったことを段取りに落とさない"],
+            id=HEADLINE_PACKAGE,
+            name=HEADLINE_PACKAGE_NAME,
+            capabilities=[KNOWN_CAPABILITY, "plan-from-decision"],
             buyer=BUYER,
             hypothesis_state=alt_settings.package_hypothesis_states[1],
         )
@@ -191,7 +202,7 @@ def test_alt_revise_package_rejects_unregistered_capability(alt_settings) -> Non
     assert result.accepted is False
     assert result.rejection is not None
     assert result.rejection.constraint == "束ねる機能名の一致"
-    assert "決まったことを段取りに落とす" in result.rejection.next_action.candidates
+    assert "plan-from-decisions" in result.rejection.next_action.candidates
     assert source_digest(alt_settings.source_dir) == before
 
 
@@ -211,10 +222,9 @@ def test_alt_check_consistency_detects_private_source_section_in_ledger(alt_sett
     # 案件番号は見出しの数字から読むので、場所の指し方も第 1 版と同じになる。
     assert "案件番号 3" in ledger[0].location
     assert PRIVATE_SECTION in ledger[0].expected
-    assert ledger[0].candidates == [
-        "テラミナ物流 配送データの置き場づくり",
-        "ユキノハ化成 品質記録の集約と見える化",
-    ]
+    assert ledger[0].candidates == ["teramina-delivery", "yukinoha-quality"]
+    # 表示名は違反の文の側に添えて出る。
+    assert "テラミナ物流 配送データの置き場づくり" in ledger[0].expected, ledger[0].expected
 
 
 def test_alt_assemble_material_drops_private_section_and_warns(alt_settings) -> None:
@@ -245,7 +255,8 @@ def test_alt_check_consistency_detects_dangling_pending_note(alt_settings) -> No
         if v.constraint == NOTE_AND_SOURCE_SECTION and v.file == "nagiho/skill_sheet.md"
     ]
     assert len(dangling) == 1, [v.model_dump() for v in report.violations]
-    assert PRIVATE_SECTION in dangling[0].candidates
+    assert PRIVATE_SECTION_ID in dangling[0].candidates
+    assert PRIVATE_SECTION in dangling[0].expected, dangling[0].expected
     assert any("未反映の注記が 1 件残っている" in note for note in report.notes), report.notes
 
 

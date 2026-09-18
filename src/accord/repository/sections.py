@@ -268,6 +268,47 @@ def read_fields(section: Section, rule: BlockRule = DEFAULT_BLOCK_RULE) -> dict[
     return fields
 
 
+def drop_field_lines(
+    body: str, names: tuple[str, ...], rule: BlockRule = DEFAULT_BLOCK_RULE
+) -> str:
+    """節の本文から、指した欄の行だけを落とす。ほかの行は 1 文字も変えない。
+
+    欄の行の見分け方は read_fields と同じ（「- ラベル: 値」・2 列の表の行・行頭の宣言に、
+    ラベルの読み替えと末尾の括弧書きの除去を当てる）。読み方の違う正本でも同じ行が落ちるように、
+    判定をこの 1 か所に置く。本文をそのまま渡す先（材料の取り出し）で、別の欄として返している
+    値が本文にも二重に出るのを止めるために使う。
+    """
+    wanted = set(names)
+
+    def is_wanted(label: str) -> bool:
+        name = strip_note(label) if rule.strip_label_note else label
+        return bool(wanted & set(rule.labels.get(name, (name,))))
+
+    kept: list[str] = []
+    for raw in body.splitlines():
+        line = raw.strip()
+        match = DEFINITION_RE.match(line)
+        if match is not None:
+            if is_wanted(match.group(1).strip()):
+                continue
+            kept.append(raw)
+            continue
+        if rule.fields_from_table and line.startswith("|"):
+            cells = [cell.strip() for cell in line.strip("|").split("|")]
+            if len(cells) >= 2 and cells[0] and is_wanted(cells[0]):
+                continue
+            kept.append(raw)
+            continue
+        if any(_bare_declaration(line, label) is not None for label in rule.bare_labels):
+            label = next(
+                label for label in rule.bare_labels if _bare_declaration(line, label) is not None
+            )
+            if is_wanted(label):
+                continue
+        kept.append(raw)
+    return "\n".join(kept).strip("\n")
+
+
 def _definition_entries(body: str, bare_labels: tuple[str, ...] = ()) -> list[tuple[str, str]]:
     """本文から「- ラベル: 値」の行と、行頭の宣言の行を、書かれた順に拾う。"""
     entries: list[tuple[str, str]] = []

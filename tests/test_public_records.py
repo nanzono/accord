@@ -16,8 +16,9 @@ from accord.services.public_records import PublicRecordService
 from accord.vocabulary.settings import Settings, load_settings
 from conftest import source_digest
 
-# 同梱のサンプルにある名前。通る入力の土台にして、1 か所だけ崩す。
-KNOWN_SECTION = "ナギサ書房 刊行計画の進行管理"
+# 同梱のサンプルにある受託案件の ID と、その見出し。通る入力の土台にして、1 か所だけ崩す。
+KNOWN_SECTION = "nagisa-publishing"
+KNOWN_SECTION_HEADING = "ナギサ書房 刊行計画の進行管理"
 
 # 設定から抜くと、公開記録を使わない正本（この段より前の設定と同じ形）になる 3 行の書き出し。
 PUBLIC_RECORD_SETTING_LINES = (
@@ -30,6 +31,7 @@ PUBLIC_RECORD_SETTING_LINES = (
 def _register(settings: Settings, **changes) -> object:
     """通る公開記録の入力を土台に、渡された欄だけを差し替えて登記を呼ぶ。"""
     draft = {
+        "id": "data-meetup-talk",
         "name": "配送データの集約を話した勉強会の発表",
         "kind": settings.public_record_kinds[1],
         "published_on": "2026-03-14",
@@ -108,14 +110,17 @@ def test_origin_section_that_does_not_exist_is_rejected_with_close_headings(
     before = source_digest(settings.source_dir)
     headings = MarkdownRepository(settings).load().section_headings()
 
-    result = _register(settings, origin_section="ナギサ書房 刊行計画の進こう管理")
+    result = _register(settings, origin_section="nagisa-publishng")
 
     assert result.accepted is False
     assert result.rejection is not None
     assert result.rejection.constraint == "由来の節の実在"
     candidates = result.rejection.next_action.candidates
     assert candidates
+    # 候補はそのまま渡せる ID だけで、表示名は拒否の文の側に出る。
     assert all(candidate in headings for candidate in candidates)
+    assert KNOWN_SECTION in candidates, candidates
+    assert KNOWN_SECTION_HEADING in result.rejection.reason, result.rejection.reason
     assert source_digest(settings.source_dir) == before
 
 
@@ -129,6 +134,7 @@ def test_accepted_record_is_appended_as_one_block_and_reads_back(settings: Setti
     records = _records(settings)
     assert len(records) == before + 1
     written = records[-1]
+    assert written.id == "data-meetup-talk"
     assert written.name == "配送データの集約を話した勉強会の発表"
     assert written.url == "https://example.com/events/report/data-meetup/"
     assert written.origin_section == KNOWN_SECTION
@@ -140,7 +146,9 @@ def test_accepted_record_is_appended_as_one_block_and_reads_back(settings: Setti
 
 def test_record_without_url_is_accepted_and_reads_back_as_no_url(settings: Settings) -> None:
     """URL を渡さない入力は通り、「- URL: なし」で書かれ、読み戻すと URL を持たない。"""
-    result = _register(settings, name="紙の雑誌に書いた進行管理の記事", url=None)
+    result = _register(
+        settings, id="paper-progress-article", name="紙の雑誌に書いた進行管理の記事", url=None
+    )
 
     assert result.accepted is True, result.model_dump()
     text = settings.path_for("public_records").read_text(encoding="utf-8")
@@ -159,6 +167,7 @@ def test_register_without_the_public_record_file_is_rejected_with_the_setting_ke
 
     result = PublicRecordService(plain).register(
         PublicRecordDraft(
+            id="data-meetup-talk",
             name="配送データの集約を話した勉強会の発表",
             kind="登壇",
             published_on="2026-03-14",

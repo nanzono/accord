@@ -17,7 +17,13 @@
 from __future__ import annotations
 
 from accord.models.constraints import CONSTRAINTS
-from accord.models.results import Material, MaterialRequest, SourceSnapshot, fold_names
+from accord.models.results import (
+    Material,
+    MaterialRequest,
+    SourceSnapshot,
+    fold_names,
+    labelled,
+)
 from accord.models.types import Capability, Package, PublicRecord
 from accord.repository.markdown_repository import MarkdownRepository
 from accord.services.positioning import PositioningService, unknown_channel_notes
@@ -32,7 +38,10 @@ ASSEMBLE_OPERATION = "assemble_material"
 INSPECT_OPERATION = "check_consistency"
 
 # 裏づけの節を材料に載せるときの、欄の名前。
+# 見出しには人が読む表示名を入れ、ID は隣の欄で添える。文面を書く側が読むのは表示名と本文で、
+# ID だけを渡すとどの節のことか伝わらない。逆に ID を落とすと、正本に戻る道が消える。
 EVIDENCE_HEADING_KEY = "見出し"
+EVIDENCE_ID_KEY = "ID"
 EVIDENCE_DISCLOSURE_KEY = "公開可否"
 EVIDENCE_BODY_KEY = "本文"
 
@@ -113,38 +122,40 @@ class MaterialService:
     ) -> tuple[Package | None, list[str]]:
         """材料の土台にするパッケージと、選べなかったときの断りを返す。
 
-        名前を渡されたときはその名前で引き、省かれたときはその媒体の決めが前面に出す束を使う。
-        渡された名前が実在しないときは、パッケージを返さず、実在する名前の一覧と次の一手を返す。
+        ID を渡されたときはその ID で引き、省かれたときはその媒体の決めが前面に出す束を使う。
+        渡された ID が実在しないときは、パッケージを返さず、実在する ID の一覧と次の一手を返す。
         """
         if request.package is None:
             return headline, []
 
-        found = next((item for item in snapshot.packages if item.name == request.package), None)
+        found = next((item for item in snapshot.packages if item.id == request.package), None)
         if found is not None:
             return found, []
 
         fallback = ""
         if headline is not None:
             fallback = (
-                f"package を省くと、この媒体の決めが前面に出す束「{headline.name}」で組み立てる。"
+                f"package を省くと、この媒体の決めが前面に出す束"
+                f"「{headline.name}」（{headline.id}）で組み立てる。"
             )
         return None, [
-            f"パッケージ「{request.package}」は、パッケージ定義に無い。",
-            "実在するパッケージ: " + " / ".join(item.name for item in snapshot.packages),
-            f"上の名前のどれかをそのまま package に渡して、もう一度 {ASSEMBLE_OPERATION} を呼ぶ。"
+            f"パッケージ「{request.package}」は、パッケージ定義に無い ID である。",
+            "実在するパッケージ: "
+            + " / ".join(labelled(item.id, {item.id: item.name}) for item in snapshot.packages),
+            f"上の ID のどれかを package に渡して、もう一度 {ASSEMBLE_OPERATION} を呼ぶ。"
             + fallback,
         ]
 
     def _capabilities(
         self, snapshot: SourceSnapshot, package: Package
     ) -> tuple[list[Capability], list[str]]:
-        """パッケージが束ねる機能を、機能の台帳から引く。台帳に無い名前は断りにする。"""
-        by_name = {item.name: item for item in snapshot.capabilities}
+        """パッケージが束ねる機能を、機能の台帳から ID で引く。台帳に無い ID は断りにする。"""
+        by_id = {item.id: item for item in snapshot.capabilities}
         found: list[Capability] = []
         warnings: list[str] = []
 
         for name in package.capabilities:
-            capability = by_name.get(name)
+            capability = by_id.get(name)
             if capability is None:
                 warnings.append(
                     f"束「{package.name}」が束ねる機能「{name}」が機能の台帳に無いので、"
@@ -157,43 +168,47 @@ class MaterialService:
     def _evidence(
         self, snapshot: SourceSnapshot, capabilities: list[Capability]
     ) -> tuple[list[dict[str, str]], list[PublicRecord], list[str]]:
-        """各機能の裏づけの節を、見出しと本文で集める。公開不可の節は落として警告に書く。
+        """各機能の裏づけの節を、表示名・ID・本文で集める。公開不可の節は落として警告に書く。
 
-        裏づけは、職歴の枠か受託案件の節を指すこともあれば、公開記録の名前を指すこともある。
-        公開記録は節ではなく 1 件ぶんの型なので、先に取り分けて別の欄で返す。取り分けないと
-        「職歴の枠にも受託案件にも無い見出し」として警告に落ちてしまう。
-        同じ節を複数の機能が指すことがあるので、見出しで重複を落とす。
+        裏づけは ID で書かれていて、職歴の枠か受託案件の節を指すこともあれば、公開記録を指す
+        こともある。公開記録は節ではなく 1 件ぶんの型なので、先に取り分けて別の欄で返す。
+        取り分けないと「職歴の枠にも受託案件にも無い」として警告に落ちてしまう。
+        同じ節を複数の機能が指すことがあるので、ID で重複を落とす。
+        ここが、ID を人が読む表示名に戻す唯一の場所である。
         """
         bodies = self.repository.evidence_bodies()
-        records = {record.name: record for record in snapshot.public_records}
+        records = {record.id: record for record in snapshot.public_records}
+        labels = snapshot.labels()
         evidence: list[dict[str, str]] = []
         public_records: list[PublicRecord] = []
         warnings: list[str] = []
         seen: set[str] = set()
 
         for capability in capabilities:
-            for heading in capability.evidence_sections:
-                if heading in seen:
+            for section_id in capability.evidence_sections:
+                if section_id in seen:
                     continue
-                seen.add(heading)
+                seen.add(section_id)
 
-                if heading in records:
-                    public_records.append(records[heading])
+                if section_id in records:
+                    public_records.append(records[section_id])
                     continue
 
-                disclosure = snapshot.disclosure_of(heading)
+                disclosure = snapshot.disclosure_of(section_id)
                 if disclosure is None:
                     warnings.append(
-                        f"機能「{capability.name}」の裏づけの節「{heading}」は、"
-                        "職歴の枠にも受託案件にも無い見出しなので、材料に入っていない。"
-                        f"実在する見出しの候補は {INSPECT_OPERATION} が返す。"
+                        f"機能「{capability.name}」の裏づけの節「{section_id}」は、"
+                        "職歴の枠にも受託案件にも公開記録にも無い ID なので、材料に入っていない。"
+                        f"実在する ID の候補は {INSPECT_OPERATION} が返す。"
                     )
                     continue
 
-                if snapshot.is_private(heading):
+                heading = labels.get(section_id, section_id)
+                if snapshot.is_private(section_id):
                     warnings.append(
-                        f"{NOTE_AND_SOURCE_SECTION}: 裏づけの節「{heading}」は公開可否が"
-                        f"「{disclosure}」なので、材料から落とした。この節の中身は文面に書かない。"
+                        f"{NOTE_AND_SOURCE_SECTION}: 裏づけの節「{heading}」（{section_id}）は"
+                        f"公開可否が「{disclosure}」なので、材料から落とした。"
+                        "この節の中身は文面に書かない。"
                         "別の公開可の節で裏づけるか、公開可否そのものを先に直す。"
                     )
                     continue
@@ -201,8 +216,9 @@ class MaterialService:
                 evidence.append(
                     {
                         EVIDENCE_HEADING_KEY: heading,
+                        EVIDENCE_ID_KEY: section_id,
                         EVIDENCE_DISCLOSURE_KEY: disclosure,
-                        EVIDENCE_BODY_KEY: bodies.get(heading, ""),
+                        EVIDENCE_BODY_KEY: bodies.get(section_id, ""),
                     }
                 )
         return evidence, public_records, warnings
@@ -219,13 +235,18 @@ class MaterialService:
             for capability in snapshot.capabilities
             for name in capability.evidence_sections
         }
-        unused = [record.name for record in snapshot.public_records if record.name not in used]
+        labels = snapshot.labels()
+        unused = [
+            labelled(record.id, labels)
+            for record in snapshot.public_records
+            if record.id not in used
+        ]
         if not unused:
             return []
         return [
             f"裏づけに使われていない公開記録が {len(unused)} 件ある"
             f"（{fold_names(unused, keep=NAME_SAMPLE_COUNT)}）。"
-            "いま売る機能の担保に使うなら、機能の裏づけの節にこの名前を足す。"
+            "いま売る機能の担保に使うなら、機能の裏づけの節にその ID を足す。"
         ]
 
     def _presentation_rule_warnings(

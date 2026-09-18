@@ -26,10 +26,12 @@ from accord.services.public_records import PublicRecordService
 from accord.vocabulary.settings import Settings
 from conftest import source_digest
 
-# 同梱のサンプルにある名前。通る入力の土台にして、1 か所だけ崩す。
-HEADLINE_PACKAGE = "要件定義と進行管理"
-KNOWN_CAPABILITY = "要件を決める場をつくる"
-KNOWN_SECTION = "ナギサ書房 刊行計画の進行管理"
+# 同梱のサンプルにある ID と見出し。通る入力の土台にして、1 か所だけ崩す。
+# 節を探すのは見出し（表示名）、ほかの項目を指すのは ID なので、両方を持つ。
+HEADLINE_PACKAGE = "requirements-and-progress"
+HEADLINE_PACKAGE_NAME = "要件定義と進行管理"
+KNOWN_CAPABILITY = "requirements-forum"
+KNOWN_SECTION = "nagisa-publishing"
 BUYER = "専任の進行役を置けない会社の事業責任者"
 RATIONALE = "直近の引き合いが、作る前の整理に集中していたため。"
 
@@ -49,6 +51,7 @@ def _record(settings: Settings, **changes) -> WriteResult:
 def _register(settings: Settings, **changes) -> WriteResult:
     """通る機能の入力を土台に、渡された欄だけを差し替えて登記を呼ぶ。"""
     draft = {
+        "id": "collect-milestones",
         "name": "工程の期日を 1 枚に集める",
         "description": "部署ごとに持っている予定を 1 枚にまとめ、遅れを早く見つける",
         "category": settings.capability_categories[2],
@@ -61,6 +64,7 @@ def _register(settings: Settings, **changes) -> WriteResult:
 def _register_record(settings: Settings, **changes) -> WriteResult:
     """通る公開記録の入力を土台に、渡された欄だけを差し替えて登記を呼ぶ。"""
     draft = {
+        "id": "data-meetup-talk",
         "name": "配送データの集約を話した勉強会の発表",
         "kind": settings.public_record_kinds[1],
         "published_on": "2026-03-14",
@@ -76,7 +80,8 @@ def _register_record(settings: Settings, **changes) -> WriteResult:
 def _revise(settings: Settings, **changes) -> WriteResult:
     """通るパッケージの入力を土台に、渡された欄だけを差し替えて改訂を呼ぶ。"""
     draft = {
-        "name": HEADLINE_PACKAGE,
+        "id": HEADLINE_PACKAGE,
+        "name": HEADLINE_PACKAGE_NAME,
         "capabilities": [KNOWN_CAPABILITY],
         "buyer": BUYER,
         "hypothesis_state": settings.package_hypothesis_states[1],
@@ -91,29 +96,40 @@ REJECTION_PATHS = {
     "決めの根拠が無い": lambda settings: _record(settings, rationale=""),
     "決めの適用範囲が媒体でも全体でもない": lambda settings: _record(settings, scope="どこか"),
     "決めの束がパッケージ定義に無い": lambda settings: _record(
-        settings, headline_package="要件定義と進こう管理"
+        settings, headline_package="requirements-and-progres"
     ),
     "機能の名前と説明が無い": lambda settings: _register(settings, name="", description=""),
     "機能の分類が設定の節に無い": lambda settings: _register(settings, category="思いつきの分類"),
     "機能の裏づけの節が 1 つも無い": lambda settings: _register(settings, evidence_sections=[]),
     "機能の裏づけの節が実在しない": lambda settings: _register(
-        settings, evidence_sections=["ナギサ書房 刊行計画の進こう管理"]
+        settings, evidence_sections=["nagisa-publishng"]
     ),
+    "機能の裏づけの節が ID の形に合わない": lambda settings: _register(
+        settings, evidence_sections=["ナギサ書房 刊行計画の進行管理"]
+    ),
+    "機能の ID が形の外": lambda settings: _register(settings, id="Collect_Milestones"),
+    "機能の ID が既に使われている": lambda settings: _register(settings, id=KNOWN_SECTION),
     "パッケージの想定買い手が無い": lambda settings: _revise(settings, buyer=""),
     "パッケージが束ねる機能が 1 つも無い": lambda settings: _revise(settings, capabilities=[]),
     "パッケージの仮説の状態が設定の語に無い": lambda settings: _revise(
         settings, hypothesis_state="だいたい実績あり"
     ),
     "パッケージが束ねる機能が台帳に無い": lambda settings: _revise(
-        settings, capabilities=["要件を決める場をつくらない"]
+        settings, capabilities=["requirements-forumm"]
     ),
+    "パッケージの ID が形の外": lambda settings: _revise(settings, id="要件定義と進行管理"),
+    "パッケージの ID が別の項目のもの": lambda settings: _revise(settings, id=KNOWN_SECTION),
     "公開記録の名前と役割が無い": lambda settings: _register_record(settings, name="", role=""),
     "公開記録の種類が設定の語に無い": lambda settings: _register_record(
         settings, kind="ポッドキャスト"
     ),
     "公開記録の役割が設定の語に無い": lambda settings: _register_record(settings, role="司会"),
     "公開記録の由来の節が実在しない": lambda settings: _register_record(
-        settings, origin_section="ナギサ書房 刊行計画の進こう管理"
+        settings, origin_section="nagisa-publishng"
+    ),
+    "公開記録の ID が形の外": lambda settings: _register_record(settings, id="a"),
+    "公開記録の ID が既に使われている": lambda settings: _register_record(
+        settings, id=KNOWN_SECTION
     ),
 }
 

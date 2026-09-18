@@ -17,10 +17,13 @@ from conftest import source_digest
 
 # 写しに仕込む違反。サンプルの正本にある文字列を、そのまま置き換える形で書く。
 STALE_UPDATED_ON = ("- 最終更新: 2026-09-12", "- 最終更新: 2026-08-01")
-OUTDATED_CLAIM = ("- 宣言する束: 要件定義と進行管理", "- 宣言する束: データの置き場づくり")
+OUTDATED_CLAIM = (
+    "- 宣言する束: requirements-and-progress",
+    "- 宣言する束: data-platform-setup",
+)
 DANGLING_NOTE = (
     "- 未反映の注記: なし",
-    "- 未反映の注記: ナギサ書房 刊行計画のしんこう管理 — 週 1 回の確認の場を隔週に変えた",
+    "- 未反映の注記: nagisa-publishng — 週 1 回の確認の場を隔週に変えた",
 )
 PRIVATE_DISCLOSURE = (
     "- 公開可否: 公開可\n- 出所: 契約書と、月次の議事録（2025-04 以降）",
@@ -32,7 +35,8 @@ EXCEPTION_ENTRY = (
     "- 例外: presentations/tsukikusa/profile.md — 媒体側の審査待ちで、次の更新まで旧い束のまま残す",
 )
 
-# 第 2 のサンプルが持つ、正本に実在するが読み取り範囲の外にある見出しと、その居場所。
+# 第 2 のサンプルが持つ、正本に実在するが読み取り範囲の外にある節と、その居場所。
+OUT_OF_RANGE_ID = "study-group-host"
 OUT_OF_RANGE_SECTION = "社外の勉強会の運営"
 OUT_OF_RANGE_PARENT = "職歴の外の活動"
 OUT_OF_RANGE_LEVEL = 3
@@ -46,11 +50,11 @@ DROP_DISCLOSURE = (
     "- 出所: 契約書と、月次の議事録（2025-04 以降）",
 )
 
-# 裏づけの節と台帳の出典の節を、別の見出しに向け直すための置き換え。
-POINT_EVIDENCE_AT = ("| ナギサ書房 刊行計画の進行管理 |", f"| {OUT_OF_RANGE_SECTION} |")
+# 裏づけの節と台帳の出典の節を、読み取り範囲の外の節に向け直すための置き換え。
+POINT_EVIDENCE_AT = ("| nagisa-publishing |", f"| {OUT_OF_RANGE_ID} |")
 POINT_LEDGER_AT = (
-    "- 出典の節: テラミナ物流 配送データの置き場づくり",
-    f"- 出典の節: {OUT_OF_RANGE_SECTION}",
+    "- 出典の節: teramina-delivery",
+    f"- 出典の節: {OUT_OF_RANGE_ID}",
 )
 
 # 欄を 1 つも持たない提示物を写しに置くときの、件数と中身。
@@ -58,7 +62,10 @@ FIELDLESS_PRESENTATION_COUNT = 40
 FIELDLESS_PRESENTATION_BODY = "# 下書き\n\n本文だけで、欄を 1 つも持たない。\n"
 
 EVIDENCE_SECTION_EXISTS = "裏づけ節名の実在"
-HEADLINE_PACKAGE = "要件定義と進行管理"
+ID_FORMAT_AND_UNIQUENESS = "ID の形式と一意性"
+# 決めと提示物はパッケージを ID で指すので、ID と見出し（表示名）の両方を持つ。
+HEADLINE_PACKAGE = "requirements-and-progress"
+HEADLINE_PACKAGE_NAME = "要件定義と進行管理"
 STALE_PACKAGE_FRESHNESS = "パッケージ定義の鮮度"
 OUTDATED_OFFERING_CLAIM = "提示物の宣言と看板の一致"
 NOTE_AND_SOURCE_SECTION = "注記と出典の節の実在・公開可否"
@@ -165,11 +172,9 @@ def test_check_consistency_detects_private_source_section_in_ledger(settings) ->
     assert "案件番号 3" in violation.location
     assert "ナギサ書房 刊行計画の進行管理" in violation.expected
     assert "公開不可" in violation.expected
-    # 差し替え先の候補は、公開可の節だけが並ぶ。
-    assert violation.candidates == [
-        "テラミナ物流 配送データの置き場づくり",
-        "ユキノハ化成 品質記録の集約と見える化",
-    ]
+    # 差し替え先の候補は、公開可の節の ID だけが並ぶ。表示名は文の側に添えて出る。
+    assert violation.candidates == ["teramina-delivery", "yukinoha-quality"]
+    assert "テラミナ物流 配送データの置き場づくり" in violation.expected, violation.expected
 
 
 def test_check_consistency_detects_dangling_pending_note(settings) -> None:
@@ -186,7 +191,8 @@ def test_check_consistency_detects_dangling_pending_note(settings) -> None:
         and v.file == "presentations/nagiho/skill_sheet.md"
     ]
     assert len(dangling) == 1, [v.model_dump() for v in report.violations]
-    assert "ナギサ書房 刊行計画の進行管理" in dangling[0].candidates
+    assert "nagisa-publishing" in dangling[0].candidates
+    assert "ナギサ書房 刊行計画の進行管理" in dangling[0].expected, dangling[0].expected
 
     # 注記が残っていること自体は、違反ではなく断りとして報告に入る。
     assert any("未反映の注記が 1 件残っている" in note for note in report.notes), report.notes
@@ -208,7 +214,7 @@ def test_check_consistency_names_a_package_section_that_lost_a_field(settings) -
 
     listed = "\n".join(report.notes)
     assert settings.files["packages"] in listed, listed
-    assert HEADLINE_PACKAGE in listed, listed
+    assert HEADLINE_PACKAGE_NAME in listed, listed
     assert "想定買い手" in listed, listed
     assert "revise_package" in listed, listed
 
@@ -217,9 +223,10 @@ def test_check_consistency_names_a_capability_row_that_lost_a_field(settings) ->
     """機能の台帳の表から裏づけの節の列を消しても黙って飛ばさず、どの分類の何行目かを断る。"""
     _rewrite(
         settings.path_for("capabilities"),
-        "| 要件を決める場をつくる | 決まっていないことを一覧にし、決める人と決める日を置く | "
-        "ナギサ書房 刊行計画の進行管理 |",
-        "| 要件を決める場をつくる | 決まっていないことを一覧にし、決める人と決める日を置く |",
+        "| requirements-forum | 要件を決める場をつくる | "
+        "決まっていないことを一覧にし、決める人と決める日を置く | nagisa-publishing |",
+        "| requirements-forum | 要件を決める場をつくる | "
+        "決まっていないことを一覧にし、決める人と決める日を置く |",
     )
 
     report = _report(settings)
@@ -274,8 +281,8 @@ def test_check_consistency_cannot_judge_freshness_without_the_headline_package(s
     """看板の束がパッケージ定義に無いときは、鮮度を違反にせず、判定できない断りを返す。"""
     _rewrite(
         settings.path_for("positioning"),
-        "- 前面に出す束: 要件定義と進行管理",
-        "- 前面に出す束: 要件定義と進こう管理",
+        "- 前面に出す束: requirements-and-progress",
+        "- 前面に出す束: requirements-and-progres",
         last=True,
     )
 
@@ -454,6 +461,7 @@ def test_ledger_source_section_outside_the_reading_range_is_named_as_such(alt_se
 
 
 # 同梱のサンプルの公開記録と、その URL を載せている提示物の本文の書き方。
+RECORD_ID = "meetup-talk-publishing"
 RECORD_NAME = "刊行計画の進め方を話した勉強会の発表"
 RECORD_URL = "https://example.com/events/report/spring-meetup/"
 PROFILE_URL_LINE = f"進め方は勉強会でも話しています: {RECORD_URL}"
@@ -476,6 +484,7 @@ OTHER_HOST_URL = "https://docs.example.com/handbook/progress"
 OTHER_HOST_RECORD = """
 ## 進行管理の手引きの公開ページ
 
+- ID: handbook-progress-page
 - 種類: 記事
 - 日付: 2026-02
 - URL: https://docs.example.com/handbook/index
@@ -523,8 +532,8 @@ def test_origin_section_that_does_not_exist_is_listed_as_a_violation(settings) -
     before = len(_report(settings).violations)
     _rewrite(
         settings.path_for("public_records"),
-        "- 由来の節: ナギサ書房 刊行計画の進行管理",
-        "- 由来の節: ナギサ書房 刊行計画の進こう管理",
+        "- 由来の節: nagisa-publishing",
+        "- 由来の節: nagisa-publishng",
     )
 
     report = _report(settings)
@@ -654,7 +663,7 @@ def test_evidence_section_can_point_at_a_public_record(settings) -> None:
 
     snapshot = ConsistencyService(settings).repository.load()
     pointing = [
-        item for item in snapshot.capabilities if RECORD_NAME in item.evidence_sections
+        item for item in snapshot.capabilities if RECORD_ID in item.evidence_sections
     ]
     assert pointing, "写しの機能の台帳に、公開記録を裏づけにした行が無い"
     report = _report(settings)
@@ -662,17 +671,21 @@ def test_evidence_section_can_point_at_a_public_record(settings) -> None:
 
     service = OfferingService(settings)
     draft = {
+        "id": "turn-talk-into-steps",
         "name": "話した内容を手順に落とす",
         "description": "勉強会で話した進め方を、そのまま使える手順に直す",
         "category": settings.capability_categories[2],
     }
     accepted = service.register_capability(
-        CapabilityDraft(**draft, evidence_sections=[RECORD_NAME])
+        CapabilityDraft(**draft, evidence_sections=[RECORD_ID])
     )
     assert accepted.accepted is True, accepted.model_dump()
 
+    # 1 行目が通って ID が埋まったので、2 回目は別の ID で呼ぶ（同じ ID は一意性で先に落ちる）。
     rejected = service.register_capability(
-        CapabilityDraft(**draft, evidence_sections=["どこにも無い名前"])
+        CapabilityDraft(
+            **{**draft, "id": "turn-talk-into-steps-2"}, evidence_sections=["nowhere-at-all"]
+        )
     )
     assert rejected.accepted is False
     assert rejected.rejection is not None
@@ -698,9 +711,9 @@ WRITE_OUTSIDE_ROLE = ("- 役割: 登壇者", f"- 役割: {OUTSIDE_ROLE}")
 OUTSIDE_CATEGORY_SECTION = f"""
 ## {OUTSIDE_CATEGORY}
 
-| 機能名 | 説明 | 裏づけの節 |
-|---|---|---|
-| 進め方を人前で話す | 決め方と段取りを、催しの場で話して伝える | ナギサ書房 刊行計画の進行管理 |
+| ID | 機能名 | 説明 | 裏づけの節 |
+|---|---|---|---|
+| talk-in-public | 進め方を人前で話す | 決め方と段取りを、催しの場で話して伝える | nagisa-publishing |
 """
 OUTSIDE_CATEGORY_CAPABILITY = "進め方を人前で話す"
 

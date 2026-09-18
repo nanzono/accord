@@ -32,6 +32,7 @@ from accord.models.types import (
 from accord.repository.sections import (
     Section,
     bullet_items,
+    drop_field_lines,
     find_section,
     find_urls,
     leading_number,
@@ -59,6 +60,7 @@ POSITIONING_LABELS = {
 }
 # 並びは、書き戻すときの行の並びでもある（読むときは並びを見ない）。
 PACKAGE_LABELS = {
+    "ID": "id",
     "最終更新": "updated_on",
     "想定買い手": "buyer",
     "仮説の状態": "hypothesis_state",
@@ -77,6 +79,7 @@ POSITIONING_EXCEPTIONS_LABEL = "例外"
 EXCEPTION_PRESENTATION_KEY = "提示物"
 EXCEPTION_REASON_KEY = "理由"
 CAREER_LABELS = {
+    "ID": "id",
     "期間": "period",
     "所属": "organization",
     "立場": "position",
@@ -87,6 +90,7 @@ CAREER_LABELS = {
     "出所": "source",
 }
 ENGAGEMENT_LABELS = {
+    "ID": "id",
     "業種": "industry",
     "規模": "scale",
     "課題": "problem",
@@ -115,6 +119,7 @@ PRESENTATION_LABELS = {
 # 公開記録の欄。名前は見出しが持つので、この表には無い。
 # 並びは、書き戻すときの行の並びでもある（読むときは並びを見ない）。
 PUBLIC_RECORD_LABELS = {
+    "ID": "id",
     "種類": "kind",
     "日付": "published_on",
     "URL": "url",
@@ -137,7 +142,11 @@ EMPTY_WORDS = {"", "なし", "無し", "-", "—"}
 EMPTY_MARK = "なし"
 
 # 機能の台帳の表の見出し。節を新しく作るときに書き出す。
-CAPABILITY_TABLE_HEADER = ("| 機能名 | 説明 | 裏づけの節 |", "|---|---|---|")
+# 列の並びは「ID、機能名、説明、裏づけ」で、読み込みはこの並びに依存する。
+CAPABILITY_TABLE_HEADER = ("| ID | 機能名 | 説明 | 裏づけの節 |", "|---|---|---|---|")
+
+# ID の欄のラベル。設定の [reading.labels] で別の語に読み替えられる。
+ID_LABEL = "ID"
 
 # 媒体ごとの規約のファイルの場所に書く、媒体の名前が入るところの印。
 CHANNEL_PLACEHOLDER = "{channel}"
@@ -197,6 +206,11 @@ def _optional(value: str | None) -> str | None:
     if value is None or value.strip() in EMPTY_WORDS:
         return None
     return value.strip()
+
+
+def _text(value: object) -> str:
+    """欄の値を、断りに載せる文字列にそろえる。読めていなければ空文字。"""
+    return str(value).strip() if value is not None else ""
 
 
 class MarkdownRepository:
@@ -270,11 +284,12 @@ class MarkdownRepository:
         )
 
     def _skipped_headings(self) -> list[SkippedHeading]:
-        """裏づけと出典が指せる 2 種について、読み方の絞りで外れた見出しを集める。
+        """裏づけと出典が指せる 2 種について、読み方の絞りで外れた節を集める。
 
-        指された見出しが読めていないとき、「どこにも無い」のか「実在するが読み取り範囲の外」なのかで
-        直し先が正反対になる。その言い分けの材料をここで作る。同じ見出しが 2 種の両方で外れたときは
+        指された ID が読めていないとき、「どこにも無い」のか「実在するが読み取り範囲の外」なのかで
+        直し先が正反対になる。その言い分けの材料をここで作る。同じ節が 2 種の両方で外れたときは
         両方入れ、探す側は先に見つかったほうを使う。
+        外れた節でも欄は読む。読まないと ID が取れず、言い分けそのものができないからである。
         """
         found: list[SkippedHeading] = []
         for key in EVIDENCE_SOURCE_KEYS:
@@ -295,6 +310,7 @@ class MarkdownRepository:
                     SkippedHeading(
                         source_key=key,
                         heading=section.heading,
+                        id=read_fields(section, rule).get(ID_LABEL, "").strip(),
                         level=section.level,
                         parents=above,
                         reason="、".join(reasons),
@@ -374,6 +390,7 @@ class MarkdownRepository:
                         missing_fields=[field.label for field in missing],
                         source_key="packages",
                         heading=block.heading,
+                        id=_text(values.get("id")),
                     )
                 )
                 continue
@@ -386,6 +403,8 @@ class MarkdownRepository:
     def _load_capabilities(self) -> tuple[list[Capability], list[SourceDefect]]:
         """機能の台帳を読む。節の見出しが分類、表の 1 行が機能 1 つ。
 
+        表の列は「ID、機能名、説明、裏づけ」の並びで、この関数はその並びに依存する。
+        機能は節ではなく表の 1 行なので、ID も行ではなく列で持つ。
         必須の欄が欠けた行（列が足りない、値が空）は型にできないので、飛ばしたことを断りに残す。
         """
         result: list[Capability] = []
@@ -395,10 +414,11 @@ class MarkdownRepository:
             rows = [cells for table in table_blocks(block.body) for cells in table]
             for index, cells in enumerate(rows, start=1):
                 values = {
-                    "name": cells[0] if len(cells) > 0 else None,
-                    "description": cells[1] if len(cells) > 1 else None,
+                    "id": cells[0] if len(cells) > 0 else None,
+                    "name": cells[1] if len(cells) > 1 else None,
+                    "description": cells[2] if len(cells) > 2 else None,
                     "category": block.heading,
-                    "evidence_sections": _split_list(cells[2]) if len(cells) > 2 else [],
+                    "evidence_sections": _split_list(cells[3]) if len(cells) > 3 else [],
                 }
                 missing = missing_required_fields(
                     CAPABILITY_TYPE_NAME, SimpleNamespace(**values)
@@ -411,6 +431,7 @@ class MarkdownRepository:
                             missing_fields=[field.label for field in missing],
                             source_key="capabilities",
                             heading=block.heading,
+                            id=_text(values.get("id")),
                         )
                     )
                     continue
@@ -438,6 +459,7 @@ class MarkdownRepository:
                         missing_fields=[field.label for field in missing],
                         source_key="career",
                         heading=block.heading,
+                        id=_text(values.get("id")),
                     )
                 )
                 continue
@@ -465,6 +487,7 @@ class MarkdownRepository:
                         missing_fields=[field.label for field in missing],
                         source_key="engagements",
                         heading=block.heading,
+                        id=_text(values.get("id")),
                     )
                 )
                 continue
@@ -499,6 +522,7 @@ class MarkdownRepository:
                         missing_fields=[field.label for field in missing],
                         source_key=PUBLIC_RECORDS_KEY,
                         heading=block.heading,
+                        id=_text(values.get("id")),
                     )
                 )
                 continue
@@ -631,16 +655,24 @@ class MarkdownRepository:
         return found
 
     def evidence_bodies(self) -> dict[str, str]:
-        """裏づけの節として指せる見出しと、その本文の対応を返す。
+        """裏づけとして指せる節の ID と、その本文の対応を返す。
 
         型に射影した欄ではなく本文をそのまま渡すのは、文面を書く側が読むのは節の中身だからである。
-        同じ見出しが 2 つの正本にあるときは、先に読んだほう（職歴の枠）を残す。
+        鍵は ID で、ID は正本全体で一意なので、どちらの正本を先に読むかで中身が入れ替わらない。
+        ID の行を持たない節は、指しようが無いので入れない。
+        本文からは ID の行だけを落とす。ID は鍵としても欄としても別に返しているので、本文にも
+        残すと、文面を書く側が同じ値を 2 か所で受け取り、どちらを使うのか決める手間が増える。
+        落とすのは ID の行だけで、ほかの欄の行はそのまま渡す。
         """
         bodies: dict[str, str] = {}
         for key in EVIDENCE_SOURCE_KEYS:
-            blocks, _ = self._blocks(key)
+            blocks, rule = self._blocks(key)
             for section in blocks:
-                bodies.setdefault(section.heading, section.body)
+                identifier = read_fields(section, rule).get(ID_LABEL, "").strip()
+                if identifier:
+                    bodies.setdefault(
+                        identifier, drop_field_lines(section.body, (ID_LABEL,), rule)
+                    )
         return bodies
 
     def _presentation_rule_sections(self) -> list[Section]:
@@ -735,14 +767,17 @@ class MarkdownRepository:
 
     @staticmethod
     def _capability_row(capability: Capability) -> str:
-        """機能 1 つを、台帳の表の 1 行にする。"""
+        """機能 1 つを、台帳の表の 1 行にする。列の並びは表の見出しと同じ。"""
 
         def cell(value: str) -> str:
             # 縦棒は表の区切りなので、全角に置き換えて表を壊さないようにする。
             return value.replace("|", "｜").strip()
 
         evidence = f" {LIST_SEPARATOR} ".join(cell(item) for item in capability.evidence_sections)
-        return f"| {cell(capability.name)} | {cell(capability.description)} | {evidence} |"
+        return (
+            f"| {cell(capability.id)} | {cell(capability.name)} "
+            f"| {cell(capability.description)} | {evidence} |"
+        )
 
     def append_positioning(self, positioning: Positioning) -> None:
         """売り方の決めを 1 ブロック足す。過去のブロックは書き換えず、末尾に積む。

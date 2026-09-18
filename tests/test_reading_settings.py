@@ -64,7 +64,7 @@ LEDGER = """
 
 ## 案件12｜配送データの置き場づくり
 
-- 出典の節: テラミナ物流 配送データの置き場づくり
+- 出典の節: teramina-delivery
 
 ## 出典の節の決め方
 
@@ -73,7 +73,7 @@ LEDGER = """
 
 # 欄の読み方を見るための、表と行頭の宣言を持つ節。
 LEDGER_ENTRY = """
-- 出典の節: テラミナ物流 配送データの置き場づくり
+- 出典の節: teramina-delivery
 
 | 欄 | 中身 |
 |---|---|
@@ -221,7 +221,7 @@ def test_table_fields_and_bullet_fields_are_merged() -> None:
     """表の欄と箇条書きの欄は、同じ 1 つの欄の集合になる。"""
     fields = read_fields(_section(LEDGER_ENTRY), BlockRule(fields_from_table=True))
 
-    assert fields["出典の節"] == "テラミナ物流 配送データの置き場づくり"
+    assert fields["出典の節"] == "teramina-delivery"
     assert fields["期間"] == "2022-05〜2022-11"
 
 
@@ -365,7 +365,7 @@ def test_write_back_stays_readable_after_a_round_trip(alt_settings) -> None:
         PositioningDraft(
             decided_on=date(2026, 9, 16),
             scope="全体",
-            headline_package="データの置き場づくり",
+            headline_package="data-platform-setup",
             rationale=rationale,
         )
     )

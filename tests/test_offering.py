@@ -24,9 +24,12 @@ OTHER_CATEGORIES = [
     "人を増やす",
 ]
 
-# 同梱のサンプルにある名前。改訂のテストはこの節を土台にする。
+# 同梱のサンプルにある名前と ID。改訂のテストはこの節を土台にする。
+# 節を探すのは見出し（表示名）、束ねる相手を指すのは ID なので、両方を持つ。
 PACKAGE_NAME = "要件定義と進行管理"
-KNOWN_CAPABILITY = "要件を決める場をつくる"
+PACKAGE_ID = "requirements-and-progress"
+KNOWN_CAPABILITY = "requirements-forum"
+KNOWN_CAPABILITY_NAME = "要件を決める場をつくる"
 BUYER = "専任の進行役を置けない、従業員 100 名前後の会社の事業責任者"
 
 CONFIG_TEMPLATE = """[source]
@@ -71,6 +74,7 @@ def test_capability_categories_come_from_settings(sample_copy: Path) -> None:
 
     accepted = service.register_capability(
         CapabilityDraft(
+            id="collect-milestones",
             name="工程の期日を 1 枚に集める",
             description="部署ごとに持っている予定を 1 枚にまとめ、遅れを早く見つける",
             category=OTHER_CATEGORIES[2],
@@ -82,6 +86,7 @@ def test_capability_categories_come_from_settings(sample_copy: Path) -> None:
 
     rejected = service.register_capability(
         CapabilityDraft(
+            id="align-storage",
             name="置き場をそろえる",
             description="分かれている数字を 1 か所に集める",
             category=old_category,
@@ -100,6 +105,7 @@ def test_register_capability_rejects_missing_required_fields(settings) -> None:
 
     result = OfferingService(settings).register_capability(
         CapabilityDraft(
+            id="collect-milestones",
             name="",
             description="",
             category=settings.capability_categories[0],
@@ -129,10 +135,11 @@ def test_register_capability_rejects_unknown_evidence_section(settings) -> None:
 
     result = service.register_capability(
         CapabilityDraft(
+            id="collect-delivery-records",
             name="配送の実績を 1 か所に集める",
             description="拠点ごとに分かれた実績を 1 つの置き場に入れる",
             category=settings.capability_categories[0],
-            evidence_sections=["テラミナ物流 配送データの置き揚づくり"],
+            evidence_sections=["teramina-deliver"],
         )
     )
 
@@ -141,8 +148,10 @@ def test_register_capability_rejects_unknown_evidence_section(settings) -> None:
     assert result.rejection.constraint == "裏づけ節名の実在"
 
     candidates = result.rejection.next_action.candidates
-    assert candidates, "近い見出しの候補が 1 つ以上返ること"
-    assert all(candidate in headings for candidate in candidates), "候補はそのまま渡せば通る名前"
+    assert candidates, "近い ID の候補が 1 つ以上返ること"
+    # 候補はそのまま渡せる ID だけで、どの節かは拒否の文が表示名で示す。
+    assert all(candidate in headings for candidate in candidates), "候補はそのまま渡せる ID"
+    assert "テラミナ物流" in result.rejection.reason, result.rejection.reason
 
     # 拒否のときは正本のバイト列が 1 つも変わらない。
     assert source_digest(settings.source_dir) == before
@@ -153,16 +162,18 @@ def test_rejected_candidate_is_accepted_when_passed_back(settings) -> None:
     service = OfferingService(settings)
     rejected = service.register_capability(
         CapabilityDraft(
+            id="collect-delivery-records",
             name="配送の実績を 1 か所に集める",
             description="拠点ごとに分かれた実績を 1 つの置き場に入れる",
             category=settings.capability_categories[0],
-            evidence_sections=["テラミナ物流 配送データの置き揚づくり"],
+            evidence_sections=["teramina-deliver"],
         )
     )
     assert rejected.rejection is not None
 
     retried = service.register_capability(
         CapabilityDraft(
+            id="collect-delivery-records",
             name="配送の実績を 1 か所に集める",
             description="拠点ごとに分かれた実績を 1 つの置き場に入れる",
             category=settings.capability_categories[0],
@@ -180,8 +191,9 @@ def test_revise_package_rejects_unregistered_capability(settings) -> None:
 
     result = service.revise_package(
         PackageDraft(
+            id=PACKAGE_ID,
             name=PACKAGE_NAME,
-            capabilities=[KNOWN_CAPABILITY, "決まったことを段取りに落とさない"],
+            capabilities=[KNOWN_CAPABILITY, "plan-from-decision"],
             buyer=BUYER,
             hypothesis_state=settings.package_hypothesis_states[1],
         )
@@ -192,7 +204,8 @@ def test_revise_package_rejects_unregistered_capability(settings) -> None:
     assert result.rejection.constraint == "束ねる機能名の一致"
 
     next_action = result.rejection.next_action
-    assert "決まったことを段取りに落とす" in next_action.candidates, next_action.candidates
+    assert "plan-from-decisions" in next_action.candidates, next_action.candidates
+    assert "決まったことを段取りに落とす" in result.rejection.reason, result.rejection.reason
     assert "register_capability" in next_action.example, next_action.example
 
     # 拒否のときは正本のバイト列が 1 つも変わらない。
@@ -201,6 +214,7 @@ def test_revise_package_rejects_unregistered_capability(settings) -> None:
     # 返ってきた候補をそのまま渡し直すと、今度は受け付けられる。
     retried = service.revise_package(
         PackageDraft(
+            id=PACKAGE_ID,
             name=PACKAGE_NAME,
             capabilities=[KNOWN_CAPABILITY, next_action.candidates[0]],
             buyer=BUYER,
@@ -216,6 +230,7 @@ def test_revise_package_rejects_a_hypothesis_state_outside_the_settings(settings
 
     result = OfferingService(settings).revise_package(
         PackageDraft(
+            id=PACKAGE_ID,
             name=PACKAGE_NAME,
             capabilities=[KNOWN_CAPABILITY],
             buyer=BUYER,
@@ -236,8 +251,9 @@ def test_revise_package_replaces_the_section_and_advances_the_update_date(settin
 
     result = OfferingService(settings).revise_package(
         PackageDraft(
+            id=PACKAGE_ID,
             name=PACKAGE_NAME,
-            capabilities=[KNOWN_CAPABILITY, "決まったことを段取りに落とす"],
+            capabilities=[KNOWN_CAPABILITY, "plan-from-decisions"],
             buyer=BUYER,
             hypothesis_state=settings.package_hypothesis_states[2],
             basis="受注 2 件がどちらも継続している。",
@@ -260,7 +276,8 @@ def test_revise_package_replaces_the_section_and_advances_the_update_date(settin
     )
     assert package.updated_on == date.today()
     assert package.hypothesis_state == settings.package_hypothesis_states[2]
-    assert package.capabilities == [KNOWN_CAPABILITY, "決まったことを段取りに落とす"]
+    assert package.id == PACKAGE_ID
+    assert package.capabilities == [KNOWN_CAPABILITY, "plan-from-decisions"]
     # 入力が持たない欄（崩れる条件）は、前の定義の値をそのまま残し、残したことを断る。
     assert package.breaks_when
     assert any("崩れる条件" in warning for warning in result.warnings), result.warnings
@@ -273,6 +290,7 @@ def test_revise_package_adds_a_section_for_a_new_name(settings) -> None:
 
     result = OfferingService(settings).revise_package(
         PackageDraft(
+            id="handover-in-one",
             name="引き継ぎまでを 1 本で受ける",
             capabilities=[KNOWN_CAPABILITY],
             buyer="担当者が 1 人で回している会社の事業責任者",

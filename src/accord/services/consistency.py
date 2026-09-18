@@ -7,12 +7,12 @@
 範囲は 3 通り取れる。正本全体（省略か「全体」）、媒体の名前、提示物のファイル名である。
 範囲の名前が実在しないときは、違反ではなく実在する範囲の一覧を返す。拒否は無い。
 
-執行するのは制約 9 件。書きの操作が書き込みの瞬間に拒否する 4 件（裏づけ節名の実在・束ねる機能名の一致・
-由来の節の実在・公開記録の種類と役割の語彙）にも後から食い違う経路があるので当て直し、書きでは拒否できず
-後から食い違う 5 件（パッケージ定義の鮮度・提示物の宣言と看板の一致・未反映の注記の実在・
+執行するのは制約 10 件。書きの操作が書き込みの瞬間に拒否する 5 件（ID の形式と一意性・裏づけ節名の実在・
+束ねる機能名の一致・由来の節の実在・公開記録の種類と役割の語彙）にも後から食い違う経路があるので当て直し、
+書きでは拒否できず後から食い違う 5 件（パッケージ定義の鮮度・提示物の宣言と看板の一致・未反映の注記の実在・
 台帳の出典の節の実在と公開可否・提示物の URL と公開記録の一致）を加えて、正本全体に当てる。
 機能の分類が設定の語の一覧にあるかも、同じ語彙の照合として当てる（この名前は ontology.yaml の
-制約 11 件には無く、登記の操作が拒否のときに名乗る名前と同じものを使う）。
+制約 12 件には無く、登記の操作が拒否のときに名乗る名前と同じものを使う）。
 決めの必須欄と公開記録の必須欄は、それぞれを登記する操作だけが見る
 （正本の ontology.yaml の enforced_by のとおり）。
 どの制約をどの関数が受け持つかは、この文書の末尾の対応表にある。
@@ -28,14 +28,18 @@ from typing import Any
 
 from accord.models.constraints import CONSTRAINTS
 from accord.models.results import (
+    ID_FORMAT_TEXT,
     PRIVATE_DISCLOSURE_PREFIX,
     ConsistencyReport,
     PresentationUrl,
     Provenance,
     SourceSnapshot,
     Violation,
+    candidate_text,
     close_names,
     fold_names,
+    is_id,
+    labelled,
     normalize_url,
     url_host,
     url_tail,
@@ -50,6 +54,7 @@ from accord.models.types import (
 )
 from accord.repository.markdown_repository import (
     EXCEPTION_PRESENTATION_KEY,
+    ID_LABEL,
     MarkdownRepository,
 )
 from accord.services.material import MaterialService
@@ -78,6 +83,7 @@ PACKAGE_FRESHNESS = CONSTRAINT_BY_NAME["パッケージ定義の鮮度"].name
 OFFERING_CLAIM_MATCHES = CONSTRAINT_BY_NAME["提示物の宣言と看板の一致"].name
 EVIDENCE_SECTION_EXISTS = CONSTRAINT_BY_NAME["裏づけ節名の実在"].name
 PACKAGE_CAPABILITY_MATCHES = CONSTRAINT_BY_NAME["束ねる機能名の一致"].name
+ID_FORMAT_AND_UNIQUENESS = CONSTRAINT_BY_NAME["ID の形式と一意性"].name
 NOTE_AND_SOURCE_SECTION = CONSTRAINT_BY_NAME["注記と出典の節の実在・公開可否"].name
 PUBLIC_RECORD_REQUIRED_FIELDS = CONSTRAINT_BY_NAME["公開記録の必須欄"].name
 PUBLIC_RECORD_VOCABULARY = CONSTRAINT_BY_NAME["公開記録の種類と役割の語彙"].name
@@ -111,20 +117,36 @@ CAPABILITY_CATEGORIES_KEY = "capability_categories"
 # 「どこにも無い」ときの文の後半。照らす相手も次の一手も呼ぶ場所ごとに違うので、語で引く。
 MISSING_HEADING_TEXT = {
     EVIDENCE_LABEL: (
-        "は、職歴の枠にも受託案件にも公開記録にも無い名前である。"
-        "下の候補のうち実在する名前に書き換える。"
+        "は、職歴の枠にも受託案件にも公開記録にも無い ID である。"
+        "実在する ID に書き換える。"
     ),
     ORIGIN_SECTION_LABEL: (
-        "は、職歴の枠にも受託案件にも無い見出しである。下の候補のうち実在する見出しに書き換える。"
+        "は、職歴の枠にも受託案件にも無い ID である。実在する ID に書き換える。"
     ),
-    LEDGER_SOURCE_LABEL: (
-        "は、受託案件の見出しに無い。下の候補のうち実在する見出しに書き換える。"
-    ),
+    LEDGER_SOURCE_LABEL: "は、受託案件の ID に無い。実在する ID に書き換える。",
     PENDING_NOTE_LABEL: (
-        "は、受託案件の見出しに無い。下の候補のうち実在する見出しに書き換える。"
+        "は、受託案件の ID に無い。実在する ID に書き換える。"
         "この事実をもう正本に書いたのなら、注記の行ごと消す。"
     ),
 }
+
+
+# 値が ID の形に合っていないときの文。区切りの取り違えを、推測ではなく形式の検査で断定する。
+def id_format_text(label: str, wanted: str) -> str:
+    """ID の形に合わない値を指されたときの、直し方の文を組み立てる。"""
+    return (
+        f"{label}「{wanted}」は ID の形に合わない（{ID_FORMAT_TEXT}）。"
+        "見出しや名前をそのまま書いているなら、その節の ID に置き換える。"
+        "2 つ以上を書くなら、半角のスラッシュ「/」で区切る"
+        "（「・」や全角の「／」や読点は区切りとして読まない）。"
+    )
+
+
+# 候補の母集団が空のときの文。書き間違いと、そもそも 1 件も読めていないことを言い分ける。
+NO_CANDIDATE_MATERIAL_TEXT = (
+    "候補を出せる材料が無い（照らす相手が 1 件も読めていない）。"
+    "設定の読み方の絞りか、正本の節の位置を確かめる。"
+)
 
 
 # 公開記録の置き場が設定に無いときの断り。照合していないことと、照合させるための鍵 3 つを言う。
@@ -138,9 +160,9 @@ NO_PUBLIC_RECORDS_FILE_NOTE = (
 def records_behind(
     capabilities: tuple[Capability, ...] | list[Capability], records: list[PublicRecord]
 ) -> tuple[PublicRecord, ...]:
-    """その機能たちの裏づけの節に名前が書かれている公開記録を、正本の並びで返す。"""
+    """その機能たちの裏づけに ID が書かれている公開記録を、正本の並びで返す。"""
     wanted = {name for capability in capabilities for name in capability.evidence_sections}
-    return tuple(record for record in records if record.name in wanted)
+    return tuple(record for record in records if record.id in wanted)
 
 
 def provenance_of(settings: Settings) -> Provenance:
@@ -185,30 +207,42 @@ def explain_heading(
     wanted: str,
     pool: list[str],
 ) -> tuple[bool, str, list[str]]:
-    """指された見出しが読めているかと、読めていないときの直し方の文と候補を返す。
+    """指された ID が読めているかと、読めていないときの直し方の文と候補を返す。
 
-    「無い」の一言で片づけると、正本に実在する見出しを指したときに、合っている側を書き換える
-    誘導になる。だから 4 通りに分ける——読めた、欄が欠けて読めていない、読み取り範囲の外に実在する、
-    どこにも無い。名前が合っている 2 つでは候補を出さない。候補は「そのまま渡し直せば通る名前」に
-    限る決めなので、名前が合っているところに候補を並べると、直し先を取り違えさせる。
+    「無い」の一言で片づけると、正本に実在する節を指したときに、合っている側を書き換える
+    誘導になる。だから 6 通りに分ける——読めた、ID の形に合わない、欄が欠けて読めていない、
+    読み取り範囲の外に実在する、候補を出せる材料が無い、どこにも無い。
+    値が合っている 2 つでは候補を出さない。候補は「そのまま渡し直せば通る値」に限る決めなので、
+    値が合っているところに候補を並べると、直し先を取り違えさせる。返す候補は ID だけで、
+    どの節のことかが読んで分かるように、表示名を添えた候補の文を直し方の文の末尾に置く。
+
+    形の検査を「どこにも無い」より先に置くのは、区切りを取り違えた値（「見出し A・見出し B」の
+    ように半角のスラッシュ以外でつないだもの）を、推測ではなく形式で断定するためである。
     """
+    labels = snapshot.labels()
     if wanted in pool:
         return True, "", []
 
+    if not is_id(wanted):
+        candidates = close_names(wanted, pool, labels)
+        return False, id_format_text(label, wanted) + candidate_text(candidates, labels), candidates
+
     for defect in snapshot.defects:
-        if defect.heading != wanted:
+        if not defect.id or defect.id != wanted:
             continue
         missing = "、".join(f"「{name}」" for name in defect.missing_fields)
+        where = defect.heading or defect.location
         return (
             False,
-            f"{label}「{wanted}」は {defect.file} に実在するが、必須の欄{missing}が無いので"
-            "型にできず、いまの正本として読んでいない。直すのはこのファイルではなく、"
-            f"{defect.file} の「{wanted}」に{missing}の行を足すことである。",
+            f"{label}「{wanted}」は {defect.file} の「{where}」に実在するが、"
+            f"必須の欄{missing}が無いので型にできず、いまの正本として読んでいない。"
+            f"直すのはこのファイルではなく、{defect.file} の「{where}」に"
+            f"{missing}の行を足すことである。",
             [],
         )
 
     for skipped in snapshot.skipped_headings:
-        if skipped.heading != wanted:
+        if not skipped.id or skipped.id != wanted:
             continue
         where = settings.files.get(skipped.source_key, skipped.source_key)
         if skipped.parents:
@@ -218,17 +252,25 @@ def explain_heading(
             place = f"深さ {skipped.level} の見出しである"
         return (
             False,
-            f"{label}「{wanted}」は {where} に実在する（{place}）が、"
+            f"{label}「{wanted}」は {where} の「{skipped.heading}」に実在する（{place}）が、"
             f"いまの読み取り範囲の外にある——{skipped.reason}。直し方は 2 つで、"
             f"設定の [{READING_KEY}.{skipped.source_key}] の絞りを広げてこの節を読めるようにするか、"
             "正本のこの節を読み取り範囲の中へ移す。",
             [],
         )
 
+    if not pool:
+        return False, f"{label}「{wanted}」を照らそうにも、{NO_CANDIDATE_MATERIAL_TEXT}", []
+
     tail = MISSING_HEADING_TEXT.get(
-        label, "は、いまの正本に読めている見出しに無い。下の候補のうち実在する見出しに書き換える。"
+        label, "は、いまの正本に読めている ID に無い。実在する ID に書き換える。"
     )
-    return False, f"{label}「{wanted}」{tail}", close_names(wanted, pool)
+    candidates = close_names(wanted, pool, labels)
+    return (
+        False,
+        f"{label}「{wanted}」{tail}" + candidate_text(candidates, labels),
+        candidates,
+    )
 
 
 def _is_listed_as_exception(positioning: Positioning, presentation: Presentation) -> bool:
@@ -314,7 +356,9 @@ class ConsistencyService:
         notes.extend(note_remarks)
 
         violations.extend(self._check_ledger_source_sections(snapshot, target))
-        notes.extend(self._duplicate_public_record_names(snapshot))
+        # ID の形式と一意性は、範囲を絞っても正本全体で見る。一意性は 1 つのブロックだけを
+        # 見ても言えず、絞った範囲の外にある項目と重なっていても違反だからである。
+        violations.extend(self._check_id_format_and_uniqueness(snapshot))
 
         return ConsistencyReport(
             provenance=provenance_of(self.settings),
@@ -365,9 +409,9 @@ class ConsistencyService:
         positionings = (positioning,) if positioning is not None else ()
 
         headline = {item.headline_package for item in positionings}
-        packages = tuple(item for item in snapshot.packages if item.name in headline)
+        packages = tuple(item for item in snapshot.packages if item.id in headline)
         bundled = {name for package in packages for name in package.capabilities}
-        capabilities = tuple(item for item in snapshot.capabilities if item.name in bundled)
+        capabilities = tuple(item for item in snapshot.capabilities if item.id in bundled)
 
         return InspectionScope(
             label=channel,
@@ -449,7 +493,8 @@ class ConsistencyService:
         看板の束がパッケージ定義に無いときは、比べる相手が無いので判定できない。
         束の実在は決めを登記する操作が書き込みの瞬間に見るので、ここでは断りとして返す。
         """
-        packages = {item.name: item for item in snapshot.packages}
+        packages = {item.id: item for item in snapshot.packages}
+        listed = [labelled(item.id, {item.id: item.name}) for item in snapshot.packages]
         violations: list[Violation] = []
         notes: list[str] = []
         seen: set[str] = set()
@@ -460,20 +505,20 @@ class ConsistencyService:
                 notes.append(
                     f"{positioning.decided_on} の決め（適用範囲 {positioning.scope}）が前面に出す束"
                     f"「{positioning.headline_package}」がパッケージ定義に無いので、鮮度は判定できない。"
-                    f"実在する束: {fold_names(list(packages), keep=NAME_SAMPLE_COUNT)}。"
-                    "束の名前を直して record_positioning で決めを登記し直す。"
+                    f"実在する束: {fold_names(listed, keep=NAME_SAMPLE_COUNT)}。"
+                    "束の ID を直して record_positioning で決めを登記し直す。"
                 )
                 continue
-            if package.name in seen:
+            if package.id in seen:
                 continue
-            seen.add(package.name)
+            seen.add(package.id)
             if package.updated_on >= positioning.decided_on:
                 continue
             violations.append(
                 Violation(
                     constraint=PACKAGE_FRESHNESS,
                     file=self.settings.files["packages"],
-                    location=f"「{package.name}」の節の「最終更新」の行",
+                    location=f"「{package.name}」（{package.id}）の節の「最終更新」の行",
                     expected=(
                         f"この束を前面に出した決めの日付は {positioning.decided_on}"
                         f"（適用範囲 {positioning.scope}）で、定義の最終更新は {package.updated_on} と"
@@ -487,8 +532,9 @@ class ConsistencyService:
     def _check_offering_claims(
         self, snapshot: SourceSnapshot, target: InspectionScope
     ) -> list[Violation]:
-        """提示物が宣言する束が、その媒体に適用される決めの看板と一致するかを見る。"""
+        """提示物が宣言する束の ID が、その媒体に適用される決めの看板と一致するかを見る。"""
         violations: list[Violation] = []
+        labels = snapshot.labels()
 
         for presentation in target.presentations:
             positioning = applicable_positioning(snapshot.positionings, presentation.channel)
@@ -504,10 +550,11 @@ class ConsistencyService:
                     file=presentation.path,
                     location="「宣言する束」の行",
                     expected=(
-                        f"いまの看板は「{positioning.headline_package}」"
+                        f"いまの看板は「{labelled(positioning.headline_package, labels)}」"
                         f"（{positioning.decided_on} の決め・適用範囲 {positioning.scope}）で、"
-                        f"この文面は「{presentation.declared_package}」を名乗っている。"
-                        "宣言する束を看板の名前に書き換える。この文面だけ合わせない理由があるなら、"
+                        f"この文面は「{labelled(presentation.declared_package, labels)}」を"
+                        "名乗っている。宣言する束を看板の ID に書き換える。"
+                        "この文面だけ合わせない理由があるなら、"
                         "決めの「例外」欄にこのファイル名と理由を書く。"
                     ),
                     candidates=[positioning.headline_package],
@@ -518,7 +565,7 @@ class ConsistencyService:
     def _check_evidence_sections(
         self, snapshot: SourceSnapshot, target: InspectionScope
     ) -> list[Violation]:
-        """機能の裏づけの節名が、職歴の枠・受託案件の見出しか公開記録の名前として実在するかを見る。"""
+        """機能の裏づけに書いた ID が、職歴の枠・受託案件・公開記録の ID として実在するかを見る。"""
         headings = snapshot.evidence_targets()
         violations: list[Violation] = []
 
@@ -533,7 +580,10 @@ class ConsistencyService:
                     Violation(
                         constraint=EVIDENCE_SECTION_EXISTS,
                         file=self.settings.files["capabilities"],
-                        location=f"分類「{capability.category}」の機能「{capability.name}」の裏づけの節",
+                        location=(
+                            f"分類「{capability.category}」の機能"
+                            f"「{capability.name}」（{capability.id}）の裏づけの節"
+                        ),
                         expected=expected,
                         candidates=candidates,
                     )
@@ -543,25 +593,35 @@ class ConsistencyService:
     def _check_bundled_capabilities(
         self, snapshot: SourceSnapshot, target: InspectionScope
     ) -> list[Violation]:
-        """パッケージが束ねる機能名が、機能の台帳にあるかを見る。"""
-        names = [item.name for item in snapshot.capabilities]
+        """パッケージが束ねる機能の ID が、機能の台帳にあるかを見る。"""
+        names = [item.id for item in snapshot.capabilities]
+        labels = snapshot.labels()
         violations: list[Violation] = []
 
         for package in target.packages:
             for wanted in package.capabilities:
                 if wanted in names:
                     continue
+                trouble = (
+                    f"束ねる機能「{wanted}」は ID の形に合わない（{ID_FORMAT_TEXT}）。"
+                    "機能名をそのまま書いているなら ID に置き換え、2 つ以上は半角のスラッシュ"
+                    "「/」で区切る。"
+                    if not is_id(wanted)
+                    else f"束ねる機能「{wanted}」は機能の台帳に無い ID である。"
+                )
+                candidates = close_names(wanted, names, labels)
                 violations.append(
                     Violation(
                         constraint=PACKAGE_CAPABILITY_MATCHES,
                         file=self.settings.files["packages"],
-                        location=f"「{package.name}」の節の「束ねる機能」の行",
+                        location=f"「{package.name}」（{package.id}）の節の「束ねる機能」の行",
                         expected=(
-                            f"束ねる機能「{wanted}」は機能の台帳に無い。"
-                            "下の候補のどれかに書き換えるか、先に register_capability で"
-                            "この機能を台帳に登記する。"
+                            trouble
+                            + "実在する ID に書き換えるか、"
+                            "先に register_capability でこの機能を台帳に登記する。"
+                            + candidate_text(candidates, labels)
                         ),
-                        candidates=close_names(wanted, names),
+                        candidates=candidates,
                     )
                 )
         return violations
@@ -569,7 +629,7 @@ class ConsistencyService:
     def _check_public_record_origins(
         self, snapshot: SourceSnapshot, target: InspectionScope
     ) -> list[Violation]:
-        """公開記録の由来の節が、職歴の枠か受託案件の見出しとして実在するかを見る。
+        """公開記録の由来の節に書いた ID が、職歴の枠か受託案件の ID として実在するかを見る。
 
         登記の操作も書き込みの瞬間に同じことを見るが、書いたあとで正本の節の側が動けば食い違う。
         だから、裏づけ節名の実在と同じく、検査でも当て直す。
@@ -592,7 +652,7 @@ class ConsistencyService:
                 Violation(
                     constraint=ORIGIN_SECTION_EXISTS,
                     file=self.settings.files[PUBLIC_RECORDS_KEY],
-                    location=f"「{record.name}」のブロックの「由来の節」の行",
+                    location=f"「{record.name}」（{record.id}）のブロックの「由来の節」の行",
                     expected=expected,
                     candidates=candidates,
                 )
@@ -749,8 +809,8 @@ class ConsistencyService:
             location=f"本文の URL「{entry.url}」",
             expected=(
                 "この URL は、正本の公開記録のどの URL にも無い。"
-                f"公開記録として登記する（{REGISTER_OPERATION} に、名前・種類・日付・発行元か主催・役割と"
-                "この URL を渡す。由来の節と出所は任意）か、この行を文面から外す。"
+                f"公開記録として登記する（{REGISTER_OPERATION} に、ID・名前・種類・日付・"
+                "発行元か主催・役割とこの URL を渡す。由来の節と出所は任意）か、この行を文面から外す。"
             ),
             candidates=close_names(entry.url, [str(record.url) for record, _ in known]),
         )
@@ -790,38 +850,93 @@ class ConsistencyService:
         """看板の束が束ねる機能の、裏づけになっている公開記録を集める。"""
         headline = {item.headline_package for item in target.positionings}
         bundled = {
-            name for package in snapshot.packages if package.name in headline
+            name for package in snapshot.packages if package.id in headline
             for name in package.capabilities
         }
-        capabilities = [item for item in snapshot.capabilities if item.name in bundled]
+        capabilities = [item for item in snapshot.capabilities if item.id in bundled]
         return records_behind(capabilities, snapshot.public_records)
 
-    def _duplicate_public_record_names(self, snapshot: SourceSnapshot) -> list[str]:
-        """職歴の枠か受託案件の見出しと同じ名前の公開記録があることを断る。
+    def _check_id_format_and_uniqueness(self, snapshot: SourceSnapshot) -> list[Violation]:
+        """指される側の 5 つの型の ID が、形に合い、正本全体で重ならないかを見る。
 
-        裏づけの節がその名前を指すと、職歴の枠と受託案件のほうを先に読む。黙って片方を選ぶと、
-        裏づけの本文が入れ替わったことに誰も気づかない。
+        形が外れた ID と重なった ID は、ブロックとしては読んだうえでここが違反として挙げる。
+        読み込みの層で落とさないのは、落とすと「その節は無い」と読めてしまい、正しい側を
+        書き換える誘導になるからである。重なりは、同じ ID を持つ場所を両方挙げる。
+        片方だけを挙げると、どちらを直すかを決めるのに正本を開き直すことになる。
         """
-        headings = set(snapshot.section_headings())
-        duplicated = [record.name for record in snapshot.public_records if record.name in headings]
-        if not duplicated:
-            return []
-        return [
-            f"職歴の枠か受託案件の見出しと同じ名前の公開記録が {len(duplicated)} 件ある"
-            f"（{fold_names(duplicated, keep=NAME_SAMPLE_COUNT)}）。"
-            "裏づけの節がこの名前を指すと、職歴の枠と受託案件のほうを先に読む。"
-            "公開記録のほうを裏づけにしたいなら、どちらかの名前を変える。"
-        ]
+        # ID を持つ項目を、正本の並びのまま「ID・置き場・場所の言い方」の組にする。
+        entries: list[tuple[str, str, str]] = []
+        for frame in snapshot.career_frames:
+            entries.append((frame.id, self.settings.files["career"], f"「{frame.heading}」の節"))
+        for engagement in snapshot.engagements:
+            entries.append(
+                (engagement.id, self.settings.files["engagements"], f"「{engagement.heading}」の節")
+            )
+        if self.settings.has_file(PUBLIC_RECORDS_KEY):
+            for record in snapshot.public_records:
+                entries.append(
+                    (
+                        record.id,
+                        self.settings.files[PUBLIC_RECORDS_KEY],
+                        f"「{record.name}」のブロック",
+                    )
+                )
+        for capability in snapshot.capabilities:
+            entries.append(
+                (
+                    capability.id,
+                    self.settings.files["capabilities"],
+                    f"分類「{capability.category}」の機能「{capability.name}」の行",
+                )
+            )
+        for package in snapshot.packages:
+            entries.append((package.id, self.settings.files["packages"], f"「{package.name}」の節"))
+
+        places: dict[str, list[str]] = {}
+        for identifier, file_name, location in entries:
+            places.setdefault(identifier, []).append(f"{file_name} の{location}")
+
+        violations: list[Violation] = []
+        for identifier, file_name, location in entries:
+            if not is_id(identifier):
+                violations.append(
+                    Violation(
+                        constraint=ID_FORMAT_AND_UNIQUENESS,
+                        file=file_name,
+                        location=f"{location}の「{ID_LABEL}」",
+                        expected=(
+                            f"ID「{identifier}」は形に合わない（{ID_FORMAT_TEXT}）。"
+                            "この行を形に合う値に直し、この ID を指している側も同じ値に直す。"
+                        ),
+                    )
+                )
+                continue
+            same = places[identifier]
+            if len(same) > 1:
+                violations.append(
+                    Violation(
+                        constraint=ID_FORMAT_AND_UNIQUENESS,
+                        file=file_name,
+                        location=f"{location}の「{ID_LABEL}」",
+                        expected=(
+                            f"ID「{identifier}」が {len(same)} か所で使われている"
+                            f"（{fold_names(same, keep=NAME_SAMPLE_COUNT)}）。"
+                            "ID は正本全体で 1 つの項目にしか付けられないので、"
+                            "どちらか一方を別の値に直し、その ID を指している側も同じ値に直す。"
+                        ),
+                    )
+                )
+        return violations
 
     def _check_pending_notes(
         self, snapshot: SourceSnapshot, target: InspectionScope
     ) -> tuple[list[Violation], list[str]]:
-        """未反映の注記が指す節の実在と、注記が残っていること自体を見る。
+        """未反映の注記が指す ID の実在と、注記が残っていること自体を見る。
 
         指す先が無い注記は違反として挙げ、注記が残っていること自体は違反ではなく断りとして返す。
         注記は、正本に反映すれば消える覚え書きだからである。
         """
-        headings = [item.heading for item in snapshot.engagements]
+        headings = [item.id for item in snapshot.engagements]
         violations: list[Violation] = []
         remaining: list[str] = []
 
@@ -856,11 +971,12 @@ class ConsistencyService:
     def _check_ledger_source_sections(
         self, snapshot: SourceSnapshot, target: InspectionScope
     ) -> list[Violation]:
-        """職務経歴書の台帳の出典の節が、受託案件として実在し、公開可であるかを見る。"""
-        engagements = {item.heading: item for item in snapshot.engagements}
+        """職務経歴書の台帳の出典の節の ID が、受託案件として実在し、公開可であるかを見る。"""
+        engagements = {item.id: item for item in snapshot.engagements}
+        labels = snapshot.labels()
         public = [
-            heading
-            for heading, item in engagements.items()
+            identifier
+            for identifier, item in engagements.items()
             if not item.disclosure.startswith(PRIVATE_DISCLOSURE_PREFIX)
         ]
         violations: list[Violation] = []
@@ -892,9 +1008,10 @@ class ConsistencyService:
                         file=self.settings.files["resume_ledger"],
                         location=location,
                         expected=(
-                            f"出典の節「{section}」の公開可否は「{engagement.disclosure}」なので、"
-                            "そこから写した中身は外に出せない。下の候補のような公開可の節に"
-                            "差し替えるか、この案件を台帳から外す。"
+                            f"出典の節「{labelled(section, labels)}」の公開可否は"
+                            f"「{engagement.disclosure}」なので、そこから写した中身は外に出せない。"
+                            "公開可の節の ID に差し替えるか、この案件を台帳から外す。"
+                            + candidate_text(public, labels)
                         ),
                         candidates=public,
                     )
@@ -908,7 +1025,7 @@ class ConsistencyService:
 # 同じ制約が、書きの操作では拒否、読みの操作では警告、検査の操作では一覧として現れるので、
 # 操作の名前ごとに関数を持つ。1 つの操作が 2 か所で執行する制約（注記と出典の節）は 2 つ並ぶ。
 # 書きの操作が持つ拒否と、検査が持つ検出は、同じ制約の違う顔である。
-# 機能の分類の列挙は ontology.yaml の制約 11 件に無い名前（型 Capability の欄の定義）なので、
+# 機能の分類の列挙は ontology.yaml の制約 12 件に無い名前（型 Capability の欄の定義）なので、
 # この表には並ばない。照合そのものは _check_vocabulary が公開記録の語彙と同じ場所で行う。
 
 ENFORCEMENT: dict[str, dict[str, tuple[Callable[..., Any], ...]]] = {
@@ -930,6 +1047,12 @@ ENFORCEMENT: dict[str, dict[str, tuple[Callable[..., Any], ...]]] = {
     PACKAGE_CAPABILITY_MATCHES: {
         "revise_package": (OfferingService.revise_package,),
         "check_consistency": (ConsistencyService._check_bundled_capabilities,),
+    },
+    ID_FORMAT_AND_UNIQUENESS: {
+        "check_consistency": (ConsistencyService._check_id_format_and_uniqueness,),
+        "register_capability": (OfferingService.register_capability,),
+        "revise_package": (OfferingService.revise_package,),
+        "register_public_record": (PublicRecordService.register,),
     },
     NOTE_AND_SOURCE_SECTION: {
         "check_consistency": (

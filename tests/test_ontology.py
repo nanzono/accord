@@ -21,11 +21,11 @@ SERVICES_DIR = REPO_ROOT / "src" / "accord" / "services"
 EXPECTED_TYPES = 8
 EXPECTED_RELATIONS = 8
 EXPECTED_RELATION_EDGES = 11
-EXPECTED_CONSTRAINTS = 11
+EXPECTED_CONSTRAINTS = 12
 
 
-def test_ontology_lists_eight_types_eight_relations_eleven_constraints(settings) -> None:
-    """資源 accord://ontology が、型 8 つ・関係 8 種・制約 11 つを返す。"""
+def test_ontology_lists_eight_types_eight_relations_twelve_constraints(settings) -> None:
+    """資源 accord://ontology が、型 8 つ・関係 8 種・制約 12 つを返す。"""
     server = create_server(settings)
     contents = asyncio.run(server.read_resource("accord://ontology"))
     document = json.loads(contents[0].content)

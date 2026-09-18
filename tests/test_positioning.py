@@ -16,9 +16,11 @@ from accord.services.positioning import PositioningService
 from conftest import source_digest
 
 # 同梱のサンプルが持つ決め。日付の新しいほうが、いまの看板になる。
+# 決めが指すのはパッケージの ID なので、見出し（表示名）とは別に持つ。
 LATEST_DECISION = "2026-09-10"
-LATEST_HEADLINE = "要件定義と進行管理"
-OLDER_HEADLINE = "データの置き場づくり"
+LATEST_HEADLINE = "requirements-and-progress"
+OLDER_HEADLINE = "data-platform-setup"
+OLDER_HEADING = "データの置き場づくり"
 
 # 写しに足す、媒体を名指しした決め。「全体」より優先される。
 CHANNEL_DECISION = """
@@ -26,7 +28,7 @@ CHANNEL_DECISION = """
 
 - 日付: 2026-09-11
 - 適用範囲: nagiho
-- 前面に出す束: データの置き場づくり
+- 前面に出す束: data-platform-setup
 - 根拠: この媒体は数字の置き場づくりの相談が多く、進行の側では引き合いが付かなかったため。
 - 例外: なし
 """
@@ -48,7 +50,7 @@ def test_get_positioning_returns_the_latest_whole_scope_decision(settings) -> No
     assert view.positioning.headline_package == LATEST_HEADLINE
     # 束のパッケージが、想定買い手つきで添えられている。
     assert view.package is not None
-    assert view.package.name == LATEST_HEADLINE
+    assert view.package.id == LATEST_HEADLINE
     assert view.package.buyer
     assert view.warnings == []
     # 読みの操作なので、正本は 1 バイトも変わらない。
@@ -108,8 +110,10 @@ def test_get_positioning_warns_when_the_headline_package_is_missing(settings) ->
     """看板の束がパッケージ定義に無いときは、実在する束の名前を断りに並べる。"""
     positioning: Path = settings.path_for("positioning")
     text = positioning.read_text(encoding="utf-8")
-    head, _, tail = text.rpartition("- 前面に出す束: 要件定義と進行管理")
-    positioning.write_text(head + "- 前面に出す束: 要件定義と進こう管理" + tail, encoding="utf-8")
+    head, _, tail = text.rpartition(f"- 前面に出す束: {LATEST_HEADLINE}")
+    positioning.write_text(
+        head + "- 前面に出す束: requirements-and-progres" + tail, encoding="utf-8"
+    )
 
     view = _view(settings)
 
@@ -153,8 +157,8 @@ def test_record_positioning_appends_a_block_and_runs_two_checks(settings) -> Non
     packages = settings.path_for("packages")
     packages.write_text(
         packages.read_text(encoding="utf-8").replace(
-            f"## {OLDER_HEADLINE}\n\n- 最終更新: 2026-09-12",
-            f"## {OLDER_HEADLINE}\n\n- 最終更新: 2026-08-01",
+            f"## {OLDER_HEADING}\n\n- ID: {OLDER_HEADLINE}\n- 最終更新: 2026-09-12",
+            f"## {OLDER_HEADING}\n\n- ID: {OLDER_HEADLINE}\n- 最終更新: 2026-08-01",
         ),
         encoding="utf-8",
     )
@@ -212,7 +216,9 @@ def test_record_positioning_suggests_a_close_package_name(settings) -> None:
     assert rejected.accepted is False
     assert rejected.rejection is not None
     candidates = rejected.rejection.next_action.candidates
+    # 候補は ID だけで返り、表示名は拒否の文の側に添えて出る。
     assert LATEST_HEADLINE in candidates, candidates
+    assert "要件定義と進行管理" in rejected.rejection.reason, rejected.rejection.reason
     assert source_digest(settings.source_dir) == before
 
     # 返ってきた候補をそのまま渡し直すと、今度は受け付けられる。

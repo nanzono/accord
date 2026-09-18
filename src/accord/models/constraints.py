@@ -1,7 +1,7 @@
 # 生成物。直すなら src/accord/ontology.yaml を直す
 """accord が執行する制約の宣言。
 
-制約は 11 つで、正本 src/accord/ontology.yaml が
+制約は 12 つで、正本 src/accord/ontology.yaml が
 挙げる制約に 1 対 1 で対応する。サービスの実装も資源の定義も、この 1 か所を名前で参照する。
 同じ制約が、書きの操作では拒否、読みの操作では警告、検査の操作では一覧として現れる。
 """
@@ -46,29 +46,36 @@ CONSTRAINTS: tuple[Constraint, ...] = (
         next_action="提示物のファイル名と、いまの看板のパッケージ名を返す。",
     ),
     Constraint(
+        name="ID の形式と一意性",
+        watches="指される側の 5 つの型（職歴の枠・受託案件・公開記録・機能・パッケージ）の ID が、英小文字・数字・ハイフンで 3〜40 字・先頭と末尾は英数字の形に合い、正本全体で重ならないか。",
+        enforced_by=("check_consistency", "register_capability", "revise_package", "register_public_record"),
+        appears_as="拒否",
+        next_action="形式に合わない ID は直し方を、重なった ID は同じ ID を持つ場所を両方返す。",
+    ),
+    Constraint(
         name="裏づけ節名の実在",
-        watches="機能の裏づけの節名が、職歴の枠か受託案件の見出しか、公開記録の名前として実在するか。",
+        watches="機能の裏づけに書いた ID が、職歴の枠・受託案件・公開記録の ID として実在するか。",
         enforced_by=("register_capability", "check_consistency"),
         appears_as="拒否",
-        next_action="実在する見出しのうち、近いものを候補として返す。",
+        next_action="実在する ID のうち近いものを候補として返し、文に表示名を添える。",
     ),
     Constraint(
         name="束ねる機能名の一致",
-        watches="パッケージが束ねる機能名が、機能の台帳にあるか。",
+        watches="パッケージが束ねる機能の ID が、機能の台帳にあるか。",
         enforced_by=("revise_package", "check_consistency"),
         appears_as="拒否",
-        next_action="近い機能名の候補と、先に register_capability を呼ぶことを返す。",
+        next_action="近い機能の ID の候補と、先に register_capability を呼ぶことを返す。",
     ),
     Constraint(
         name="注記と出典の節の実在・公開可否",
-        watches="提示物の未反映の注記が指す節と、職務経歴書の台帳の出典の節が実在し、公開可の節に限るか。",
+        watches="提示物の未反映の注記が指す ID と、職務経歴書の台帳の出典の節の ID が実在し、公開可の節に限るか。",
         enforced_by=("check_consistency", "assemble_material"),
         appears_as="検出",
-        next_action="実在する節の候補を返す。公開不可の節は材料から落とし、落とした節の名前を警告に書く。",
+        next_action="実在する節の ID の候補を返す。公開不可の節は材料から落とし、落とした節の名前を警告に書く。",
     ),
     Constraint(
         name="公開記録の必須欄",
-        watches="公開記録に、名前・種類・日付・発行元か主催・役割の 5 欄が揃っているか。",
+        watches="公開記録に、ID・名前・種類・日付・発行元か主催・役割の 6 欄が揃っているか。",
         enforced_by=("register_public_record",),
         appears_as="拒否",
         next_action="欠けた欄の名前と、その欄の書き方の例を返す。",
@@ -82,10 +89,10 @@ CONSTRAINTS: tuple[Constraint, ...] = (
     ),
     Constraint(
         name="由来の節の実在",
-        watches="公開記録の由来の節が、職歴の枠か受託案件の見出しとして実在するか。",
+        watches="公開記録の由来の節に書いた ID が、職歴の枠か受託案件の ID として実在するか。",
         enforced_by=("register_public_record", "check_consistency"),
         appears_as="拒否",
-        next_action="実在する見出しのうち、近いものを候補として返す。",
+        next_action="実在する ID のうち近いものを候補として返し、文に表示名を添える。",
     ),
     Constraint(
         name="提示物の URL と公開記録の一致",

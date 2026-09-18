@@ -3,24 +3,27 @@
 # 外に出したもの
 
 外から確かめられる公開の成果物を持つ。`source/public_records.md` と同じ中身を、違う書き方で
-書いてある——ファイルの名前が違い、1 件ぶんの見出しが深さ 3 で、欄のラベルが 1 つ違う
-（「発行元か主催」ではなく「発行元」）。読み方は `accord_alt.toml` の `[reading.public_records]` と
-`[reading.labels]` が合わせる。
+書いてある——ファイルの名前が違い、1 件ぶんの見出しが深さ 3 で、欄のラベルが 2 つ違う
+（「発行元か主催」ではなく「発行元」、「ID」ではなく「識別子」）。読み方は `accord_alt.toml` の
+`[reading.public_records]` と `[reading.labels]` が合わせる。機能の裏づけは、名前ではなく識別子で
+この 1 件を指す。
 
 ## 公開したもの（新しい順）
 
 ### 刊行計画の進め方を話した勉強会の発表
 
+- 識別子: meetup-talk-publishing
 - 種類: 登壇
 - 日付: 2025-11-08
 - URL: https://example.com/events/report/spring-meetup/
 - 発行元: 出版まわりの仕事を持ち寄る勉強会（架空の催し）
 - 役割: 登壇者
-- 由来の節: ナギサ書房 刊行計画の進行管理
+- 由来の節: nagisa-publishing
 - 出所: 発表の資料と、主催が出した開催の記録
 
 ### 分かれた数字を 1 か所に集める手順の寄稿
 
+- 識別子: magazine-column-data
 - 種類: 記事
 - 日付: 2010
 - URL: なし
