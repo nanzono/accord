@@ -677,3 +677,84 @@ def test_evidence_section_can_point_at_a_public_record(settings) -> None:
     assert rejected.accepted is False
     assert rejected.rejection is not None
     assert "公開記録" in rejected.rejection.reason
+
+
+# ---------------------------------------------------------------- 設定の語の一覧との照合
+
+
+PUBLIC_RECORD_VOCABULARY = "公開記録の種類と役割の語彙"
+CAPABILITY_CATEGORY_ENUM = "機能の分類の列挙"
+
+# 設定の語の一覧に無い語。どれも架空の語で、写しの正本に手で書いたことにする。
+OUTSIDE_KIND = "ポッドキャスト"
+OUTSIDE_ROLE = "司会"
+OUTSIDE_CATEGORY = "話して伝える"
+
+# 語の一覧の外の語を、正本に手で書いた状態にする置き換え。1 件目の公開記録の 2 つの欄を使う。
+WRITE_OUTSIDE_KIND = ("- 種類: 登壇", f"- 種類: {OUTSIDE_KIND}")
+WRITE_OUTSIDE_ROLE = ("- 役割: 登壇者", f"- 役割: {OUTSIDE_ROLE}")
+
+# 語の一覧に無い見出しの節を、機能の台帳の末尾に足す。裏づけの節は正本に実在するものを書く。
+OUTSIDE_CATEGORY_SECTION = f"""
+## {OUTSIDE_CATEGORY}
+
+| 機能名 | 説明 | 裏づけの節 |
+|---|---|---|
+| 進め方を人前で話す | 決め方と段取りを、催しの場で話して伝える | ナギサ書房 刊行計画の進行管理 |
+"""
+OUTSIDE_CATEGORY_CAPABILITY = "進め方を人前で話す"
+
+
+@pytest.mark.parametrize(
+    ("label", "rewrite", "vocabulary_attribute", "written"),
+    [
+        ("種類", WRITE_OUTSIDE_KIND, "public_record_kinds", OUTSIDE_KIND),
+        ("役割", WRITE_OUTSIDE_ROLE, "public_record_roles", OUTSIDE_ROLE),
+    ],
+)
+def test_public_record_word_outside_the_vocabulary_is_listed_as_a_violation(
+    settings, label: str, rewrite: tuple[str, str], vocabulary_attribute: str, written: str
+) -> None:
+    """公開記録の種類と役割に設定の語の一覧に無い語が書かれていると、違反 1 件として挙げる。"""
+    before = len(_report(settings).violations)
+    _rewrite(settings.path_for("public_records"), *rewrite)
+
+    report = _report(settings)
+
+    assert len(report.violations) == before + 1, [v.model_dump() for v in report.violations]
+    listed = [v for v in report.violations if v.constraint == PUBLIC_RECORD_VOCABULARY]
+    assert len(listed) == 1, [v.model_dump() for v in report.violations]
+    violation = listed[0]
+    assert violation.file == settings.files["public_records"]
+    assert RECORD_NAME in violation.location, violation.location
+    assert label in violation.location, violation.location
+    assert violation.candidates == getattr(settings, vocabulary_attribute)
+    assert written in violation.expected, violation.expected
+    assert vocabulary_attribute in violation.expected, violation.expected
+
+
+def test_capability_category_outside_the_vocabulary_is_listed_as_a_violation(settings) -> None:
+    """機能の台帳に設定の語の一覧に無い見出しの節があると、その節の機能を違反 1 件として挙げる。"""
+    before = len(_report(settings).violations)
+    path = settings.path_for("capabilities")
+    path.write_text(path.read_text(encoding="utf-8") + OUTSIDE_CATEGORY_SECTION, encoding="utf-8")
+
+    report = _report(settings)
+
+    assert len(report.violations) == before + 1, [v.model_dump() for v in report.violations]
+    listed = [v for v in report.violations if v.constraint == CAPABILITY_CATEGORY_ENUM]
+    assert len(listed) == 1, [v.model_dump() for v in report.violations]
+    violation = listed[0]
+    assert violation.file == settings.files["capabilities"]
+    assert OUTSIDE_CATEGORY in violation.location, violation.location
+    assert OUTSIDE_CATEGORY_CAPABILITY in violation.location, violation.location
+    assert violation.candidates == settings.capability_categories
+    assert OUTSIDE_CATEGORY in violation.expected, violation.expected
+    assert "capability_categories" in violation.expected, violation.expected
+
+
+def test_untouched_samples_have_no_vocabulary_violation(settings, alt_settings) -> None:
+    """書き方の違う 2 つの同梱サンプルは、どちらも語彙の照合で違反が出ない（0 件のまま）。"""
+    for target in (settings, alt_settings):
+        report = _report(target)
+        assert [v.model_dump() for v in report.violations] == [], target.config_path.name

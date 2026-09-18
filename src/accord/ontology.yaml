@@ -444,7 +444,7 @@ constraints:
 
   - name: 公開記録の種類と役割の語彙
     watches: 公開記録の種類と役割が、設定ファイルが持つ語の一覧にあるか。
-    enforced_by: [register_public_record]
+    enforced_by: [register_public_record, check_consistency]
     appears_as: 拒否
     next_action: 設定が持つ語の一覧を返す。
 

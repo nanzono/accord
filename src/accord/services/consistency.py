@@ -7,11 +7,14 @@
 範囲は 3 通り取れる。正本全体（省略か「全体」）、媒体の名前、提示物のファイル名である。
 範囲の名前が実在しないときは、違反ではなく実在する範囲の一覧を返す。拒否は無い。
 
-執行するのは制約 8 件。書きの操作が書き込みの瞬間に拒否する 3 件（裏づけ節名の実在・束ねる機能名の一致・
-由来の節の実在）にも後から食い違う経路があるので当て直し、書きでは拒否できず後から食い違う 5 件
-（パッケージ定義の鮮度・提示物の宣言と看板の一致・未反映の注記の実在・台帳の出典の節の実在と公開可否・
-提示物の URL と公開記録の一致）を加えて、正本全体に当てる。決めの必須欄と公開記録の必須欄と語彙は、
-それぞれを登記する操作だけが見る（正本の ontology.yaml の enforced_by のとおり）。
+執行するのは制約 9 件。書きの操作が書き込みの瞬間に拒否する 4 件（裏づけ節名の実在・束ねる機能名の一致・
+由来の節の実在・公開記録の種類と役割の語彙）にも後から食い違う経路があるので当て直し、書きでは拒否できず
+後から食い違う 5 件（パッケージ定義の鮮度・提示物の宣言と看板の一致・未反映の注記の実在・
+台帳の出典の節の実在と公開可否・提示物の URL と公開記録の一致）を加えて、正本全体に当てる。
+機能の分類が設定の語の一覧にあるかも、同じ語彙の照合として当てる（この名前は ontology.yaml の
+制約 11 件には無く、登記の操作が拒否のときに名乗る名前と同じものを使う）。
+決めの必須欄と公開記録の必須欄は、それぞれを登記する操作だけが見る
+（正本の ontology.yaml の enforced_by のとおり）。
 どの制約をどの関数が受け持つかは、この文書の末尾の対応表にある。
 """
 
@@ -50,7 +53,7 @@ from accord.repository.markdown_repository import (
     MarkdownRepository,
 )
 from accord.services.material import MaterialService
-from accord.services.offering import OfferingService
+from accord.services.offering import CAPABILITY_CATEGORY_ENUM, OfferingService
 from accord.services.positioning import (
     WHOLE_SCOPE,
     PositioningService,
@@ -96,6 +99,14 @@ EVIDENCE_LABEL = "裏づけの節"
 LEDGER_SOURCE_LABEL = "出典の節"
 PENDING_NOTE_LABEL = "注記が指す節"
 ORIGIN_SECTION_LABEL = "由来の節"
+
+# 設定の語の一覧に照らす 3 つの欄の、正本での欄の名前。違反の文はこの語のまま欄を指す。
+PUBLIC_RECORD_KIND_LABEL = "種類"
+PUBLIC_RECORD_ROLE_LABEL = "役割"
+CAPABILITY_CATEGORY_LABEL = "分類"
+
+# 機能の分類の語を書く、[vocabulary] の鍵。公開記録の 2 つと同じく、設定の側の名前を文に出す。
+CAPABILITY_CATEGORIES_KEY = "capability_categories"
 
 # 「どこにも無い」ときの文の後半。照らす相手も次の一手も呼ぶ場所ごとに違うので、語で引く。
 MISSING_HEADING_TEXT = {
@@ -292,6 +303,7 @@ class ConsistencyService:
         violations.extend(self._check_evidence_sections(snapshot, target))
         violations.extend(self._check_bundled_capabilities(snapshot, target))
         violations.extend(self._check_public_record_origins(snapshot, target))
+        violations.extend(self._check_vocabulary(snapshot, target))
 
         url_violations, url_notes = self._check_presentation_urls(snapshot, target)
         violations.extend(url_violations)
@@ -587,6 +599,80 @@ class ConsistencyService:
             )
         return violations
 
+    def _check_vocabulary(
+        self, snapshot: SourceSnapshot, target: InspectionScope
+    ) -> list[Violation]:
+        """公開記録の種類と役割、機能の分類が、設定が持つ語の一覧にあるかを見る。
+
+        登記の操作も書き込みの瞬間に同じことを見るが、正本は accord を通さずに手で直すことがある。
+        設定の外の語でも型にはできるので読み込みは通り、必須の欄の欠けだけを見る検査は黙って通る。
+        だから、裏づけ節名の実在と同じく、読み込んだ正本に対しても当て直す。
+        語の外れたブロックを読み飛ばさず違反 1 件として挙げるので、材料の取り出しからは消えない。
+        """
+        violations: list[Violation] = []
+        config_name = self.settings.config_path.name
+
+        # 公開記録の置き場を書いていない設定は、公開記録を 0 件として読む。照らす相手も語彙も無い。
+        if self.settings.has_file(PUBLIC_RECORDS_KEY):
+            records_file = self.settings.files[PUBLIC_RECORDS_KEY]
+            fields = (
+                (
+                    PUBLIC_RECORD_KIND_LABEL,
+                    self.settings.public_record_kinds,
+                    PUBLIC_RECORD_KINDS_KEY,
+                ),
+                (
+                    PUBLIC_RECORD_ROLE_LABEL,
+                    self.settings.public_record_roles,
+                    PUBLIC_RECORD_ROLES_KEY,
+                ),
+            )
+            for record in target.public_records:
+                written = {
+                    PUBLIC_RECORD_KIND_LABEL: record.kind,
+                    PUBLIC_RECORD_ROLE_LABEL: record.role,
+                }
+                for label, allowed, key in fields:
+                    value = written[label]
+                    if not value or value in allowed:
+                        continue
+                    violations.append(
+                        Violation(
+                            constraint=PUBLIC_RECORD_VOCABULARY,
+                            file=records_file,
+                            location=f"「{record.name}」のブロックの「{label}」の行",
+                            expected=(
+                                f"{label}「{value}」は、設定が持つ語の一覧に無い。"
+                                f"この行を下の候補のどれかに書き換えるか、設定 {config_name} の"
+                                f" [vocabulary] の {key} に「{value}」を足す。"
+                            ),
+                            candidates=list(allowed),
+                        )
+                    )
+
+        categories = self.settings.capability_categories
+        for capability in target.capabilities:
+            if capability.category in categories:
+                continue
+            violations.append(
+                Violation(
+                    constraint=CAPABILITY_CATEGORY_ENUM,
+                    file=self.settings.files["capabilities"],
+                    location=(
+                        f"節「{capability.category}」の機能「{capability.name}」の行"
+                        f"（この節の見出しが{CAPABILITY_CATEGORY_LABEL}になる）"
+                    ),
+                    expected=(
+                        f"{CAPABILITY_CATEGORY_LABEL}「{capability.category}」は、"
+                        "設定が持つ機能の台帳の節の名前に無い。この行を下の候補のどれかの節へ移すか、"
+                        f"設定 {config_name} の [vocabulary] の {CAPABILITY_CATEGORIES_KEY} に"
+                        f"「{capability.category}」を足す。"
+                    ),
+                    candidates=list(categories),
+                )
+            )
+        return violations
+
     def _check_presentation_urls(
         self, snapshot: SourceSnapshot, target: InspectionScope
     ) -> tuple[list[Violation], list[str]]:
@@ -822,6 +908,8 @@ class ConsistencyService:
 # 同じ制約が、書きの操作では拒否、読みの操作では警告、検査の操作では一覧として現れるので、
 # 操作の名前ごとに関数を持つ。1 つの操作が 2 か所で執行する制約（注記と出典の節）は 2 つ並ぶ。
 # 書きの操作が持つ拒否と、検査が持つ検出は、同じ制約の違う顔である。
+# 機能の分類の列挙は ontology.yaml の制約 11 件に無い名前（型 Capability の欄の定義）なので、
+# この表には並ばない。照合そのものは _check_vocabulary が公開記録の語彙と同じ場所で行う。
 
 ENFORCEMENT: dict[str, dict[str, tuple[Callable[..., Any], ...]]] = {
     POSITIONING_REQUIRED_FIELDS: {
@@ -855,6 +943,7 @@ ENFORCEMENT: dict[str, dict[str, tuple[Callable[..., Any], ...]]] = {
     },
     PUBLIC_RECORD_VOCABULARY: {
         "register_public_record": (PublicRecordService.register,),
+        "check_consistency": (ConsistencyService._check_vocabulary,),
     },
     ORIGIN_SECTION_EXISTS: {
         "register_public_record": (PublicRecordService.register,),
