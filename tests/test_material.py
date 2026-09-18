@@ -179,3 +179,66 @@ def test_assemble_material_lists_existing_channels_for_an_unknown_name(settings)
     for name in settings.channels:
         assert name in listed, listed
     assert "assemble_material" in listed, listed
+
+
+# ---------------------------------------------------------------- 公開記録
+
+
+# 同梱のサンプルの公開記録のうち、看板の束が束ねる機能の裏づけになっているもの。
+CARRIED_RECORD = "刊行計画の進め方を話した勉強会の発表"
+
+# 写しの公開記録を、裏づけに使われているブロック 1 つだけに切り詰めるときの目印。
+SECOND_RECORD_HEADING = "## 品質記録の集約を取り上げた導入事例の記事"
+
+# 裏づけに使われていない公開記録。写しに足して、警告に出ることを見る。
+UNUSED_RECORD_NAME = "配送の置き場づくりを書いた個人の記事"
+UNUSED_RECORD = f"""
+## {UNUSED_RECORD_NAME}
+
+- 種類: 記事
+- 日付: 2023-06
+- URL: https://example.com/notes/warehouse
+- 発行元か主催: 架空の個人の記事の置き場
+- 役割: 著者
+- 由来の節: なし
+- 出所: 公開したときの控え
+"""
+
+UNUSED_RECORD_PHRASE = "裏づけに使われていない公開記録"
+
+
+def _keep_only_the_carried_record(settings) -> None:
+    """写しの公開記録を、裏づけに使われているブロック 1 つだけに切り詰める。"""
+    records = settings.path_for("public_records")
+    head, mark, _ = records.read_text(encoding="utf-8").partition(SECOND_RECORD_HEADING)
+    assert mark, "写しの公開記録に、2 つ目のブロックが無い"
+    records.write_text(head.rstrip("\n") + "\n", encoding="utf-8")
+
+
+def test_material_carries_the_public_records_behind_the_headline_capabilities(settings) -> None:
+    """看板の束が束ねる機能の裏づけになっている公開記録が、材料に載って返る。"""
+    material = _material(settings)
+
+    assert [record.name for record in material.public_records] == [CARRIED_RECORD]
+    behind = {
+        name for capability in material.capabilities for name in capability.evidence_sections
+    }
+    assert all(record.name in behind for record in material.public_records)
+    # 公開記録は節ではないので、裏づけの節の一覧には混ざらない。
+    assert CARRIED_RECORD not in [entry["見出し"] for entry in material.evidence]
+    # 媒体の規約も同じ返り値に載っているので、どの欄に入れるかをここだけで決められる。
+    assert material.channel_rules
+
+
+def test_public_record_not_used_as_evidence_is_named_in_a_warning(settings) -> None:
+    """どの機能の裏づけにもなっていない公開記録を足すと、名前を添えた警告が 1 件増える。"""
+    _keep_only_the_carried_record(settings)
+    before = [note for note in _material(settings).warnings if UNUSED_RECORD_PHRASE in note]
+    assert before == []
+
+    records = settings.path_for("public_records")
+    records.write_text(records.read_text(encoding="utf-8") + UNUSED_RECORD, encoding="utf-8")
+
+    after = [note for note in _material(settings).warnings if UNUSED_RECORD_PHRASE in note]
+    assert len(after) == 1, after
+    assert UNUSED_RECORD_NAME in after[0]

@@ -1,4 +1,4 @@
-"""MCP のツール 6 本と資源 1 本を開く、薄い皮。
+"""MCP のツール 7 本と資源 1 本を開く、薄い皮。
 
 この文書がするのは、引数の型を確かめてサービスに渡し、返ってきた型をそのまま返すことだけである。
 制約の判断はサービスにあり、正本の在処はリポジトリにある。ここに業務の判断を書かないのは、
@@ -21,12 +21,14 @@ from accord.models.results import (
     PositioningDraft,
     PositioningException,
     PositioningView,
+    PublicRecordDraft,
     WriteResult,
 )
 from accord.services.consistency import ConsistencyService
 from accord.services.material import MaterialService
 from accord.services.offering import OfferingService
 from accord.services.positioning import PositioningService
+from accord.services.public_records import PublicRecordService
 from accord.vocabulary.settings import Settings
 
 # ツールと資源の名前。README の「動かす」の表と同じ綴りで、変えない。
@@ -35,6 +37,7 @@ TOOL_NAMES = (
     "assemble_material",
     "record_positioning",
     "register_capability",
+    "register_public_record",
     "revise_package",
     "check_consistency",
 )
@@ -61,11 +64,12 @@ INSTRUCTIONS = """accord は、案件獲得の正本（何ができるか、何�
 
 
 def create_server(settings: Settings) -> MCPServer:
-    """設定を 1 つ受け取り、ツール 6 本と資源 1 本を登録したサーバーを返す。"""
+    """設定を 1 つ受け取り、ツール 7 本と資源 1 本を登録したサーバーを返す。"""
     positioning_service = PositioningService(settings)
     offering_service = OfferingService(settings)
     material_service = MaterialService(settings)
     consistency_service = ConsistencyService(settings)
+    public_record_service = PublicRecordService(settings)
 
     mcp = MCPServer("accord", instructions=INSTRUCTIONS)
 
@@ -122,6 +126,35 @@ def create_server(settings: Settings) -> MCPServer:
                 description=description,
                 category=category,
                 evidence_sections=list(evidence_sections),
+            )
+        )
+
+    @mcp.tool()
+    def register_public_record(
+        name: str,
+        kind: str,
+        published_on: str,
+        publisher: str,
+        role: str,
+        url: str | None = None,
+        origin_section: str | None = None,
+        source: str | None = None,
+    ) -> WriteResult:
+        """公開記録（登壇・記事・リポジトリなど）を 1 ブロック登記する。必須の欄が欠けていれば書かずに拒否する。
+
+        日付は `2020-03-10` の形で渡す。月までしか分からないときは `2020-03`、年だけなら `2020`。
+        URL を持たない紙媒体のものは、URL を省いて渡す。
+        """
+        return public_record_service.register(
+            PublicRecordDraft(
+                name=name,
+                kind=kind,
+                published_on=published_on,
+                url=url,
+                publisher=publisher,
+                role=role,
+                origin_section=origin_section,
+                source=source,
             )
         )
 

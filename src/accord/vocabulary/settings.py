@@ -15,7 +15,7 @@ import tomllib
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 
-# 正本のファイルの役割の名前。型 7 つに 1 対 1 で対応する。
+# 正本のファイルの役割の名前。型 8 つに 1 対 1 で対応する。
 SOURCE_KEYS = (
     "positioning",
     "packages",
@@ -24,15 +24,27 @@ SOURCE_KEYS = (
     "engagements",
     "resume_ledger",
     "presentations",
+    "public_records",
 )
+
+# 公開記録の正本の役割の名前。書いても書かなくてもよい唯一の置き場である。
+PUBLIC_RECORDS_KEY = "public_records"
+
+# 公開記録の語彙を書く、[vocabulary] の鍵。置き場を書いた設定では、どちらも 1 語以上が要る。
+PUBLIC_RECORD_KINDS_KEY = "public_record_kinds"
+PUBLIC_RECORD_ROLES_KEY = "public_record_roles"
 
 # 見せ方の正本の役割の名前。
 # 見せ方（媒体の規約・語り口の決め・禁じた言い回し）は accord の境界の外なので、型には持たない。
 # 持つのは置き場だけで、材料の取り出しが、宛先の媒体の節と禁じた言い回しの節をそのまま渡す。
 PRESENTATION_RULES_KEY = "presentation_rules"
 
-# 設定の [source.files] が埋める鍵の全体。正本 7 種に、見せ方の正本を 1 つ足したもの。
+# 設定の [source.files] が埋める鍵の全体。正本 8 種に、見せ方の正本を 1 つ足したもの。
 FILE_KEYS = (*SOURCE_KEYS, PRESENTATION_RULES_KEY)
+
+# 書かなくてもよい置き場の鍵。公開記録を使わない正本が、今までどおり動くようにするためである。
+# 書いていない設定では、公開記録を 0 件として読み、提示物の URL の照合を行わない。
+OPTIONAL_FILE_KEYS = (PUBLIC_RECORDS_KEY,)
 
 # 正本の書き方を書く節の名前。この節が無ければ、すべての鍵が既定値になる。
 READING_KEY = "reading"
@@ -133,7 +145,16 @@ class Settings:
     channels: list[str] = field(default_factory=list)
     capability_categories: list[str] = field(default_factory=list)
     package_hypothesis_states: list[str] = field(default_factory=list)
+    public_record_kinds: list[str] = field(default_factory=list)
+    public_record_roles: list[str] = field(default_factory=list)
     reading: ReadingRules = field(default_factory=ReadingRules)
+
+    def has_file(self, key: str) -> bool:
+        """その正本の置き場が、設定に書かれているか。
+
+        書かなくてもよい置き場（公開記録）を読む側が、path_for を呼ぶ前に確かめる。
+        """
+        return key in self.files
 
     def path_for(self, key: str) -> Path:
         """正本の役割の名前から、実ファイル（提示物だけはディレクトリ）の場所を返す。"""
@@ -313,16 +334,31 @@ def load_settings(path: Path | None = None) -> Settings:
     source_dir = (config_path.parent / directory).resolve()
 
     files_table = source_table.get("files", {})
-    missing = [key for key in FILE_KEYS if key not in files_table]
+    missing = [
+        key for key in FILE_KEYS if key not in files_table and key not in OPTIONAL_FILE_KEYS
+    ]
     if missing:
         raise ValueError(f"設定の [source.files] に {'、'.join(missing)} が無い: {config_path}")
 
     vocabulary_table = document.get("vocabulary", {})
 
+    # 公開記録の置き場を書いた設定だけ、その語彙 2 つを必須にする。置き場を書いていない設定は
+    # 公開記録を使わないので、語彙が無くても今までどおり起動する。
+    if PUBLIC_RECORDS_KEY in files_table:
+        public_record_kinds = _require_list(
+            vocabulary_table, PUBLIC_RECORD_KINDS_KEY, config_path
+        )
+        public_record_roles = _require_list(
+            vocabulary_table, PUBLIC_RECORD_ROLES_KEY, config_path
+        )
+    else:
+        public_record_kinds = []
+        public_record_roles = []
+
     return Settings(
         config_path=config_path,
         source_dir=source_dir,
-        files={key: str(files_table[key]) for key in FILE_KEYS},
+        files={key: str(files_table[key]) for key in FILE_KEYS if key in files_table},
         channels=_require_list(vocabulary_table, "channels", config_path),
         capability_categories=_require_list(
             vocabulary_table, "capability_categories", config_path
@@ -330,5 +366,7 @@ def load_settings(path: Path | None = None) -> Settings:
         package_hypothesis_states=_require_list(
             vocabulary_table, "package_hypothesis_states", config_path
         ),
+        public_record_kinds=public_record_kinds,
+        public_record_roles=public_record_roles,
         reading=load_reading_rules(document, config_path),
     )

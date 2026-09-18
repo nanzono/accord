@@ -6,7 +6,7 @@
 正本の書き方は人によって違う。見出しの深さも、欄を箇条書きで書くか表で書くかも、欄の
 ラベルの言い方も違う。その違いは設定（`BlockRule`）が持ち、この文書はそれを当てる側に徹する。
 どの節をブロックとして読むかは `select_blocks`、その節の欄をどう読むかは `read_fields` が
-1 か所で決め、正本 7 種の読み込みはどちらも同じ関数を通る。
+1 か所で決め、正本 8 種の読み込みはどちらも同じ関数を通る。
 """
 
 from __future__ import annotations
@@ -30,6 +30,12 @@ NOTE_RE = re.compile(r"[（(][^（）()]*[）)][ \t]*$")
 
 # 見出しの前置きに続く数字。「案件12｜…」の前置きを外した残りから 12 を取る。
 LEADING_NUMBER_RE = re.compile(r"^[ \t]*(\d+)")
+
+# 本文に貼られた URL。http か https で始まり、空白・全角空白・改行・囲みの記号・句読点で終わる。
+URL_RE = re.compile("https?://[^\\s　<>\"'`)）」、。]+")
+
+# 取った URL の末尾に付いていたら落とす記号。文末の記号を URL に含めないため。
+URL_TAIL_MARKS = ".,、。)）"
 
 
 @dataclass
@@ -127,6 +133,15 @@ def bullet_items(body: str, first_block: bool = False) -> list[str]:
             continue
         items.append(match.group(1).strip())
     return items
+
+
+def find_urls(text: str) -> list[str]:
+    """本文に書かれた URL を、書かれた順に拾う。
+
+    Markdown のリンク記法 `[文字](URL)` と `<URL>` は、囲みの記号が上の 2 つの規則で落ちるので、
+    別の処理は書かない。同じ URL が 2 度書かれていれば、2 件として返す（畳むのは読む側の仕事）。
+    """
+    return [match.group(0).rstrip(URL_TAIL_MARKS) for match in URL_RE.finditer(text)]
 
 
 def strip_note(text: str) -> str:

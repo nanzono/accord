@@ -46,6 +46,9 @@ REVISE_OPERATION = "revise_package"
 # パッケージを改訂するときに、入力が持たない欄。前の定義の値をそのまま残し、残したことを断る。
 CARRIED_OVER_LABEL = "崩れる条件"
 
+# 裏づけが公開記録のときに、公開可否の欄の代わりに書く語。公開記録は公開されているものである。
+PUBLIC_RECORD_DISCLOSURE = "公開記録（外から確かめられる）"
+
 
 class OfferingService:
     """機能を登記する、パッケージを改訂する。"""
@@ -95,7 +98,7 @@ class OfferingService:
                 ),
             )
 
-        headings = snapshot.section_headings()
+        headings = snapshot.evidence_targets()
         unknown = [name for name in draft.evidence_sections if name not in headings]
         if unknown:
             return WriteResult(
@@ -103,7 +106,8 @@ class OfferingService:
                 rejection=Rejection(
                     constraint=EVIDENCE_SECTION_EXISTS,
                     reason=(
-                        f"裏づけの節「{unknown[0]}」は、職歴の枠にも受託案件にも無い見出しである。"
+                        f"裏づけの節「{unknown[0]}」は、"
+                        "職歴の枠にも受託案件にも公開記録にも無い名前である。"
                     ),
                     next_action=NextAction(
                         operation=REGISTER_OPERATION,
@@ -121,8 +125,15 @@ class OfferingService:
         )
         self.repository.append_capability(capability)
 
+        # 公開記録は定義により公開されているものなので、公開可否の欄を持たない。
+        # 「不明」と並べると外に出せないものと読めるので、公開記録であることをそのまま書く。
+        record_names = {record.name for record in snapshot.public_records}
         disclosure = {
-            heading: snapshot.disclosure_of(heading) or "不明"
+            heading: (
+                PUBLIC_RECORD_DISCLOSURE
+                if heading in record_names
+                else snapshot.disclosure_of(heading) or "不明"
+            )
             for heading in capability.evidence_sections
         }
         warnings = [

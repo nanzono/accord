@@ -408,3 +408,56 @@ def test_the_three_known_top_level_sections_are_accepted(alt_settings) -> None:
     assert set(document) <= set(TOP_LEVEL_KEYS)
     # 読み直しても例外にならず、同じ設定が返る。
     assert load_settings(alt_settings.config_path) == alt_settings
+
+
+# ---------------------------------------------------------------- 公開記録の置き場と語彙
+
+
+# 設定から抜くと、公開記録を使わない正本（この段より前の設定と同じ形）になる 3 行の書き出し。
+PUBLIC_RECORD_SETTING_LINES = (
+    "public_records = ",
+    "public_record_kinds = ",
+    "public_record_roles = ",
+)
+
+
+def _drop_lines(settings, prefixes: tuple[str, ...]) -> Path:
+    """写しの設定から、書き出しの合う行を抜いて、その設定ファイルの場所を返す。"""
+    path: Path = settings.config_path
+    lines = path.read_text(encoding="utf-8").splitlines()
+    kept = [line for line in lines if not line.startswith(prefixes)]
+    assert len(kept) == len(lines) - len(prefixes), f"写しの設定に抜く行が無い: {prefixes}"
+    path.write_text("\n".join(kept) + "\n", encoding="utf-8")
+    return path
+
+
+@pytest.mark.parametrize("key", ["public_record_kinds", "public_record_roles"])
+def test_config_with_the_public_record_file_but_without_its_vocabulary_is_rejected(
+    settings, key: str
+) -> None:
+    """公開記録の置き場を書いたのに語彙を書いていない設定は、鍵の名前を添えて起動時に止まる。"""
+    path = _drop_lines(settings, (f"{key} = ",))
+
+    with pytest.raises(ValueError) as caught:
+        load_settings(path)
+
+    assert key in str(caught.value), str(caught.value)
+
+
+def test_config_without_the_public_record_file_still_loads(settings) -> None:
+    """置き場も語彙も書いていない設定は、例外にならず、公開記録を 0 件として読む。"""
+    from accord.models.results import MaterialRequest
+    from accord.services.material import MaterialService
+
+    path = _drop_lines(settings, PUBLIC_RECORD_SETTING_LINES)
+
+    plain = load_settings(path)
+
+    assert plain.has_file("public_records") is False
+    assert plain.public_record_kinds == []
+    assert plain.public_record_roles == []
+    snapshot = MarkdownRepository(plain).load()
+    assert snapshot.public_records == []
+    # 材料の取り出しも、公開記録を空で返すだけで壊れない。
+    material = MaterialService(plain).assemble(MaterialRequest(channel=CHANNEL))
+    assert material.public_records == []

@@ -1,7 +1,7 @@
 # 生成物。直すなら src/accord/ontology.yaml を直す
 """accord が執行する制約の宣言。
 
-制約は 7 つで、正本 src/accord/ontology.yaml が
+制約は 11 つで、正本 src/accord/ontology.yaml が
 挙げる制約に 1 対 1 で対応する。サービスの実装も資源の定義も、この 1 か所を名前で参照する。
 同じ制約が、書きの操作では拒否、読みの操作では警告、検査の操作では一覧として現れる。
 """
@@ -47,7 +47,7 @@ CONSTRAINTS: tuple[Constraint, ...] = (
     ),
     Constraint(
         name="裏づけ節名の実在",
-        watches="機能の裏づけの節名が、職歴の枠か受託案件の見出しとして実在するか。",
+        watches="機能の裏づけの節名が、職歴の枠か受託案件の見出しか、公開記録の名前として実在するか。",
         enforced_by=("register_capability", "check_consistency"),
         appears_as="拒否",
         next_action="実在する見出しのうち、近いものを候補として返す。",
@@ -65,6 +65,34 @@ CONSTRAINTS: tuple[Constraint, ...] = (
         enforced_by=("check_consistency", "assemble_material"),
         appears_as="検出",
         next_action="実在する節の候補を返す。公開不可の節は材料から落とし、落とした節の名前を警告に書く。",
+    ),
+    Constraint(
+        name="公開記録の必須欄",
+        watches="公開記録に、名前・種類・日付・発行元か主催・役割の 5 欄が揃っているか。",
+        enforced_by=("register_public_record",),
+        appears_as="拒否",
+        next_action="欠けた欄の名前と、その欄の書き方の例を返す。",
+    ),
+    Constraint(
+        name="公開記録の種類と役割の語彙",
+        watches="公開記録の種類と役割が、設定ファイルが持つ語の一覧にあるか。",
+        enforced_by=("register_public_record",),
+        appears_as="拒否",
+        next_action="設定が持つ語の一覧を返す。",
+    ),
+    Constraint(
+        name="由来の節の実在",
+        watches="公開記録の由来の節が、職歴の枠か受託案件の見出しとして実在するか。",
+        enforced_by=("register_public_record", "check_consistency"),
+        appears_as="拒否",
+        next_action="実在する見出しのうち、近いものを候補として返す。",
+    ),
+    Constraint(
+        name="提示物の URL と公開記録の一致",
+        watches="提示物の本文に貼った URL が、正本の公開記録の URL にあるか。経路の書き方だけが違うものも見る。",
+        enforced_by=("check_consistency",),
+        appears_as="検出",
+        next_action="提示物のファイル名と、正本にある近い URL を返す。経路の書き方だけが違うものは、相手の URL を 1 件返す。",
     ),
     Constraint(
         name="逆参照を書かない",

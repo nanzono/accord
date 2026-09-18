@@ -8,7 +8,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 import accord
+from accord.models.ontology import load_ontology
 from accord.services.consistency import NOTE_LIMIT, ConsistencyService, limit_notes
 from conftest import source_digest
 
@@ -445,3 +448,232 @@ def test_ledger_source_section_outside_the_reading_range_is_named_as_such(alt_se
     assert OUT_OF_RANGE_PARENT in violation.expected, violation.expected
     assert OUT_OF_RANGE_RULE_KEY in violation.expected, violation.expected
     assert violation.candidates == []
+
+
+# ---------------------------------------------------------------- 公開記録と、提示物の URL
+
+
+# 同梱のサンプルの公開記録と、その URL を載せている提示物の本文の書き方。
+RECORD_NAME = "刊行計画の進め方を話した勉強会の発表"
+RECORD_URL = "https://example.com/events/report/spring-meetup/"
+PROFILE_URL_LINE = f"進め方は勉強会でも話しています: {RECORD_URL}"
+
+# 同じ場所を指しているが、書き方だけが違う 5 通り。どれも違反にならない。
+SAME_PLACE_URLS = {
+    "末尾にスラッシュを足す": "https://example.com/events/report/spring-meetup/",
+    "https を http にする": "http://example.com/events/report/spring-meetup",
+    "ホストを大文字にする": "https://EXAMPLE.COM/events/report/spring-meetup",
+    "ホストの頭に www. を足す": "https://www.example.com/events/report/spring-meetup",
+    "末尾にクエリを足す": "https://example.com/events/report/spring-meetup?utm_source=test",
+}
+
+# 経路の書き方だけが違う URL と、正本のどれとも合わない URL。
+DIFFERENT_PATH_URL = "https://example.com/topic/spring-meetup"
+UNKNOWN_URL = "https://example.com/notes/unknown-page"
+
+# 公開記録を 1 件も持たないホスト。テストの中で、このホストの公開記録を足して振る舞いを変える。
+OTHER_HOST_URL = "https://docs.example.com/handbook/progress"
+OTHER_HOST_RECORD = """
+## 進行管理の手引きの公開ページ
+
+- 種類: 記事
+- 日付: 2026-02
+- URL: https://docs.example.com/handbook/index
+- 発行元か主催: 架空の手引きの置き場
+- 役割: 著者
+- 由来の節: なし
+- 出所: 公開したときの控え
+"""
+
+ORIGIN_SECTION_EXISTS = "由来の節の実在"
+PRESENTATION_URL_MATCHES = "提示物の URL と公開記録の一致"
+
+# 設定から抜くと、公開記録を使わない正本（この段より前の設定と同じ形）になる 3 行の書き出し。
+PUBLIC_RECORD_SETTING_LINES = (
+    "public_records = ",
+    "public_record_kinds = ",
+    "public_record_roles = ",
+)
+
+
+def _profile(settings) -> Path:
+    """写しの、URL を本文に載せている提示物の場所を返す。"""
+    return settings.path_for("presentations") / "tsukikusa" / "profile.md"
+
+
+def _url_violations(report) -> list:
+    """提示物の URL の違反だけを取り出す。"""
+    return [v for v in report.violations if v.constraint == PRESENTATION_URL_MATCHES]
+
+
+def _without_public_records(settings):
+    """写しの設定から、公開記録の置き場と語彙の 3 行を抜いて読み直す。"""
+    from accord.vocabulary.settings import load_settings
+
+    path: Path = settings.config_path
+    lines = path.read_text(encoding="utf-8").splitlines()
+    kept = [line for line in lines if not line.startswith(PUBLIC_RECORD_SETTING_LINES)]
+    assert len(kept) == len(lines) - 3, "写しの設定から抜く 3 行が見つからない"
+    path.write_text("\n".join(kept) + "\n", encoding="utf-8")
+    return load_settings(path)
+
+
+def test_origin_section_that_does_not_exist_is_listed_as_a_violation(settings) -> None:
+    """公開記録の由来の節が実在しないと、公開記録の正本のどのブロックかを名指しで挙げる。"""
+    before = len(_report(settings).violations)
+    _rewrite(
+        settings.path_for("public_records"),
+        "- 由来の節: ナギサ書房 刊行計画の進行管理",
+        "- 由来の節: ナギサ書房 刊行計画の進こう管理",
+    )
+
+    report = _report(settings)
+
+    assert len(report.violations) == before + 1, [v.model_dump() for v in report.violations]
+    origin = [v for v in report.violations if v.constraint == ORIGIN_SECTION_EXISTS]
+    assert len(origin) == 1, [v.model_dump() for v in report.violations]
+    assert origin[0].file == settings.files["public_records"]
+    assert RECORD_NAME in origin[0].location
+    assert origin[0].candidates
+
+
+def test_presentation_url_missing_from_the_source_is_a_violation_with_close_urls(
+    settings,
+) -> None:
+    """正本のどの公開記録の URL にも無い URL は、登記する操作の名前と近い URL つきで挙げる。"""
+    _rewrite(_profile(settings), RECORD_URL, UNKNOWN_URL)
+
+    report = _report(settings)
+
+    urls = _url_violations(report)
+    assert len(urls) == 1, [v.model_dump() for v in report.violations]
+    violation = urls[0]
+    assert violation.file == "presentations/tsukikusa/profile.md"
+    assert UNKNOWN_URL in violation.location
+    assert "register_public_record" in violation.expected
+    # 違反の文だけで登記に行けるよう、必ず渡す欄の名前を正本の必須の別から引いて確かめる
+    public_record = next(t for t in load_ontology().types if t.name == "PublicRecord")
+    required_labels = [field.label for field in public_record.fields if field.required]
+    assert all(label in violation.expected for label in required_labels), violation.expected
+    assert violation.candidates
+
+
+def test_presentation_url_with_a_different_path_is_named_as_a_notation_difference(
+    settings,
+) -> None:
+    """同じ場所を指すのに経路の書き方だけが違う URL は、相手の URL 1 件を添えてそう言い分ける。"""
+    _rewrite(_profile(settings), RECORD_URL, DIFFERENT_PATH_URL)
+
+    report = _report(settings)
+
+    urls = _url_violations(report)
+    assert len(urls) == 1, [v.model_dump() for v in report.violations]
+    violation = urls[0]
+    assert "経路の書き方が違う" in violation.expected
+    assert RECORD_URL in violation.expected
+    assert violation.candidates == [RECORD_URL]
+
+
+@pytest.mark.parametrize("writing", sorted(SAME_PLACE_URLS))
+def test_urls_that_differ_only_in_writing_are_treated_as_the_same(settings, writing) -> None:
+    """書き方だけが違う 5 通りは、どれも正本の URL と同じものとして扱う。"""
+    _rewrite(_profile(settings), RECORD_URL, SAME_PLACE_URLS[writing])
+
+    report = _report(settings)
+
+    assert _url_violations(report) == [], writing
+
+
+def test_public_record_without_url_is_never_compared(settings) -> None:
+    """URL を持たない公開記録だけの正本では、提示物に URL を書いても照らす相手が 0 件になる。"""
+    records = settings.path_for("public_records")
+    text = records.read_text(encoding="utf-8")
+    head, mark, tail = text.partition("## 分かれた数字を 1 か所に集める手順の寄稿")
+    assert mark, "写しの公開記録に、URL を持たないブロックが無い"
+    records.write_text(head.split("## ", 1)[0] + mark + tail, encoding="utf-8")
+    _rewrite(_profile(settings), RECORD_URL, UNKNOWN_URL)
+
+    report = _report(settings)
+
+    # 照らす相手が 0 件なので、違反も、近い URL の候補も返らない。
+    assert [violation.candidates for violation in _url_violations(report)] == []
+
+
+def test_url_on_a_host_without_any_public_record_is_not_compared(settings) -> None:
+    """正本のどの公開記録とも違うホストの URL は見ない。同じホストの公開記録を足すと見るようになる。"""
+    _rewrite(_profile(settings), RECORD_URL, OTHER_HOST_URL)
+    before = len(_url_violations(_report(settings)))
+    assert before == 0
+
+    records = settings.path_for("public_records")
+    records.write_text(
+        records.read_text(encoding="utf-8") + OTHER_HOST_RECORD, encoding="utf-8"
+    )
+
+    urls = _url_violations(_report(settings))
+    assert len(urls) == 1, [violation.model_dump() for violation in urls]
+    assert OTHER_HOST_URL in urls[0].location
+
+
+def test_without_the_public_record_file_urls_are_not_compared_and_a_note_says_so(
+    settings,
+) -> None:
+    """公開記録の置き場を書いていない設定では、URL を照合せず、照合していないことを断る。"""
+    _rewrite(_profile(settings), RECORD_URL, UNKNOWN_URL)
+    plain = _without_public_records(settings)
+
+    report = _report(plain)
+
+    assert _url_violations(report) == []
+    listed = "\n".join(report.notes)
+    assert "公開記録の置き場が設定に無い" in listed, listed
+    for key in ("public_records", "public_record_kinds", "public_record_roles"):
+        assert key in listed, listed
+
+
+def test_public_record_not_carried_by_any_presentation_is_a_note_not_a_violation(
+    settings,
+) -> None:
+    """看板の裏づけの公開記録がどの提示物にも載っていないことは、注記で、違反にはしない。"""
+    _rewrite(_profile(settings), PROFILE_URL_LINE, "")
+
+    report = _report(settings)
+
+    assert _url_violations(report) == []
+    assert [v.model_dump() for v in report.violations] == []
+    carried = [note for note in report.notes if "載っていない" in note]
+    assert len(carried) == 1, report.notes
+    assert RECORD_NAME in carried[0]
+    assert "違反にはしない" in carried[0]
+
+
+def test_evidence_section_can_point_at_a_public_record(settings) -> None:
+    """機能の裏づけの節は公開記録の名前も指せる。実在しない名前のときの拒否は公開記録にも触れる。"""
+    from accord.models.results import CapabilityDraft
+    from accord.services.offering import OfferingService
+
+    snapshot = ConsistencyService(settings).repository.load()
+    pointing = [
+        item for item in snapshot.capabilities if RECORD_NAME in item.evidence_sections
+    ]
+    assert pointing, "写しの機能の台帳に、公開記録を裏づけにした行が無い"
+    report = _report(settings)
+    assert [v for v in report.violations if v.constraint == EVIDENCE_SECTION_EXISTS] == []
+
+    service = OfferingService(settings)
+    draft = {
+        "name": "話した内容を手順に落とす",
+        "description": "勉強会で話した進め方を、そのまま使える手順に直す",
+        "category": settings.capability_categories[2],
+    }
+    accepted = service.register_capability(
+        CapabilityDraft(**draft, evidence_sections=[RECORD_NAME])
+    )
+    assert accepted.accepted is True, accepted.model_dump()
+
+    rejected = service.register_capability(
+        CapabilityDraft(**draft, evidence_sections=["どこにも無い名前"])
+    )
+    assert rejected.accepted is False
+    assert rejected.rejection is not None
+    assert "公開記録" in rejected.rejection.reason

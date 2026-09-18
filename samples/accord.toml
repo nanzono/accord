@@ -11,7 +11,7 @@
 directory = "source"
 
 [source.files]
-# 正本 7 種のファイル名。提示物だけはディレクトリで、媒体ごとの下位ディレクトリを持つ。
+# 正本 8 種のファイル名。提示物だけはディレクトリで、媒体ごとの下位ディレクトリを持つ。
 positioning = "positioning.md"
 packages = "packages.md"
 capabilities = "capabilities.md"
@@ -19,6 +19,11 @@ career = "career.md"
 engagements = "engagements.md"
 resume_ledger = "resume_ledger.md"
 presentations = "presentations"
+
+# 公開記録（リポジトリ・登壇・記事・書籍・第三者の掲載）の置き場。
+# この 1 行だけは、書かなくてもよい。書かなければ公開記録を 0 件として読み、提示物の本文の
+# URL を正本と突き合わせる検査も行わない（行っていないことは、検査の断りに 1 行出る）。
+public_records = "public_records.md"
 
 # 見せ方の正本。媒体ごとの規約と、禁じた言い回しを持つ。accord はこの中身を型として持たず、
 # 材料の取り出しが、宛先の媒体の節と「禁じた言い回し」の節をそのまま材料に載せる。
@@ -39,3 +44,10 @@ capability_categories = [
 
 # パッケージの仮説の状態の語。
 package_hypothesis_states = ["仮説のみ", "検証中", "実績あり"]
+
+# 公開記録の種類の語。公開記録を登記するときの種類は、この一覧の語に限る。
+# 公開記録の置き場を書いたときだけ必須になる（置き場を書かない設定では、この 2 行も要らない）。
+public_record_kinds = ["リポジトリ", "登壇", "記事", "書籍", "第三者の掲載"]
+
+# 公開記録の役割の語。その公開記録で自分が何だったかを書く。
+public_record_roles = ["登壇者", "著者", "作者", "掲載対象"]

@@ -18,14 +18,14 @@ GENERATOR = REPO_ROOT / "scripts" / "generate_models.py"
 SERVICES_DIR = REPO_ROOT / "src" / "accord" / "services"
 
 # 数の正本は src/accord/ontology.yaml。
-EXPECTED_TYPES = 7
-EXPECTED_RELATIONS = 6
-EXPECTED_RELATION_EDGES = 7
-EXPECTED_CONSTRAINTS = 7
+EXPECTED_TYPES = 8
+EXPECTED_RELATIONS = 8
+EXPECTED_RELATION_EDGES = 11
+EXPECTED_CONSTRAINTS = 11
 
 
-def test_ontology_lists_seven_types_six_relations_seven_constraints(settings) -> None:
-    """資源 accord://ontology が、型 7 つ・関係 6 種・制約 7 つを返す。"""
+def test_ontology_lists_eight_types_eight_relations_eleven_constraints(settings) -> None:
+    """資源 accord://ontology が、型 8 つ・関係 8 種・制約 11 つを返す。"""
     server = create_server(settings)
     contents = asyncio.run(server.read_resource("accord://ontology"))
     document = json.loads(contents[0].content)
@@ -34,7 +34,7 @@ def test_ontology_lists_seven_types_six_relations_seven_constraints(settings) ->
     assert len(document["relations"]) == EXPECTED_RELATIONS
     assert len(document["constraints"]) == EXPECTED_CONSTRAINTS
 
-    # 関係は 6 種で、相手の型ごとに数えた辺は 7 本になる。
+    # 関係は 8 種で、相手の型ごとに数えた辺は 11 本になる。
     ontology = load_ontology()
     assert ontology.relation_edge_count == EXPECTED_RELATION_EDGES
 

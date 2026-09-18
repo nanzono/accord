@@ -159,7 +159,7 @@ def diff_mermaid_nodes(readme_text: str, ontology: Ontology) -> list[str]:
 def diff_mermaid_edges(readme_text: str, ontology: Ontology) -> list[str]:
     """図の矢印の集合（from・関係名・to の 3 つ組）が、関係を to ごとに展開した集合と一致するかを見る。
 
-    裏づけの関係は to を 2 つ持つので、矢印としては 2 本に展開して比べる。
+    裏づけの関係は to を 3 つ、由来は 2 つ持つので、矢印としてはその本数に展開して比べる。
     """
     section = extract_section(readme_text)
     if section is None:
@@ -243,21 +243,21 @@ def test_mermaid_nodes_match_types() -> None:
 
 
 def test_mermaid_edges_match_relations() -> None:
-    """図の矢印の集合が、関係を相手ごとに展開した 7 本と過不足なく一致する。"""
+    """図の矢印の集合が、関係を相手ごとに展開した 11 本と過不足なく一致する。"""
     ontology = load_ontology()
     diffs = diff_mermaid_edges(_real_readme_text(), ontology)
     assert not diffs, "\n".join(diffs)
 
 
 def test_type_table_lists_every_label() -> None:
-    """型の表に、7 つの label それぞれを 1 列目に持つ行がある。"""
+    """型の表に、8 つの label それぞれを 1 列目に持つ行がある。"""
     ontology = load_ontology()
     diffs = diff_type_table(_real_readme_text(), ontology)
     assert not diffs, "\n".join(diffs)
 
 
 def test_rule_table_lists_every_constraint_with_appears_as() -> None:
-    """ルールの表に、7 つの制約名それぞれを 1 列目に持つ行があり、その行に appears_as の語が含まれる。"""
+    """ルールの表に、11 つの制約名それぞれを 1 列目に持つ行があり、その行に appears_as の語が含まれる。"""
     ontology = load_ontology()
     diffs = diff_rule_table(_real_readme_text(), ontology)
     assert not diffs, "\n".join(diffs)
@@ -357,7 +357,7 @@ def test_self_check_swapping_appears_as_word_is_caught() -> None:
 
 
 def diff_svg_labels(svg_text: str, ontology: Ontology) -> list[str]:
-    """画像にした図に、型の表示名 7 つと関係の名前 6 つがすべて文字として入っているかを見る。
+    """画像にした図に、型の表示名 8 つと関係の名前 8 つがすべて文字として入っているかを見る。
 
     画像は Mermaid の原稿から描いたもので、原稿を直したら描き直す。描き直し忘れをここで拾う。
     """
@@ -372,7 +372,7 @@ def diff_svg_labels(svg_text: str, ontology: Ontology) -> list[str]:
 
 
 def test_svg_figure_lists_every_type_and_relation() -> None:
-    """docs/ontology.svg があり、型の表示名 7 つと関係の名前 6 つをすべて含む。"""
+    """docs/ontology.svg があり、型の表示名 8 つと関係の名前 8 つをすべて含む。"""
     assert SVG_PATH.exists(), f"画像にした図 {SVG_PATH} が無い。"
     ontology = load_ontology()
     diffs = diff_svg_labels(SVG_PATH.read_text(encoding="utf-8"), ontology)

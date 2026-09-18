@@ -1,8 +1,8 @@
 """文面の材料を取り出す操作。
 
 媒体向けの文面を書く工程に入ったときに 1 回呼ばれ、正本の通読の代わりになる材料を返す。
-返すのは、適用される決め、看板のパッケージ、束ねる機能、各機能の裏づけの節、媒体の規約、
-禁じた言い回し、そして警告の一覧である。
+返すのは、適用される決め、看板のパッケージ、束ねる機能、各機能の裏づけの節、裏づけになっている
+公開記録、媒体の規約、禁じた言い回し、そして警告の一覧である。
 
 この操作が執行する制約は 1 つ、「提出物に含まれる事実は公開可の節に限る」である。
 公開不可の節は材料に載せず、落としたことと節の名前を警告に書く。落としたことを黙っていると、
@@ -17,8 +17,8 @@
 from __future__ import annotations
 
 from accord.models.constraints import CONSTRAINTS
-from accord.models.results import Material, MaterialRequest, SourceSnapshot
-from accord.models.types import Capability, Package
+from accord.models.results import Material, MaterialRequest, SourceSnapshot, fold_names
+from accord.models.types import Capability, Package, PublicRecord
 from accord.repository.markdown_repository import MarkdownRepository
 from accord.services.positioning import PositioningService, unknown_channel_notes
 from accord.vocabulary.settings import PRESENTATION_RULES_KEY, Settings
@@ -35,6 +35,9 @@ INSPECT_OPERATION = "check_consistency"
 EVIDENCE_HEADING_KEY = "見出し"
 EVIDENCE_DISCLOSURE_KEY = "公開可否"
 EVIDENCE_BODY_KEY = "本文"
+
+# 警告に名前を並べるときに、名前で見せる数。残りは件数に畳む。
+NAME_SAMPLE_COUNT = 5
 
 
 class MaterialService:
@@ -73,8 +76,9 @@ class MaterialService:
         capabilities, unknown_capabilities = self._capabilities(snapshot, package)
         warnings.extend(unknown_capabilities)
 
-        evidence, evidence_warnings = self._evidence(snapshot, capabilities)
+        evidence, public_records, evidence_warnings = self._evidence(snapshot, capabilities)
         warnings.extend(evidence_warnings)
+        warnings.extend(self._unused_public_record_warnings(snapshot))
 
         channel_rules = self.repository.channel_rules(channel)
         forbidden_phrases = self.repository.forbidden_phrases()
@@ -96,6 +100,7 @@ class MaterialService:
             package=package,
             capabilities=capabilities,
             evidence=evidence,
+            public_records=public_records,
             channel_rules=channel_rules,
             forbidden_phrases=forbidden_phrases,
             warnings=warnings,
@@ -151,13 +156,18 @@ class MaterialService:
 
     def _evidence(
         self, snapshot: SourceSnapshot, capabilities: list[Capability]
-    ) -> tuple[list[dict[str, str]], list[str]]:
+    ) -> tuple[list[dict[str, str]], list[PublicRecord], list[str]]:
         """各機能の裏づけの節を、見出しと本文で集める。公開不可の節は落として警告に書く。
 
+        裏づけは、職歴の枠か受託案件の節を指すこともあれば、公開記録の名前を指すこともある。
+        公開記録は節ではなく 1 件ぶんの型なので、先に取り分けて別の欄で返す。取り分けないと
+        「職歴の枠にも受託案件にも無い見出し」として警告に落ちてしまう。
         同じ節を複数の機能が指すことがあるので、見出しで重複を落とす。
         """
         bodies = self.repository.evidence_bodies()
+        records = {record.name: record for record in snapshot.public_records}
         evidence: list[dict[str, str]] = []
+        public_records: list[PublicRecord] = []
         warnings: list[str] = []
         seen: set[str] = set()
 
@@ -166,6 +176,10 @@ class MaterialService:
                 if heading in seen:
                     continue
                 seen.add(heading)
+
+                if heading in records:
+                    public_records.append(records[heading])
+                    continue
 
                 disclosure = snapshot.disclosure_of(heading)
                 if disclosure is None:
@@ -191,7 +205,28 @@ class MaterialService:
                         EVIDENCE_BODY_KEY: bodies.get(heading, ""),
                     }
                 )
-        return evidence, warnings
+        return evidence, public_records, warnings
+
+    @staticmethod
+    def _unused_public_record_warnings(snapshot: SourceSnapshot) -> list[str]:
+        """どの機能の裏づけにもなっていない公開記録を、名前つきで断る。
+
+        登記しただけで裏づけに使っていない公開記録は、材料に載らない。載らないことを黙っていると、
+        書く側は「登記したのに使われない」理由を探しに正本を開く羽目になる。
+        """
+        used = {
+            name
+            for capability in snapshot.capabilities
+            for name in capability.evidence_sections
+        }
+        unused = [record.name for record in snapshot.public_records if record.name not in used]
+        if not unused:
+            return []
+        return [
+            f"裏づけに使われていない公開記録が {len(unused)} 件ある"
+            f"（{fold_names(unused, keep=NAME_SAMPLE_COUNT)}）。"
+            "いま売る機能の担保に使うなら、機能の裏づけの節にこの名前を足す。"
+        ]
 
     def _presentation_rule_warnings(
         self, channel: str, channel_rules: list[str], forbidden_phrases: list[str]

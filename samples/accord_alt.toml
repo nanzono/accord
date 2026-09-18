@@ -11,7 +11,7 @@
 directory = "source_alt"
 
 [source.files]
-# 正本 7 種のファイル名。職歴の枠と受託案件は 1 つのファイルに同居していて、
+# 正本 8 種のファイル名。職歴の枠と受託案件は 1 つのファイルに同居していて、
 # 見出しの深さで分けて読む（下の [reading.career] と [reading.engagements] を見る）。
 positioning = "positioning.md"
 packages = "product/packages.md"
@@ -22,6 +22,9 @@ resume_ledger = "keirekisho/daicho.md"
 # 提示物は媒体ごとのディレクトリの下にある。どのディレクトリを見るかは
 # [reading.presentations] の directories が決めるので、ここは正本のディレクトリそのものを指す。
 presentations = "."
+
+# 公開記録。ファイルの名前も、1 件ぶんの見出しの深さも、欄のラベルも第 1 のサンプルと違う。
+public_records = "public_works.md"
 
 # 見せ方の正本。媒体ごとの規約はここではなく、各媒体のディレクトリの channel.md にある。
 presentation_rules = "misekata_master.md"
@@ -42,6 +45,10 @@ capability_categories = [
 # パッケージの仮説の状態の語。
 package_hypothesis_states = ["仮説のみ", "検証中", "実績あり"]
 
+# 公開記録の種類の語と役割の語。公開記録の置き場を書いたので、この 2 行が必須になる。
+public_record_kinds = ["リポジトリ", "登壇", "記事", "書籍", "第三者の掲載"]
+public_record_roles = ["登壇者", "著者", "作者", "掲載対象"]
+
 [reading]
 # 正本の書き方。この節をまるごと書かなければ、samples/accord.toml と同じに読む。
 
@@ -56,6 +63,7 @@ strip_label_note = true
 "業種・規模" = ["業種", "規模"]
 "技術スタック" = ["技術"]
 "課題・背景" = ["課題"]
+"発行元" = ["発行元か主催"]
 
 [reading.packages]
 # パッケージでない節を 1 つ持つので、その節は読まない。
@@ -72,6 +80,10 @@ under_headings = ["職歴・案件（新しい順）"]
 heading_levels = [4, 5]
 under_headings = ["職歴・案件（新しい順）"]
 skip_sections_without_fields = true
+
+[reading.public_records]
+# 公開記録は、束ねるための見出しの下の深さ 3 の見出しで 1 件ぶんになる。
+heading_levels = [3]
 
 [reading.resume_ledger]
 # 台帳の案件は「案件1｜…」の形の見出しで、欄は 2 列の表に書く。

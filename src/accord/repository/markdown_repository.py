@@ -12,7 +12,13 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from accord.models.ontology import missing_required_fields
-from accord.models.results import SkippedHeading, SourceDefect, SourceSnapshot
+from accord.models.results import (
+    PresentationUrl,
+    SkippedHeading,
+    SourceDefect,
+    SourceSnapshot,
+    normalize_url,
+)
 from accord.models.types import (
     Capability,
     CareerFrame,
@@ -20,12 +26,14 @@ from accord.models.types import (
     Package,
     Positioning,
     Presentation,
+    PublicRecord,
     ResumeLedger,
 )
 from accord.repository.sections import (
     Section,
     bullet_items,
     find_section,
+    find_urls,
     leading_number,
     read_fields,
     select_blocks,
@@ -37,6 +45,7 @@ from accord.vocabulary.settings import (
     CHANNEL_RULES_PER_CHANNEL_FILE,
     PHRASES_FROM_TABLE,
     PRESENTATION_RULES_KEY,
+    PUBLIC_RECORDS_KEY,
     BlockRule,
     Settings,
 )
@@ -103,6 +112,17 @@ PRESENTATION_LABELS = {
     "宣言する束": "declared_package",
     "作成日": "created_on",
 }
+# 公開記録の欄。名前は見出しが持つので、この表には無い。
+# 並びは、書き戻すときの行の並びでもある（読むときは並びを見ない）。
+PUBLIC_RECORD_LABELS = {
+    "種類": "kind",
+    "日付": "published_on",
+    "URL": "url",
+    "発行元か主催": "publisher",
+    "役割": "role",
+    "由来の節": "origin_section",
+    "出所": "source",
+}
 
 # 一覧の欄を 1 行に書くときの区切り。
 LIST_SEPARATOR = "/"
@@ -133,6 +153,7 @@ CAREER_FRAME_TYPE_NAME = "CareerFrame"
 ENGAGEMENT_TYPE_NAME = "Engagement"
 PRESENTATION_TYPE_NAME = "Presentation"
 RESUME_LEDGER_TYPE_NAME = "ResumeLedger"
+PUBLIC_RECORD_TYPE_NAME = "PublicRecord"
 
 
 def _split_list(value: str) -> list[str]:
@@ -211,7 +232,7 @@ class MarkdownRepository:
         return select_blocks(split_sections(text), self._rule(key))
 
     def load(self) -> SourceSnapshot:
-        """7 種の正本を読み、型のインスタンスの集合にする。
+        """8 種の正本を読み、型のインスタンスの集合にする。
 
         必須の欄が欠けたブロックや節は型にできないので集合には入らないが、飛ばしたこと自体を
         defects に載せて渡す。黙って飛ばすと、1 つ前か隣のブロックが「いまの正本」として
@@ -222,7 +243,8 @@ class MarkdownRepository:
         capabilities, capability_defects = self._load_capabilities()
         career_frames, career_defects = self._load_career_frames()
         engagements, engagement_defects = self._load_engagements()
-        presentations, presentation_defects = self._load_presentations()
+        public_records, public_record_defects = self._load_public_records()
+        presentations, presentation_urls, presentation_defects = self._load_presentations()
         ledger_entries, ledger_defects = self._load_ledger_entries()
         return SourceSnapshot(
             positionings=positionings,
@@ -230,14 +252,17 @@ class MarkdownRepository:
             capabilities=capabilities,
             career_frames=career_frames,
             engagements=engagements,
+            public_records=public_records,
             presentations=presentations,
             ledger_entries=ledger_entries,
+            presentation_urls=presentation_urls,
             defects=[
                 *positioning_defects,
                 *package_defects,
                 *capability_defects,
                 *career_defects,
                 *engagement_defects,
+                *public_record_defects,
                 *presentation_defects,
                 *ledger_defects,
             ],
@@ -446,6 +471,44 @@ class MarkdownRepository:
             result.append(Engagement(**values))
         return result, defects
 
+    def _load_public_records(self) -> tuple[list[PublicRecord], list[SourceDefect]]:
+        """公開記録を、1 件 1 ブロックで読む。
+
+        置き場が設定に書かれていなければ、公開記録を 0 件として返す。書かなくてもよい置き場は
+        これ 1 つで、書いていない正本は公開記録を使わない正本として、今までどおり読める。
+        """
+        if not self.settings.has_file(PUBLIC_RECORDS_KEY):
+            return [], []
+
+        result: list[PublicRecord] = []
+        defects: list[SourceDefect] = []
+        blocks, rule = self._blocks(PUBLIC_RECORDS_KEY)
+        for block in blocks:
+            fields = read_fields(block, rule)
+            values: dict[str, object] = {
+                name: fields.get(label) for label, name in PUBLIC_RECORD_LABELS.items()
+            }
+            values["name"] = block.heading
+
+            missing = missing_required_fields(PUBLIC_RECORD_TYPE_NAME, SimpleNamespace(**values))
+            if missing:
+                defects.append(
+                    SourceDefect(
+                        file=self.settings.files[PUBLIC_RECORDS_KEY],
+                        location=f"「{block.heading}」のブロック",
+                        missing_fields=[field.label for field in missing],
+                        source_key=PUBLIC_RECORDS_KEY,
+                        heading=block.heading,
+                    )
+                )
+                continue
+
+            # URL・由来の節・出所は、空を表す語（「なし」など）で書かれていたら持たないものとして読む。
+            for optional_name in ("url", "origin_section", "source"):
+                values[optional_name] = _optional(values.get(optional_name))
+            result.append(PublicRecord(**values))
+        return result, defects
+
     def _load_ledger_entries(self) -> tuple[list[ResumeLedger], list[SourceDefect]]:
         """職務経歴書の台帳を、案件 1 件 1 ブロックで読む。
 
@@ -501,20 +564,27 @@ class MarkdownRepository:
                 found.extend(sorted(root.rglob("*.md")))
         return found
 
-    def _load_presentations(self) -> tuple[list[Presentation], list[SourceDefect]]:
+    def _load_presentations(
+        self,
+    ) -> tuple[list[Presentation], list[PresentationUrl], list[SourceDefect]]:
         """提示物を読む。媒体ごとのディレクトリの下の Markdown が 1 件ずつ。
 
         必須の欄（宛先の媒体・宣言する束）が欠けたファイルは型にできないので、飛ばしたことを断りに残す。
         ただし、宣言の行を持つものだけを提示物として読む設定のときは、宣言を持たないファイルを
         提示物と見なさないので、断りにも残さない。
+
+        あわせて、提示物として読んだファイルの本文に貼られた URL を拾う。提示物として読まなかった
+        ファイル（宣言の行を持たないもの）からは拾わない。正規化して同じになる URL は 1 件に落とす。
         """
         result: list[Presentation] = []
+        urls: list[PresentationUrl] = []
         defects: list[SourceDefect] = []
         rule = self._rule("presentations")
         require_declaration = self.settings.reading.require_presentation_declaration
 
         for path in self._presentation_files():
-            document = Section(level=0, heading="", body=path.read_text(encoding="utf-8"))
+            text = path.read_text(encoding="utf-8")
+            document = Section(level=0, heading="", body=text)
             fields = read_fields(document, rule)
             relative = path.relative_to(self.settings.source_dir).as_posix()
             values: dict[str, object] = {
@@ -544,7 +614,21 @@ class MarkdownRepository:
                 if note.strip() and note.strip() not in EMPTY_WORDS
             ]
             result.append(Presentation(**values))
-        return result, defects
+            urls.extend(self._presentation_urls(relative, text))
+        return result, urls, defects
+
+    @staticmethod
+    def _presentation_urls(relative: str, text: str) -> list[PresentationUrl]:
+        """提示物 1 枚の本文から URL を拾う。正規化して同じになるものは 1 件に落とす。"""
+        found: list[PresentationUrl] = []
+        seen: set[str] = set()
+        for url in find_urls(text):
+            normalized = normalize_url(url)
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            found.append(PresentationUrl(path=relative, url=url, normalized=normalized))
+        return found
 
     def evidence_bodies(self) -> dict[str, str]:
         """裏づけの節として指せる見出しと、その本文の対応を返す。
@@ -705,6 +789,31 @@ class MarkdownRepository:
         if not reason:
             return presentation
         return f"{presentation} {EXCEPTION_SEPARATOR} {reason}"
+
+    def append_public_record(self, record: PublicRecord) -> None:
+        """公開記録を 1 ブロック足す。過去のブロックは書き換えず、末尾に積む。
+
+        積むだけにするのは、決めの正本と同じく、いつ何を公開したかを後から辿れるようにするため
+        である。値の無い任意の欄も「なし」の 1 行で書く。行ごと落とすと、手で書き足す人が
+        欄の並びを写せなくなるからである。
+        """
+        path = self.settings.path_for(PUBLIC_RECORDS_KEY)
+        text = path.read_text(encoding="utf-8") if path.is_file() else ""
+        lines = text.splitlines()
+        lines.extend(["", *self._public_record_block(record)])
+        path.write_text("\n".join(lines).rstrip("\n") + "\n", encoding="utf-8")
+
+    @classmethod
+    def _public_record_block(cls, record: PublicRecord) -> list[str]:
+        """公開記録 1 件を、正本のブロックの行にする。読み戻すのは _load_public_records である。"""
+        lines = [f"## {record.name}", ""]
+        for label, name in PUBLIC_RECORD_LABELS.items():
+            value = getattr(record, name)
+            if value is None or value == "":
+                lines.append(f"- {label}: {EMPTY_MARK}")
+                continue
+            lines.append(f"- {label}: {cls._as_text(value)}")
+        return lines
 
     def write_package(self, package: Package) -> None:
         """パッケージ定義の 1 節を書き換える。その名前の節が無ければ、末尾に足す。

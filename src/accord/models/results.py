@@ -3,7 +3,7 @@
 拒否は例外ではなく返り値で表す。呼んだ側が、返ってきた「次の一手」を読んで自分で
 呼び直せるようにするためである。だから書きの操作は、通っても通らなくても WriteResult を返す。
 
-正本の 7 つの型は生成物の types.py にあり、この文書はそれを組み合わせた器だけを持つ。
+正本の 8 つの型は生成物の types.py にあり、この文書はそれを組み合わせた器だけを持つ。
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from accord.models.types import (
     Package,
     Positioning,
     Presentation,
+    PublicRecord,
     ResumeLedger,
 )
 
@@ -56,6 +57,62 @@ def fold_names(names: list[str], keep: int = 5) -> str:
     if rest > 0:
         return f"{head} ほかに {rest} 件"
     return head
+
+
+def normalize_url(url: str) -> str:
+    """URL から、書き方の違い（scheme・www.・末尾のスラッシュ・クエリ）だけを落とす。
+
+    比べ方をここ 1 か所に置く。提示物の本文から拾う側も、正本の公開記録と突き合わせる側も、
+    この関数が返した形どうしを比べる。落とすのは、http と https の違い、ホストの大文字と小文字、
+    ホストの先頭の `www.`、`?` から後ろと `#` から後ろ、末尾のスラッシュ 1 つである。
+    パスの大文字と小文字は残す（同じ経路の別の綴りは、別の場所を指しうるため）。
+    http でも https でも始まらない文字列は、URL として扱わずに空文字を返す。
+    """
+    text = url.strip()
+    for scheme in ("https://", "http://"):
+        if text[: len(scheme)].lower() == scheme:
+            text = text[len(scheme) :]
+            break
+    else:
+        return ""
+
+    # クエリとフラグメントを先に落とす。どちらの記号もホストには現れないので、
+    # ホストを切り出してから落とすのと結果は変わらず、パスを持たない URL も同じ形になる。
+    for mark in ("?", "#"):
+        text = text.split(mark, 1)[0]
+
+    host, slash, path = text.partition("/")
+    host = host.lower()
+    if host.startswith("www."):
+        host = host[len("www.") :]
+
+    normalized = f"{host}{slash}{path}"
+    if normalized.endswith("/"):
+        normalized = normalized[:-1]
+    return normalized
+
+
+def url_host(normalized: str) -> str:
+    """正規化した URL のホストを返す。照合の相手にするかどうかは、このホストで決める。"""
+    return normalized.partition("/")[0]
+
+
+def url_tail(normalized: str) -> str:
+    """正規化した URL のパスを / で切り、空でない最後の要素を返す。無ければ空文字。
+
+    同じものを指しているのに経路の書き方だけが違う URL は、この最後の要素が同じになる。
+    """
+    path = normalized.partition("/")[2]
+    items = [item for item in path.split("/") if item]
+    return items[-1] if items else ""
+
+
+class PresentationUrl(BaseModel):
+    """提示物の本文に書かれていた URL 1 つ。"""
+
+    path: str = Field(description="その提示物の、正本のディレクトリからの相対パス")
+    url: str = Field(description="本文に書かれていたそのままの文字列")
+    normalized: str = Field(description="書き方の違いを落とした形")
 
 
 class NextAction(BaseModel):
@@ -142,6 +199,19 @@ class CapabilityDraft(BaseModel):
     evidence_sections: list[str] = Field(default_factory=list)
 
 
+class PublicRecordDraft(BaseModel):
+    """公開記録を登記する操作の入力。欠けた欄を見つけるため、どの欄も空を許して受ける。"""
+
+    name: str | None = None
+    kind: str | None = None
+    published_on: str | None = None
+    url: str | None = None
+    publisher: str | None = None
+    role: str | None = None
+    origin_section: str | None = None
+    source: str | None = None
+
+
 class PackageDraft(BaseModel):
     """パッケージを改訂する操作の入力。"""
 
@@ -178,6 +248,9 @@ class Material(BaseModel):
     capabilities: list[Capability] = Field(default_factory=list, description="束ねる機能")
     evidence: list[dict[str, str]] = Field(
         default_factory=list, description="各機能の裏づけの節（公開可のものだけ。見出しと本文）"
+    )
+    public_records: list[PublicRecord] = Field(
+        default_factory=list, description="束ねる機能の裏づけになっている公開記録"
     )
     channel_rules: list[str] = Field(default_factory=list, description="媒体の規約")
     forbidden_phrases: list[str] = Field(default_factory=list, description="禁じた言い回し")
@@ -249,15 +322,19 @@ class SkippedHeading(BaseModel):
 
 
 class SourceSnapshot(BaseModel):
-    """正本 7 種を読み込んだ結果。リポジトリが返し、サービスはこれだけを見て判断する。"""
+    """正本 8 種を読み込んだ結果。リポジトリが返し、サービスはこれだけを見て判断する。"""
 
     positionings: list[Positioning] = Field(default_factory=list)
     packages: list[Package] = Field(default_factory=list)
     capabilities: list[Capability] = Field(default_factory=list)
     career_frames: list[CareerFrame] = Field(default_factory=list)
     engagements: list[Engagement] = Field(default_factory=list)
+    public_records: list[PublicRecord] = Field(default_factory=list)
     presentations: list[Presentation] = Field(default_factory=list)
     ledger_entries: list[ResumeLedger] = Field(default_factory=list)
+    presentation_urls: list[PresentationUrl] = Field(
+        default_factory=list, description="提示物の本文に書かれていた URL"
+    )
     defects: list[SourceDefect] = Field(
         default_factory=list, description="必須の欄が欠けていて型にできなかったブロック"
     )
@@ -266,10 +343,18 @@ class SourceSnapshot(BaseModel):
     )
 
     def section_headings(self) -> list[str]:
-        """裏づけの節と出典の節が指せる見出しを、職歴の枠と受託案件から集める。"""
+        """由来の節と出典の節が指せる見出しを、職歴の枠と受託案件から集める。"""
         return [frame.heading for frame in self.career_frames] + [
             engagement.heading for engagement in self.engagements
         ]
+
+    def evidence_targets(self) -> list[str]:
+        """裏づけの節が指せる名前。職歴の枠・受託案件の見出しに、公開記録の名前を足したもの。
+
+        並びは職歴の枠・受託案件・公開記録の順にする。同じ名前が重なったとき、先に見つかるのが
+        職歴の枠と受託案件になるようにするためである（本文を引く evidence_bodies と同じ流儀）。
+        """
+        return self.section_headings() + [record.name for record in self.public_records]
 
     def disclosure_of(self, heading: str) -> str | None:
         """見出しに対応する節の公開可否を返す。見出しが無ければ None。"""

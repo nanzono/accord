@@ -1,10 +1,10 @@
-"""書きの操作 3 つに共通の、2 つの約束を確かめる。
+"""書きの操作 4 つに共通の、2 つの約束を確かめる。
 
 1 つは、拒否の返り値が必ず「次に何をすべきか」を持つこと。何が悪いかだけを返すと、
 受け取った側は正本を読み直して直し方を自分で探す羽目になり、規則が行動の瞬間に効かない。
 もう 1 つは、拒否のときに正本のバイト列が 1 つも変わらないこと。
 
-到達できる拒否の経路を、3 つの操作ぶんすべて並べて回す。経路を 1 つ足したら、この表に 1 行足す。
+到達できる拒否の経路を、4 つの操作ぶんすべて並べて回す。経路を 1 つ足したら、この表に 1 行足す。
 """
 
 from __future__ import annotations
@@ -17,10 +17,12 @@ from accord.models.results import (
     CapabilityDraft,
     PackageDraft,
     PositioningDraft,
+    PublicRecordDraft,
     WriteResult,
 )
 from accord.services.offering import OfferingService
 from accord.services.positioning import PositioningService
+from accord.services.public_records import PublicRecordService
 from accord.vocabulary.settings import Settings
 from conftest import source_digest
 
@@ -56,6 +58,21 @@ def _register(settings: Settings, **changes) -> WriteResult:
     return OfferingService(settings).register_capability(CapabilityDraft(**draft))
 
 
+def _register_record(settings: Settings, **changes) -> WriteResult:
+    """通る公開記録の入力を土台に、渡された欄だけを差し替えて登記を呼ぶ。"""
+    draft = {
+        "name": "配送データの集約を話した勉強会の発表",
+        "kind": settings.public_record_kinds[1],
+        "published_on": "2026-03-14",
+        "url": "https://example.com/events/report/data-meetup/",
+        "publisher": "データの置き場づくりを持ち寄る勉強会（架空の催し）",
+        "role": settings.public_record_roles[0],
+        "origin_section": KNOWN_SECTION,
+    }
+    draft.update(changes)
+    return PublicRecordService(settings).register(PublicRecordDraft(**draft))
+
+
 def _revise(settings: Settings, **changes) -> WriteResult:
     """通るパッケージの入力を土台に、渡された欄だけを差し替えて改訂を呼ぶ。"""
     draft = {
@@ -89,6 +106,14 @@ REJECTION_PATHS = {
     ),
     "パッケージが束ねる機能が台帳に無い": lambda settings: _revise(
         settings, capabilities=["要件を決める場をつくらない"]
+    ),
+    "公開記録の名前と役割が無い": lambda settings: _register_record(settings, name="", role=""),
+    "公開記録の種類が設定の語に無い": lambda settings: _register_record(
+        settings, kind="ポッドキャスト"
+    ),
+    "公開記録の役割が設定の語に無い": lambda settings: _register_record(settings, role="司会"),
+    "公開記録の由来の節が実在しない": lambda settings: _register_record(
+        settings, origin_section="ナギサ書房 刊行計画の進こう管理"
     ),
 }
 

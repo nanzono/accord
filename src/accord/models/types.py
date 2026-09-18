@@ -1,7 +1,7 @@
 # 生成物。直すなら src/accord/ontology.yaml を直す
 """accord の型の定義。
 
-型は 7 つで、正本 src/accord/ontology.yaml が
+型は 8 つで、正本 src/accord/ontology.yaml が
 挙げる型に 1 対 1 で対応する。欄の名前と必須の別は src/accord/ontology.yaml が持つ。
 """
 
@@ -70,6 +70,19 @@ class Engagement(BaseModel):
     technologies: str | None = Field(default=None, description="技術")
     disclosure: str = Field(description="公開可否。外に出してよいかどうか。公開不可の節は材料の取り出しが落とす。")
     source: str = Field(description="出所。この記述の元にした素材。")
+
+
+class PublicRecord(BaseModel):
+    """公開記録。外から確かめられる公開の成果物 1 件。リポジトリ・登壇・記事・書籍・第三者の掲載など。1 件 1 ブロックで積む。"""
+
+    name: str = Field(description="名前。この 1 件を言い表す名前。機能の裏づけの節は、この文字列で指す。")
+    kind: str = Field(description="種類。選べる語は設定ファイルの public_record_kinds が持つ一覧に限る。")
+    published_on: str = Field(description="日付。2020-03-10 の形。月までしか分からないときは 2020-03、年だけなら 2020 と書く。")
+    url: str | None = Field(default=None, description="URL。外から確かめられる場所。紙媒体など URL が無いものは「なし」と書く。")
+    publisher: str = Field(description="発行元か主催。記事なら載せた媒体、登壇なら催しの主催、リポジトリなら置いた場所。")
+    role: str = Field(description="役割。選べる語は設定ファイルの public_record_roles が持つ一覧に限る。")
+    origin_section: str | None = Field(default=None, description="由来の節。職歴の枠か受託案件の見出し。無ければ空でよい。")
+    source: str | None = Field(default=None, description="出所。この記述の元にした素材。URL があれば、その URL 自身が外から確かめられる出所になる。")
 
 
 class Presentation(BaseModel):

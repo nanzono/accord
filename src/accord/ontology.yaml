@@ -5,12 +5,12 @@
 # 生成物を手で直してはいけない。直すのはこのファイルで、直したら生成器を回す。
 #
 # 数はこのファイルが正本で（由来は README の「設計の要点」）、
-# 型 7 つ・関係 6 種（辺は 7 本）・制約 7 つに 1 対 1 で対応する。
+# 型 8 つ・関係 8 種（辺は 11 本）・制約 11 つに 1 対 1 で対応する。
 # 資源 accord://ontology はこのファイルの中身を返す。
 
 version: 1
 
-# ---------------------------------------------------------------- 型（7）
+# ---------------------------------------------------------------- 型（8）
 #
 # field の type に書ける値は 5 つ。
 #   text        文字列 1 つ            -> str
@@ -214,6 +214,52 @@ types:
         required: true
         description: この記述の元にした素材。
 
+  - name: PublicRecord
+    label: 公開記録
+    description: 外から確かめられる公開の成果物 1 件。リポジトリ・登壇・記事・書籍・第三者の掲載など。1 件 1 ブロックで積む。
+    source: public_records
+    fields:
+      - name: name
+        label: 名前
+        type: text
+        required: true
+        description: この 1 件を言い表す名前。機能の裏づけの節は、この文字列で指す。
+      - name: kind
+        label: 種類
+        type: text
+        required: true
+        description: 選べる語は設定ファイルの public_record_kinds が持つ一覧に限る。
+      - name: published_on
+        label: 日付
+        type: text
+        required: true
+        description: 2020-03-10 の形。月までしか分からないときは 2020-03、年だけなら 2020 と書く。
+      - name: url
+        label: URL
+        type: text
+        required: false
+        description: 外から確かめられる場所。紙媒体など URL が無いものは「なし」と書く。
+      - name: publisher
+        label: 発行元か主催
+        type: text
+        required: true
+        description: 記事なら載せた媒体、登壇なら催しの主催、リポジトリなら置いた場所。
+      - name: role
+        label: 役割
+        type: text
+        required: true
+        description: 選べる語は設定ファイルの public_record_roles が持つ一覧に限る。
+      - name: origin_section
+        label: 由来の節
+        type: text
+        required: false
+        description: 職歴の枠か受託案件の見出し。無ければ空でよい。
+      - name: source
+        label: 出所
+        type: text
+        required: false
+        description: この記述の元にした素材。URL があれば、その URL 自身が外から確かめられる出所になる。
+
   - name: Presentation
     label: 提示物
     description: 媒体の画面や添付に貼る文面。どのパッケージを名乗るかを宣言する。
@@ -292,9 +338,9 @@ types:
         type: text
         required: false
 
-# ---------------------------------------------------------------- 関係（6 種・辺 7 本）
+# ---------------------------------------------------------------- 関係（8 種・辺 11 本）
 #
-# 裏づけだけが相手の型を 2 つ持つので、種は 6、辺は 7 本になる。
+# 裏づけが相手の型を 3 つ、由来が 2 つ持つので、種は 8、辺は 11 本になる。
 
 relations:
   - name: 前面に出す
@@ -311,9 +357,15 @@ relations:
 
   - name: 裏づけ
     from: Capability
-    to: [CareerFrame, Engagement]
+    to: [CareerFrame, Engagement, PublicRecord]
     cardinality: 機能 1 つにつき節 1 つ以上
-    description: 機能が、その仕事をしたと言える事実の節を指す。相手の型ごとに 1 本ずつ数えるので辺は 2 本。
+    description: 機能が、その仕事をしたと言える事実の節か、外から確かめられる公開記録を指す。相手の型ごとに 1 本ずつ数えるので辺は 3 本。
+
+  - name: 由来
+    from: PublicRecord
+    to: [CareerFrame, Engagement]
+    cardinality: 公開記録 1 件につき節 0 か 1
+    description: 公開記録が、その中身の元になった仕事の節を指す。公開記録どうしは指し合わない。
 
   - name: 宣言する
     from: Presentation
@@ -327,13 +379,19 @@ relations:
     cardinality: 提示物 1 件につき注記 0 件以上
     description: 文面に書いたが正本にまだ反映していない事実が、どの節に入るはずかを指す。
 
+  - name: 載せる
+    from: Presentation
+    to: [PublicRecord]
+    cardinality: 提示物 1 件につき公開記録 0 件以上
+    description: 外に出す文面の本文に貼った URL が、正本に登記した公開記録を指す。
+
   - name: 出典の節
     from: ResumeLedger
     to: [Engagement]
     cardinality: 台帳の案件 1 件につき節 1 つ
     description: 台帳の案件が、どの受託案件の節から写したかを指す。
 
-# ---------------------------------------------------------------- 制約（7）
+# ---------------------------------------------------------------- 制約（11）
 #
 # appears_as は、この制約がどの顔で現れるか。
 #   拒否  書きの操作が入力を受け付けず、代わりの手を返す
@@ -361,7 +419,7 @@ constraints:
     next_action: 提示物のファイル名と、いまの看板のパッケージ名を返す。
 
   - name: 裏づけ節名の実在
-    watches: 機能の裏づけの節名が、職歴の枠か受託案件の見出しとして実在するか。
+    watches: 機能の裏づけの節名が、職歴の枠か受託案件の見出しか、公開記録の名前として実在するか。
     enforced_by: [register_capability, check_consistency]
     appears_as: 拒否
     next_action: 実在する見出しのうち、近いものを候補として返す。
@@ -377,6 +435,30 @@ constraints:
     enforced_by: [check_consistency, assemble_material]
     appears_as: 検出
     next_action: 実在する節の候補を返す。公開不可の節は材料から落とし、落とした節の名前を警告に書く。
+
+  - name: 公開記録の必須欄
+    watches: 公開記録に、名前・種類・日付・発行元か主催・役割の 5 欄が揃っているか。
+    enforced_by: [register_public_record]
+    appears_as: 拒否
+    next_action: 欠けた欄の名前と、その欄の書き方の例を返す。
+
+  - name: 公開記録の種類と役割の語彙
+    watches: 公開記録の種類と役割が、設定ファイルが持つ語の一覧にあるか。
+    enforced_by: [register_public_record]
+    appears_as: 拒否
+    next_action: 設定が持つ語の一覧を返す。
+
+  - name: 由来の節の実在
+    watches: 公開記録の由来の節が、職歴の枠か受託案件の見出しとして実在するか。
+    enforced_by: [register_public_record, check_consistency]
+    appears_as: 拒否
+    next_action: 実在する見出しのうち、近いものを候補として返す。
+
+  - name: 提示物の URL と公開記録の一致
+    watches: 提示物の本文に貼った URL が、正本の公開記録の URL にあるか。経路の書き方だけが違うものも見る。
+    enforced_by: [check_consistency]
+    appears_as: 検出
+    next_action: 提示物のファイル名と、正本にある近い URL を返す。経路の書き方だけが違うものは、相手の URL を 1 件返す。
 
   - name: 逆参照を書かない
     watches: 下の層の正本が上の層を指さないこと。事実の節がパッケージや決めを指す書き方を正本に入れない。
