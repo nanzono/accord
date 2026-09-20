@@ -5,7 +5,7 @@
 見るのは 6 項目で、どれも「番号の文字列がそろっているか」だけを見る。要件の文が
 正しいかどうか、テストの中身が要件を確かめているかどうかは見ない。そこは人が読む。
 
-読む範囲は 4 つ。
+読む範囲は 5 つ。
 
   要件        `docs/specs/` 配下の `*.md` の、`REQ-` に数字が続く見出し。
               案内の `README.md` と、コードの囲み（``` と ~~~ で囲んだ範囲）の中は
@@ -15,29 +15,37 @@
   取って代わられた印
               要件の見出しから次の見出しまでの間にある
               `status: superseded by REQ-<数字>` の行。行頭の箇条書きの記号は許す。
+  条件の行    `--spec-dir` で渡された置き場の `*.md` の、「機械検査で見る条件」の
+              見出しから次の見出しまでの間にある条件の行。渡されなければ読まない。
 
 要件が 0 件でも、実装の目印が 0 件でも合格する。番号の書き方と、要件の書き方は
 `docs/specs/README.md` にある。
+
+条件の行の見分け方と、その末尾に置く印の形は、下の「条件の行」の節に書いた。
 
 標準ライブラリだけを使い、`accord` パッケージを import しない。このリポジトリを
 外から見るための道具で、中で動くコードとは依存を分けるためである。
 
 使い方:
   python3 tools/check_req_coverage.py [--root <リポジトリの直下>]
+                                      [--spec-dir <開発の仕様書の置き場>]
 
-終了コード: 0（全項目合格）／1（不合格あり）／2（入力が読めない）
+終了コード: 0（全項目合格。省略は合格に数える）／1（不合格あり）／2（入力が読めない）
 """
 
 import argparse
+import os
 import re
 import sys
 from pathlib import Path
 
 CHECK_TITLE = "要件とテストの突合検査"
 
-# 結果の語。この 2 つ以外は使わない。
+# 結果の語。この 3 つ以外は使わない。SKIP は「見る材料を渡されなかった」であって、
+# 不合格ではない。終了コードには数えない。
 RESULT_PASS = "PASS"
 RESULT_FAIL = "FAIL"
+RESULT_SKIP = "SKIP"
 
 # 番号の桁数。この桁でないものは「番号の形と重なり」で落とす。
 NUMBER_WIDTH = 3
@@ -52,13 +60,64 @@ TESTS_DIR_SHOWN = TESTS_DIR + "/"
 # 要件を置かない案内のファイル名（`docs/specs/` の中でこの名前だけは読まない）。
 GUIDE_NAME = "README.md"
 
+# ---------------------------------------------------------------------------
+# 条件の行
+#
+# 開発の仕様書の「機械検査で見る条件」の節には、条件を 1 件 1 行で書く。その行の
+# 末尾に、その条件がどの要件を指すかの印を 1 つ置く。印の形は 3 つだけである。
+#
+#   要件: REQ-014          振る舞いを述べ、指せる要件がある条件。複数を指すなら
+#                          `要件: REQ-011・REQ-012` や `要件: REQ-046〜REQ-052` と並べる。
+#                          範囲で書いた場合は、間の番号もすべて実在するかを見る。
+#   要件: 無し（理由）      振る舞いを述べていない条件。理由は「開発の手続き」
+#                          「テスト全体の合格」「公開境界」のような短い語で書く。
+#   要件: これから（機能名） 振る舞いを述べているのに、指せる要件がまだ書かれていない条件。
+#                          要件を書いた単位で、番号の印へ置き換える。
+#
+# 1 つの条件が 2 つの振る舞いを述べ、片方だけ要件があるときは
+# `要件: REQ-019・これから（機能名）` のように並べてよい。
+#
+# 条件の行は次の 3 つである。コードの囲みの中は読まない。
+#
+#   行頭が `- ` の行
+#   行頭が `**` の行
+#   表のデータ行（行頭が `| ` で、区切りの行でも見出しの行でもないもの）
+#
+# 太字の段落の下に内訳の箇条書きを置くときは 2 文字字下げする。字下げした行は行頭が
+# `- ` ではなくなるので、条件の行から外れる。内訳が指す要件は、上の太字の行にまとめる。
+#
+# 条件の行を読むのは、宣言の行 `条件の印: あり` を持つ仕様書だけである。
+# `条件の印: 対象外（理由）` の行を持つ仕様書と、どちらの行も無い仕様書は読み飛ばす。
+# 検査に対象の一覧を持たせると、仕様書が増えるたびに一覧の更新を人が覚えておくことに
+# なるので、範囲は仕様書の側の宣言で決める。
+# ---------------------------------------------------------------------------
+
+# 条件の節を見分ける語。この語を含む見出しから、次の見出しまでが条件の節である。
+CONDITION_SECTION_WORD = "機械検査で見る条件"
+
+# 印の頭の語と、結ばないとき・要件がこれからのときの本文の形。
+MARK_LABEL = "要件:"
+MARK_NONE_RE = re.compile(r"^無し（.+）$")
+MARK_PENDING_RE = re.compile(r"これから（.+?）")
+
+# 仕様書の側の宣言。行の頭に置く。
+DECLARATION_RE = re.compile(r"^条件の印:\s*(\S.*?)\s*$")
+DECLARATION_ON = "あり"
+DECLARATION_OFF = "対象外"
+
 FENCE_RE = re.compile(r"^\s*(```|~~~)")
+# 表の区切りの行。行頭が `|` で、縦棒とハイフンとコロンと空白だけでできている。
+TABLE_SEPARATOR_RE = re.compile(r"^\|[\s:|-]+$")
 HEADING_RE = re.compile(r"^#+\s*REQ-(\d+)")
 SUPERSEDED_RE = re.compile(
     r"^\s*(?:[-*+]\s+)?`?status:\s*superseded\s+by\s+REQ-(\d+)`?\s*$"
 )
 TEST_RE = re.compile(r"def\s+(test_REQ_(\d+)[A-Za-z0-9_]*)")
 MARKER_RE = re.compile(r"#\s*spec:\s*REQ-(\d+)")
+# 印の本文に並ぶ番号。`REQ-011・REQ-012` のように並べた形を拾う。
+MARKER_NUMBER_RE = re.compile(r"REQ-(\d+)")
+# 範囲で書いた形。`REQ-046〜REQ-052` は、間の番号も含めてすべてを指す。
+MARKER_RANGE_RE = re.compile(r"REQ-(\d+)\s*〜\s*REQ-(\d+)")
 
 
 class InputError(Exception):
@@ -205,8 +264,153 @@ def collect_markers(root):
     return markers
 
 
-def load_state(root):
-    """検査対象を読んで、項目の関数に渡す状態を作る。"""
+def numbers_in_mark(mark):
+    """印の本文が指す番号を、範囲を広げて全部返す。
+
+    返すのは (番号の一覧, 逆向きの範囲の一覧)。`REQ-046〜REQ-052` は 046 から 052 まで
+    7 件に広げる。範囲で書いた以上、間が詰まっていることが前提なので、欠番があれば
+    「実在しない番号」として落ちる。終わりが始まりより小さい範囲は、書き間違いとして返す。
+    """
+    numbers = []
+    backwards = []
+    rest = mark
+    for found in MARKER_RANGE_RE.finditer(mark):
+        start, end = found.group(1), found.group(2)
+        if int(end) < int(start):
+            backwards.append(found.group(0))
+            continue
+        width = max(len(start), len(end))
+        numbers.extend("%0*d" % (width, n) for n in range(int(start), int(end) + 1))
+    # 広げ終えた範囲は、両端を二重に数えないよう本文から抜く。
+    rest = MARKER_RANGE_RE.sub(" ", rest)
+    numbers.extend(MARKER_NUMBER_RE.findall(rest))
+    return numbers, backwards
+
+
+def mark_of(line):
+    """条件の行から印の本文を取り出す。印が無ければ None を返す。
+
+    表のデータ行は末尾の欄に印を書くので、その欄だけを見る。ほかの行は、行の末尾に
+    ある最後の `要件:` から後ろを印の本文とする。
+    """
+    body = line.rstrip()
+    if body.startswith("| "):
+        cells = [cell.strip() for cell in body.strip().strip("|").split("|")]
+        body = cells[-1] if cells else ""
+    position = body.rfind(MARK_LABEL)
+    if position < 0:
+        return None
+    return body[position + len(MARK_LABEL):].strip()
+
+
+def resolve_given_dir(given):
+    """渡された置き場を探す。
+
+    相対の置き場が見つからないときは、symlink をたどる前の作業ディレクトリからも探す。
+    symlink をたどってこのリポジトリに入ると、`cd` した後の `../…` が、たどる前の場所では
+    なく実体の側から数えられて、書いた場所に着かないためである。
+    `..` は symlink をたどった後で解かれるので、文字列のうちに約めてから見に行く。
+    """
+    path = Path(given)
+    if path.is_dir() or path.is_absolute():
+        return path
+    logical = os.environ.get("PWD")
+    if logical:
+        candidate = Path(os.path.normpath(os.path.join(logical, given)))
+        if candidate.is_dir():
+            return candidate
+    return path
+
+
+def declaration_of(lines):
+    """仕様書の宣言の行を読む。コードの囲みの中は見ない。
+
+    返すのは `あり`・`対象外…`・None のどれか。同じ行が 2 つあれば、はじめの 1 つを採る。
+    """
+    fence = None
+    for line in lines:
+        found_fence = FENCE_RE.match(line)
+        if fence is None and found_fence:
+            fence = found_fence.group(1)
+            continue
+        if fence is not None:
+            if found_fence and found_fence.group(1) == fence:
+                fence = None
+            continue
+        found = DECLARATION_RE.match(line)
+        if found:
+            return found.group(1)
+    return None
+
+
+def collect_conditions(spec_dir):
+    """開発の仕様書の条件の行を集める。置き場が無ければ入力の側の誤り。
+
+    読むのは、宣言の行が `条件の印: あり` の仕様書だけである。返すのは
+    (条件の一覧, 読んだ仕様書の数, 読み飛ばした仕様書の数)。
+    """
+    spec_dir = resolve_given_dir(spec_dir)
+    if not spec_dir.is_dir():
+        raise InputError("仕様書の置き場が見つからない: %s" % spec_dir)
+
+    conditions = []
+    read_count = 0
+    skipped_count = 0
+    for path in sorted(spec_dir.rglob("*.md")):
+        lines = read_lines(path)
+        declaration = declaration_of(lines)
+        if declaration != DECLARATION_ON:
+            # 宣言が無い仕様書も、`対象外` を宣言した仕様書も、条件の行を読まない。
+            skipped_count += 1
+            continue
+        read_count += 1
+        inside = False
+        fence = None
+        fence_line = 0
+        for line_number, line in enumerate(lines, 1):
+            found_fence = FENCE_RE.match(line)
+            if fence is None and found_fence:
+                fence = found_fence.group(1)
+                fence_line = line_number
+                continue
+            if fence is not None:
+                if found_fence and found_fence.group(1) == fence:
+                    fence = None
+                continue
+            if line.startswith("#"):
+                inside = CONDITION_SECTION_WORD in line
+                continue
+            if not inside:
+                continue
+            if line.startswith("| "):
+                if TABLE_SEPARATOR_RE.match(line.rstrip()):
+                    continue
+                # 見出しの行は「次の行が区切りの行」で見分ける。
+                following = lines[line_number] if line_number < len(lines) else ""
+                if TABLE_SEPARATOR_RE.match(following.rstrip()):
+                    continue
+            elif not (line.startswith("- ") or line.startswith("**")):
+                continue
+            conditions.append(
+                {
+                    "where": where(path, spec_dir, line_number),
+                    "text": line.strip(),
+                    "mark": mark_of(line),
+                }
+            )
+        if fence is not None:
+            raise InputError(
+                "コードの囲みが閉じていない: %s。囲みを閉じてから走らせ直す"
+                % where(path, spec_dir, fence_line)
+            )
+    return conditions, read_count, skipped_count
+
+
+def load_state(root, spec_dir=None):
+    """検査対象を読んで、項目の関数に渡す状態を作る。
+
+    `spec_dir` が None のときは条件の行を読まず、条件を見る 2 項目は省略になる。
+    """
     root = Path(root)
     if not root.is_dir():
         raise InputError("リポジトリの直下が見つからない: %s" % root)
@@ -214,14 +418,22 @@ def load_state(root):
     requirements = collect_requirements(root)
     tests = collect_tests(root)
     markers = collect_markers(root)
+    if spec_dir is None:
+        conditions, specs_read, specs_skipped = None, 0, 0
+    else:
+        conditions, specs_read, specs_skipped = collect_conditions(spec_dir)
 
     live = {r["number"] for r in requirements if r["superseded_by"] is None}
     superseded = {r["number"] for r in requirements if r["superseded_by"] is not None}
     return {
         "root": root,
+        "spec_dir": None if spec_dir is None else Path(spec_dir),
         "requirements": requirements,
         "tests": tests,
         "markers": markers,
+        "conditions": conditions,
+        "specs_read": specs_read,
+        "specs_skipped": specs_skipped,
         "numbers": {r["number"] for r in requirements},
         "live": live,
         "superseded": superseded,
@@ -419,6 +631,135 @@ def check_supersede_target_exists(state):
     return RESULT_PASS, "取って代わられた要件 %d 件の行き先はすべて実在する" % len(state["superseded"]), []
 
 
+def check_conditions_point_to_requirements(state):
+    """条件の行の印が指す番号が、要件に実在し、取って代わられていないか。
+
+    `--spec-dir` を渡されなければ省略する。印の無い行は、ここでは数えない
+    （印が無いことは「条件に印がある」の項目が見る）。
+    """
+    if state["conditions"] is None:
+        return RESULT_SKIP, "--spec-dir を渡されていないので、条件の行を読んでいない", []
+
+    replaced = {
+        r["number"]: r["superseded_by"]
+        for r in state["requirements"]
+        if r["superseded_by"] is not None
+    }
+    lines = []
+    linked = 0
+    ranges = 0
+    for condition in state["conditions"]:
+        mark = condition["mark"]
+        if mark is None or MARK_NONE_RE.match(mark):
+            continue
+        numbers, backwards = numbers_in_mark(mark)
+        for written in backwards:
+            lines.append(
+                "%s の条件の印: 範囲「%s」の終わりが始まりより小さい。"
+                "小さいほうを先に書く" % (condition["where"], written)
+            )
+        if not numbers:
+            continue
+        linked += 1
+        ranges += len(MARKER_RANGE_RE.findall(mark))
+        for number in numbers:
+            if number in replaced:
+                lines.append(
+                    "%s（%s の条件の印）: この要件は %s に取って代わられている。"
+                    "印の番号を %s に付け替える"
+                    % (
+                        label(number),
+                        condition["where"],
+                        label(replaced[number]),
+                        label(replaced[number]),
+                    )
+                )
+            elif number not in state["numbers"]:
+                lines.append(
+                    "%s（%s の条件の印）: %s にこの番号の要件が無い。"
+                    "実在する要件の番号に直すか、先に要件を書く"
+                    % (label(number), condition["where"], SPECS_DIR_SHOWN)
+                )
+    if lines:
+        return RESULT_FAIL, "行き先の無い条件の印 %d 件" % len(lines), lines
+    return (
+        RESULT_PASS,
+        "要件に結んだ条件 %d 件の行き先はすべて実在する（うち範囲で書いた印 %d 件は、"
+        "間の番号まで広げて確かめた）" % (linked, ranges),
+        [],
+    )
+
+
+def check_conditions_have_marks(state):
+    """条件の行すべてに印があるか。
+
+    `--spec-dir` を渡されなければ省略する。印の形が 2 つのどちらでもない行も、
+    ここで落とす（`要件:` と書いてあるのに中身が読めない状態を見逃さないため）。
+    """
+    if state["conditions"] is None:
+        return RESULT_SKIP, "--spec-dir を渡されていないので、条件の行を読んでいない", []
+
+    lines = []
+    linked = 0
+    none = 0
+    pending = 0
+    both = 0
+    for condition in state["conditions"]:
+        mark = condition["mark"]
+        shown = condition["text"]
+        if len(shown) > 40:
+            shown = shown[:40] + "…"
+        if mark is None:
+            lines.append(
+                "%s: 条件の行に印が無い。行の末尾に「%s REQ-014」か"
+                "「%s 無し（理由）」か「%s これから（機能名）」を足す（%s）"
+                % (condition["where"], MARK_LABEL, MARK_LABEL, MARK_LABEL, shown)
+            )
+            continue
+        if MARK_NONE_RE.match(mark):
+            none += 1
+            continue
+        has_number = bool(MARKER_NUMBER_RE.search(mark))
+        has_pending = bool(MARK_PENDING_RE.search(mark))
+        if has_number:
+            linked += 1
+        if has_pending:
+            pending += 1
+        if has_number and has_pending:
+            both += 1
+        if not has_number and not has_pending:
+            lines.append(
+                "%s: 印の形が違う（いまは「%s %s」）。「%s REQ-014」か"
+                "「%s 無し（理由）」か「%s これから（機能名）」の形にする"
+                % (
+                    condition["where"],
+                    MARK_LABEL,
+                    mark,
+                    MARK_LABEL,
+                    MARK_LABEL,
+                    MARK_LABEL,
+                )
+            )
+    if lines:
+        return RESULT_FAIL, "印の無い条件の行 %d 件" % len(lines), lines
+    return (
+        RESULT_PASS,
+        "条件の行 %d 件すべてに印がある（要件に結んだ %d・無し %d・これから %d。"
+        "うち %d 件は番号と「これから」を併記）。読んだ仕様書 %d 本、"
+        "宣言が無いか対象外で読まなかった仕様書 %d 本"
+        % (
+            len(state["conditions"]),
+            linked,
+            none,
+            pending,
+            both,
+            state["specs_read"],
+            state["specs_skipped"],
+        ),
+        [],
+    )
+
+
 # 検査項目の表。読み手に向けて項目番号を使わず、この項目名で呼ぶ。
 CHECKS = [
     ("要件にテストがある", check_tests_exist),
@@ -427,6 +768,8 @@ CHECKS = [
     ("実装の目印が有効な要件を指す", check_markers_point_to_live_requirements),
     ("番号の形と重なり", check_number_form),
     ("取って代わった先が実在する", check_supersede_target_exists),
+    ("条件が指す要件が実在する", check_conditions_point_to_requirements),
+    ("条件に印がある", check_conditions_have_marks),
 ]
 
 
@@ -453,34 +796,41 @@ def evaluate(state):
     return results
 
 
-def run(root):
+def run(root, spec_dir=None):
     """検査を 1 回走らせて終了コードを返す。"""
     try:
-        state = load_state(root)
+        state = load_state(root, spec_dir)
     except InputError as exc:
         print("ERROR: %s" % exc, file=sys.stderr)
         return 2
 
     print("# %s（対象: %s）" % (CHECK_TITLE, shown_root(root)))
     failed = 0
+    skipped = 0
     for name, result, detail, lines in evaluate(state):
         print("%s %s: %s" % (result, name, detail))
+        if result == RESULT_SKIP:
+            skipped += 1
         if result == RESULT_FAIL:
             failed += 1
             for line in lines:
                 print("    %s" % line)
 
     if failed:
-        print("NG 不合格 %d 項目" % failed)
+        print("NG 不合格 %d 項目（省略 %d 項目）" % (failed, skipped))
         return 1
 
+    conditions = state["conditions"]
     print(
-        "OK 要件 %d 件（うち取って代わられた %d 件）、番号つきのテスト %d 件、実装の目印 %d 件"
+        "OK 要件 %d 件（うち取って代わられた %d 件）、番号つきのテスト %d 件、実装の目印 %d 件、"
+        "条件の行 %s（省略 %d 項目）"
         % (
             len(state["requirements"]),
             len(state["superseded"]),
             len(state["tests"]),
             len(state["markers"]),
+            "読んでいない" if conditions is None else "%d 件" % len(conditions),
+            skipped,
         )
     )
     return 0
@@ -498,8 +848,14 @@ def main(argv=None):
         default=str(Path(__file__).resolve().parent.parent),
         help="リポジトリの直下（既定: この検査の 1 つ上のディレクトリ）",
     )
+    parser.add_argument(
+        "--spec-dir",
+        default=None,
+        help="開発の仕様書の置き場。渡すと、条件の行を見る 2 項目が走る。"
+        "渡さなければその 2 項目は省略になる（既定: 渡さない）",
+    )
     args = parser.parse_args(argv)
-    return run(args.root)
+    return run(args.root, args.spec_dir)
 
 
 if __name__ == "__main__":

@@ -3,6 +3,8 @@
 # 要件に対応するテストが無いことを、テストが落ちることより先に知るためである。
 # 層の依存の契約の段は、コードの読み込みが .importlinter に書いた向きどおりか、
 # src/accord/ の直下に層に載っていない置き場ができていないかを見る。
+# 置き場の検査の段は、層の中の入れ子の置き場、生成器が accord を読まないこと、
+# 設定を読むモジュールが標準ライブラリと同じ層の中だけを読むことを見る。
 name: CI
 
 on:
@@ -40,6 +42,14 @@ jobs:
 
       - name: 層の依存が契約どおりかを見る
         run: uv run lint-imports
+
+      - name: 置き場の検査そのものを試す
+        run: uv run python tools/check_structure_selftest.py
+
+      - name: 置き場と定義を見る
+        # 設計文書はこのリポジトリの外にあるので、ここでは渡さない。
+        # 渡さないと、実装層の表を見る項目だけが省略になる（残りの 4 項目は走る）。
+        run: uv run python tools/check_structure.py
 
       - name: テストを走らせる
         run: uv run pytest
