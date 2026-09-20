@@ -4,8 +4,9 @@
 書いた正本である。見出しの深さも、欄を箇条書きで書くか表で書くかも、欄のラベルの言い方も違う。
 読み方の差は設定ファイル `samples/accord_alt.toml` の `[reading]` の節だけが吸収する。
 
-ここで見るのは 2 つ。7 種と見せ方の正本が断り無しで読めることと、制約 7 つの判定が
+ここで見るのは 2 つ。8 種と見せ方の正本が断り無しで読めることと、制約 7 つの判定が
 第 1 版と同じ（受け付けない／検出する／飛ばす）になることである。
+読み方の設定が書き方の違いを吸収することを、整合の検査の要件の番号で確かめる。
 違反はすべて、写しに仕込む。同梱のサンプルそのものは整ったままにする。
 """
 
@@ -81,12 +82,18 @@ def _presentation(settings, name: str) -> Path:
     return settings.source_dir / name
 
 
-def test_alt_sample_loads_every_type_without_defects(alt_settings) -> None:
-    """書き方が違っても、7 種の正本と見せ方の正本が、断り 0 件で読める。"""
+def test_REQ_082_alt_sample_loads_without_defects(alt_settings) -> None:
+    """書き方が違っても、読めなかったブロックの断りが 1 件も出ない。"""
+    snapshot = MarkdownRepository(alt_settings).load()
+
+    assert [defect.model_dump() for defect in snapshot.defects] == []
+
+
+def test_REQ_083_alt_sample_loads_every_type(alt_settings) -> None:
+    """書き方が違っても、8 種の正本と見せ方の正本のすべてから 1 件以上が読める。"""
     repository = MarkdownRepository(alt_settings)
     snapshot = repository.load()
 
-    assert [defect.model_dump() for defect in snapshot.defects] == []
     assert len(snapshot.positionings) == 2
     assert [item.id for item in snapshot.packages] == [HEADLINE_PACKAGE, OTHER_PACKAGE]
     assert [item.name for item in snapshot.packages][0] == HEADLINE_PACKAGE_NAME
@@ -102,6 +109,8 @@ def test_alt_sample_loads_every_type_without_defects(alt_settings) -> None:
     # 台帳は 2 列の表を欄として読み、案件番号は見出しの数字から取る。
     assert [item.entry_number for item in snapshot.ledger_entries] == ["1", "2", "3"]
     assert snapshot.ledger_entries[0].fold_line
+    # 公開記録は、束ねるための見出しの下の深さ 3 の節で 1 件ぶんになる。
+    assert len(snapshot.public_records) == 2
 
     assert repository.channel_rules(CHANNEL)
     assert repository.forbidden_phrases()
@@ -126,7 +135,7 @@ def test_alt_record_positioning_rejects_missing_date(alt_settings) -> None:
     assert source_digest(alt_settings.source_dir) == before
 
 
-def test_alt_check_consistency_detects_stale_package_definition(alt_settings) -> None:
+def test_REQ_011_alt_check_consistency_detects_stale_package_definition(alt_settings) -> None:
     """看板の束の定義が決めより古いことを、第 2 の正本でも検出する。"""
     _rewrite(alt_settings.path_for("packages"), *STALE_UPDATED_ON)
 
@@ -138,7 +147,7 @@ def test_alt_check_consistency_detects_stale_package_definition(alt_settings) ->
     assert HEADLINE_PACKAGE in stale[0].location
 
 
-def test_alt_check_consistency_detects_outdated_offering_claim(alt_settings) -> None:
+def test_REQ_012_alt_check_consistency_detects_outdated_offering_claim(alt_settings) -> None:
     """旧い束を宣言した提示物を、媒体ディレクトリ直下のファイル名つきで検出する。"""
     _rewrite(_presentation(alt_settings, "tsukikusa/profile.md"), *OUTDATED_CLAIM)
 
@@ -149,7 +158,7 @@ def test_alt_check_consistency_detects_outdated_offering_claim(alt_settings) -> 
     assert outdated[0].candidates == [HEADLINE_PACKAGE]
 
 
-def test_alt_check_consistency_skips_claim_listed_as_exception(alt_settings) -> None:
+def test_REQ_013_alt_check_consistency_skips_claim_listed_as_exception(alt_settings) -> None:
     """旧い束を宣言した提示物が 2 件でも、決めの例外欄に書いた 1 件は一覧に出ない。"""
     _rewrite(_presentation(alt_settings, "tsukikusa/profile.md"), *OUTDATED_CLAIM)
     _rewrite(_presentation(alt_settings, "nagiho/skill_sheet.md"), *OUTDATED_CLAIM)
@@ -206,7 +215,7 @@ def test_alt_revise_package_rejects_unregistered_capability(alt_settings) -> Non
     assert source_digest(alt_settings.source_dir) == before
 
 
-def test_alt_check_consistency_detects_private_source_section_in_ledger(alt_settings) -> None:
+def test_REQ_019_alt_check_consistency_detects_private_source_section_in_ledger(alt_settings) -> None:
     """台帳が公開不可の節を出典にしていることを、表で書かれた台帳でも検出する。"""
     _rewrite(alt_settings.path_for("engagements"), *MAKE_PRIVATE)
 
@@ -243,7 +252,7 @@ def test_alt_assemble_material_drops_private_section_and_warns(alt_settings) -> 
     assert headings
 
 
-def test_alt_check_consistency_detects_dangling_pending_note(alt_settings) -> None:
+def test_REQ_020_alt_check_consistency_detects_dangling_pending_note(alt_settings) -> None:
     """実在しない節を指す注記を、ファイル名と近い節の候補つきで検出する。"""
     _rewrite(_presentation(alt_settings, "nagiho/skill_sheet.md"), *DANGLING_NOTE)
 
@@ -257,6 +266,14 @@ def test_alt_check_consistency_detects_dangling_pending_note(alt_settings) -> No
     assert len(dangling) == 1, [v.model_dump() for v in report.violations]
     assert PRIVATE_SECTION_ID in dangling[0].candidates
     assert PRIVATE_SECTION in dangling[0].expected, dangling[0].expected
+
+
+def test_REQ_021_alt_remaining_pending_notes_are_counted_in_a_note(alt_settings) -> None:
+    """残っている未反映の注記の件数を、第 2 の正本でも断りに書く。"""
+    _rewrite(_presentation(alt_settings, "nagiho/skill_sheet.md"), *DANGLING_NOTE)
+
+    report = ConsistencyService(alt_settings).inspect()
+
     assert any("未反映の注記が 1 件残っている" in note for note in report.notes), report.notes
 
 

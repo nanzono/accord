@@ -224,16 +224,20 @@ def select_blocks(sections: list[Section], rule: BlockRule = DEFAULT_BLOCK_RULE)
         if section.heading:
             ancestors.append((section.level, section.heading))
 
+        # spec: REQ-053
         if not section.heading or section.level not in levels:
             continue
+        # spec: REQ-054
         if rule.under_headings and not any(name in rule.under_headings for name in above):
             continue
         if section.heading in rule.skip_headings:
             continue
         if any(name in rule.skip_headings for name in above):
             continue
+        # spec: REQ-055
         if rule.heading_prefix and not section.heading.startswith(rule.heading_prefix):
             continue
+        # spec: REQ-057
         if rule.skip_sections_without_fields and not read_fields(section, rule):
             continue
         selected.append(section)
@@ -250,6 +254,7 @@ def read_fields(section: Section, rule: BlockRule = DEFAULT_BLOCK_RULE) -> dict[
     同じ欄が複数回出たときは、値を改行でつないで 1 つにまとめる。
     """
     entries = _definition_entries(section.body, rule.bare_labels)
+    # spec: REQ-059
     if rule.fields_from_table:
         entries += [
             (cells[0], cells[1])
@@ -259,7 +264,9 @@ def read_fields(section: Section, rule: BlockRule = DEFAULT_BLOCK_RULE) -> dict[
 
     fields: dict[str, str] = {}
     for label, value in entries:
+        # spec: REQ-063
         name = strip_note(label) if rule.strip_label_note else label
+        # spec: REQ-064
         for target in rule.labels.get(name, (name,)):
             if target in fields:
                 fields[target] = f"{fields[target]}\n{value}"
@@ -318,6 +325,7 @@ def _definition_entries(body: str, bare_labels: tuple[str, ...] = ()) -> list[tu
         if match is not None:
             entries.append((match.group(1).strip(), match.group(2).strip()))
             continue
+        # spec: REQ-061
         for label in bare_labels:
             value = _bare_declaration(line, label)
             if value is not None:

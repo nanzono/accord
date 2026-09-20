@@ -44,6 +44,7 @@ FILE_KEYS = (*SOURCE_KEYS, PRESENTATION_RULES_KEY)
 
 # 書かなくてもよい置き場の鍵。公開記録を使わない正本が、今までどおり動くようにするためである。
 # 書いていない設定では、公開記録を 0 件として読み、提示物の URL の照合を行わない。
+# spec: REQ-081
 OPTIONAL_FILE_KEYS = (PUBLIC_RECORDS_KEY,)
 
 # 正本の書き方を書く節の名前。この節が無ければ、すべての鍵が既定値になる。
@@ -75,6 +76,7 @@ class BlockRule:
     """
 
     # 節を選ぶ
+    # spec: REQ-046
     heading_levels: tuple[int, ...] = (2,)
     under_headings: tuple[str, ...] = ()
     heading_prefix: str = ""
@@ -105,13 +107,19 @@ class ReadingRules:
 
     blocks: dict[str, BlockRule] = field(default_factory=dict)
     # 提示物
+    # spec: REQ-047
     presentation_directories: tuple[str, ...] = ()
+    # spec: REQ-048
     require_presentation_declaration: bool = False
     # 見せ方の正本
+    # spec: REQ-049
     channel_rules_from: str = CHANNEL_RULES_ONE_FILE
     channel_rules_file: str = ""
+    # spec: REQ-050
     forbidden_phrases_heading: str = "禁じた言い回し"
+    # spec: REQ-051
     forbidden_phrases_any_level: bool = False
+    # spec: REQ-052
     forbidden_phrases_from: str = PHRASES_FROM_BULLETS
     # 設定ファイルに実際に書かれていた読み方の鍵。返り値の足跡にそのまま載せる。
     applied_keys: tuple[str, ...] = ()
@@ -194,6 +202,7 @@ def _reject_unknown_keys(table: dict, allowed: set[str], where: str, config_path
     綴りを間違えた鍵を黙って読み飛ばすと、書いたつもりの読み方が効かないまま
     「読めない」だけが残る。設定を読んだ瞬間に、鍵の名前と書ける名前の一覧で止める。
     """
+    # spec: REQ-077
     unknown = sorted(key for key in table if key not in allowed)
     if unknown:
         raise ValueError(
@@ -209,6 +218,7 @@ def _reject_unknown_top_level(document: dict, config_path: Path) -> None:
     サーバーが立ち上がり、既定の見本を読んだ結果が返り続ける。書いた名前と書ける名前を添えて、
     設定を読んだ瞬間に止める（節でない最上位の鍵も同じ扱いにする）。
     """
+    # spec: REQ-075
     unknown = sorted(key for key in document if key not in TOP_LEVEL_KEYS)
     if unknown:
         raise ValueError(
@@ -220,6 +230,7 @@ def _reject_unknown_top_level(document: dict, config_path: Path) -> None:
 def _one_of(value: object, choices: tuple[str, ...], where: str, config_path: Path) -> str:
     """選べる語が決まっている鍵の値を確かめる。"""
     text = str(value)
+    # spec: REQ-079
     if text not in choices:
         raise ValueError(
             f"設定 '{where}' に書ける語は {'、'.join(choices)} のどれか"
@@ -243,6 +254,7 @@ def _block_rule(table: dict, common: dict, where: str, config_path: Path) -> Blo
             values[name] = str(value)
         else:
             values[name] = bool(value)
+    # spec: REQ-078
     if not values.get("heading_levels", DEFAULT_BLOCK_RULE.heading_levels):
         raise ValueError(f"設定 [{where}] の heading_levels に深さが 1 つ以上要る: {config_path}")
     return BlockRule(**values)
@@ -344,6 +356,7 @@ def load_settings(path: Path | None = None) -> Settings:
 
     # 公開記録の置き場を書いた設定だけ、その語彙 2 つを必須にする。置き場を書いていない設定は
     # 公開記録を使わないので、語彙が無くても今までどおり起動する。
+    # spec: REQ-080
     if PUBLIC_RECORDS_KEY in files_table:
         public_record_kinds = _require_list(
             vocabulary_table, PUBLIC_RECORD_KINDS_KEY, config_path

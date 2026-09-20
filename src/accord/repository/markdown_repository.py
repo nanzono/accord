@@ -239,6 +239,7 @@ class MarkdownRepository:
         設定の `[source.files]` に同じファイル名を書き、見出しの深さで分ける。
         """
         rule = self._rule(key)
+        # spec: REQ-058
         return select_blocks(split_sections(self._read(key)), rule), rule
 
     def _blocks_in(self, key: str, text: str) -> list[Section]:
@@ -548,6 +549,7 @@ class MarkdownRepository:
             }
             values["heading"] = block.heading
             values["fold_line"] = _optional(values.get("fold_line"))
+            # spec: REQ-062
             if rule.entry_number_from_heading:
                 # 案件番号を欄ではなく見出しの数字で持つ書き方。欄があればそちらを優先しない。
                 number = leading_number(block.heading, rule.heading_prefix)
@@ -576,6 +578,7 @@ class MarkdownRepository:
         設定が提示物として指したディレクトリの下を全部たどる（第 1 版と同じ）。
         媒体ディレクトリの下に、提示物でないファイルが同居している正本があるためである。
         """
+        # spec: REQ-065
         names = self.settings.reading.presentation_directories
         roots = (
             [self.settings.source_dir / name for name in names]
@@ -616,6 +619,7 @@ class MarkdownRepository:
             }
             values["path"] = relative
 
+            # spec: REQ-066
             if require_declaration and not values.get("declared_package"):
                 continue
 
@@ -689,10 +693,12 @@ class MarkdownRepository:
         節もファイルも無ければ空の一覧を返す。
         """
         rules = self.settings.reading
+        # spec: REQ-068
         if rules.channel_rules_from == CHANNEL_RULES_PER_CHANNEL_FILE:
             path = self.settings.source_dir / rules.channel_rules_file.replace(
                 CHANNEL_PLACEHOLDER, channel
             )
+            # spec: REQ-069
             if not path.is_file():
                 return []
             return bullet_items(path.read_text(encoding="utf-8"))
@@ -709,9 +715,11 @@ class MarkdownRepository:
         """
         rules = self.settings.reading
         sections = split_sections(self._read(PRESENTATION_RULES_KEY))
+        # spec: REQ-070
         if not rules.forbidden_phrases_any_level:
             sections = select_blocks(sections, self._rule(PRESENTATION_RULES_KEY))
 
+        # spec: REQ-071
         wanted = strip_note(rules.forbidden_phrases_heading)
         for section in sections:
             if section.heading and strip_note(section.heading) == wanted:
@@ -732,7 +740,9 @@ class MarkdownRepository:
             tables = table_blocks(section.body)
             if not tables:
                 return []
+            # spec: REQ-072
             return [cells[0] for cells in tables[0] if cells and cells[0]]
+        # spec: REQ-074
         return bullet_items(section.body, first_block=True)
 
     # ------------------------------------------------------------ 書き戻す
