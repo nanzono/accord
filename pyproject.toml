@@ -18,6 +18,8 @@ accord = "accord.__main__:main"
 [dependency-groups]
 dev = [
     "pytest>=8",
+    # 層の依存の契約（.importlinter）を確かめる道具。開発と CI でだけ使い、実行時には要らない。
+    "import-linter>=2.15,<3",
 ]
 
 [build-system]

@@ -1,0 +1,40 @@
+# 層の依存の契約。accord のコードがどの向きにだけ読み込んでよいかを、この 1 ファイルで定める。
+# 手元で確かめるときは、リポジトリの直下で `uv run lint-imports` を実行する。CI も同じものを走らせる。
+# 決めた理由は docs/decisions/0008-check-layer-dependencies-with-a-contract.md にある。
+
+[importlinter]
+root_package = accord
+# 外部のパッケージへの読み込みも解析の対象に入れる。下の 2 本目の契約がそれを見るため。
+include_external_packages = True
+
+# 1 本目。層は上から下へだけ読む。上にある層が下にある層を読むのはよく、逆向きは落とす。
+# 最後の 2 つ（models と vocabulary）は同じ段で、互いに読み合わない。
+# exhaustive を立ててあるので、src/accord/ の直下に、ここに載っていないディレクトリや
+# ファイルを作ると、その時点で落ちる（置き場の決まりも、この 1 本が兼ねて見ている）。
+# 見るのは直下だけで、層のディレクトリの中に入れ子のディレクトリを作っても落ちない
+# （入れ子の中のファイルにも、層の向きは効く）。
+[importlinter:contract:layers]
+name = 層は上から下へだけ読む
+type = layers
+containers =
+    accord
+layers =
+    __main__
+    server
+    services
+    repository
+    models | vocabulary
+exhaustive = true
+
+# 2 本目。設定を読むモジュールは、型の意味の判断を持ち込まないよう、外部のパッケージを読まない。
+# 一覧は accord が依存に宣言している外部のパッケージ（pyproject.toml の dependencies）と同じにする。
+# 依存を足したときは、この一覧にも足すこと。ここに書いていないパッケージは見ていない。
+[importlinter:contract:vocabulary-external]
+name = 設定を読むモジュールは外部のパッケージを読まない
+type = forbidden
+source_modules =
+    accord.vocabulary
+forbidden_modules =
+    pydantic
+    yaml
+    mcp
