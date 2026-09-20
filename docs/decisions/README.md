@@ -12,6 +12,7 @@
 - [文面そのものを作らせない](0004-do-not-write-the-prose-itself.md) — 採用 / 2026-09-15
 - [拒否は例外ではなく戻り値](0005-return-refusals-as-values.md) — 採用 / 2026-09-15
 - [見出しではなく ID で結ぶ](0006-link-records-by-id.md) — 採用 / 2026-09-18
+- [要件とテストを番号で結び、機械で突き合わせる](0007-link-requirements-and-tests-by-number.md) — 採用 / 2026-09-20
 
 ## 記録の扱い
 

@@ -1,0 +1,38 @@
+# 要件とテストの突合検査と、テストを自動で走らせる。
+# 段は上から順に走り、落ちたところで止まる。突合検査を pytest より先に置くのは、
+# 要件に対応するテストが無いことを、テストが落ちることより先に知るためである。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# 中身を読むだけ。書き込みの権限は渡さない。
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: リポジトリを取り出す
+        uses: actions/checkout@v7
+
+      - name: uv を用意する
+        uses: astral-sh/setup-uv@v10
+        with:
+          # 動く下限の版で走らせる（「3.12 以上で動く」という宣言どおりかを毎回見る）。
+          python-version: "3.12"
+
+      - name: 依存を入れる
+        run: uv sync
+
+      - name: 突合検査そのものを試す
+        run: uv run python tools/check_req_coverage_selftest.py
+
+      - name: 要件とテストを突き合わせる
+        run: uv run python tools/check_req_coverage.py
+
+      - name: テストを走らせる
+        run: uv run pytest
