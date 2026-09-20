@@ -648,6 +648,7 @@ class MarkdownRepository:
         seen: set[str] = set()
         for url in find_urls(text):
             normalized = normalize_url(url)
+            # spec: REQ-045
             if not normalized or normalized in seen:
                 continue
             seen.add(normalized)

@@ -140,6 +140,7 @@ def normalize_url(url: str) -> str:
     パスの大文字と小文字は残す（同じ経路の別の綴りは、別の場所を指しうるため）。
     http でも https でも始まらない文字列は、URL として扱わずに空文字を返す。
     """
+    # spec: REQ-032
     text = url.strip()
     for scheme in ("https://", "http://"):
         if text[: len(scheme)].lower() == scheme:

@@ -127,6 +127,7 @@ def defect_notes(settings: Settings, snapshot: SourceSnapshot) -> list[str]:
 
     groups: dict[tuple[str, tuple[str, ...]], list[SourceDefect]] = {}
     for defect in snapshot.defects:
+        # spec: REQ-025
         groups.setdefault((defect.source_key, tuple(defect.missing_fields)), []).append(defect)
 
     notes: list[str] = []
@@ -138,6 +139,7 @@ def defect_notes(settings: Settings, snapshot: SourceSnapshot) -> list[str]:
         ]
         missing = "、".join(f"「{name}」" for name in missing_fields)
         where = settings.files.get(source_key, next(iter(files), ""))
+        # spec: REQ-024
         notes.append(
             f"必須の欄{missing}が無いので型にできず、いまの正本として読んでいないブロックが "
             f"{where} に {len(defects)} 件ある"

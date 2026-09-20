@@ -150,6 +150,7 @@ NO_CANDIDATE_MATERIAL_TEXT = (
 
 
 # 公開記録の置き場が設定に無いときの断り。照合していないことと、照合させるための鍵 3 つを言う。
+# spec: REQ-036
 NO_PUBLIC_RECORDS_FILE_NOTE = (
     "公開記録の置き場が設定に無いので、提示物の URL は照合していない。照合させるには、"
     f"設定の [source.files] に {PUBLIC_RECORDS_KEY} を、"
@@ -175,8 +176,11 @@ def provenance_of(settings: Settings) -> Provenance:
         version = importlib.metadata.version("accord")
     except importlib.metadata.PackageNotFoundError:
         version = "不明（未導入）"
+    # spec: REQ-004
     return Provenance(
         config_path=str(settings.config_path.resolve()),
+        # spec: REQ-005
+        # spec: REQ-006
         reading=list(settings.reading.applied_keys) or ["既定"],
         version=version,
         # 動いている accord のパッケージの置き場。ここでパッケージを import しないのは、
@@ -191,9 +195,11 @@ def limit_notes(notes: list[str]) -> list[str]:
     束ねても、束の種類そのものは入力次第で増える。最後に 1 か所で止めることで、
     返り値の大きさが入力の大きさに引きずられないようにする。
     """
+    # spec: REQ-026
     if len(notes) <= NOTE_LIMIT:
         return notes
     rest = len(notes) - (NOTE_LIMIT - 1)
+    # spec: REQ-027
     return notes[: NOTE_LIMIT - 1] + [
         f"ほかに {rest} 件の断りを省いた。範囲を絞って check_consistency を呼ぶと、"
         "その範囲の断りを全部見られる。"
@@ -227,6 +233,7 @@ def explain_heading(
         candidates = close_names(wanted, pool, labels)
         return False, id_format_text(label, wanted) + candidate_text(candidates, labels), candidates
 
+    # spec: REQ-029
     for defect in snapshot.defects:
         if not defect.id or defect.id != wanted:
             continue
@@ -241,6 +248,7 @@ def explain_heading(
             [],
         )
 
+    # spec: REQ-028
     for skipped in snapshot.skipped_headings:
         if not skipped.id or skipped.id != wanted:
             continue
@@ -321,6 +329,7 @@ class ConsistencyService:
         target = self._resolve_scope(snapshot, scope)
 
         if target is None:
+            # spec: REQ-009
             return ConsistencyReport(
                 provenance=provenance_of(self.settings),
                 scope=scope or WHOLE_SCOPE,
@@ -339,6 +348,7 @@ class ConsistencyService:
             violations.extend(stale)
             notes.extend(missing_package)
             violations.extend(self._check_offering_claims(snapshot, target))
+        # spec: REQ-014
         else:
             notes.extend(self._unrecorded_positioning_notes())
 
@@ -358,6 +368,7 @@ class ConsistencyService:
         violations.extend(self._check_ledger_source_sections(snapshot, target))
         # ID の形式と一意性は、範囲を絞っても正本全体で見る。一意性は 1 つのブロックだけを
         # 見ても言えず、絞った範囲の外にある項目と重なっていても違反だからである。
+        # spec: REQ-044
         violations.extend(self._check_id_format_and_uniqueness(snapshot))
 
         return ConsistencyReport(
@@ -373,6 +384,7 @@ class ConsistencyService:
         """範囲の名前を、今回見る型の集合に翻訳する。名前が実在しなければ None。"""
         if scope is None or scope == WHOLE_SCOPE:
             return InspectionScope(
+                # spec: REQ-001
                 label=WHOLE_SCOPE,
                 positionings=self._applicable_positionings(snapshot),
                 packages=tuple(snapshot.packages),
@@ -385,6 +397,7 @@ class ConsistencyService:
         if scope in self.settings.channels:
             return self._channel_scope(snapshot, scope)
 
+        # spec: REQ-042
         presentations = self._presentations_named(snapshot, scope)
         if presentations:
             return InspectionScope(
@@ -394,6 +407,7 @@ class ConsistencyService:
                 capabilities=(),
                 presentations=presentations,
                 ledger_entries=(),
+                # spec: REQ-008
                 skipped=(
                     f"範囲を提示物「{scope}」に絞ったので、"
                     "パッケージ定義・機能の台帳・職務経歴書の台帳・他の提示物は見ていない。"
@@ -418,11 +432,14 @@ class ConsistencyService:
             positionings=positionings,
             packages=packages,
             capabilities=capabilities,
+            # spec: REQ-007
             presentations=tuple(
                 item for item in snapshot.presentations if item.channel == channel
             ),
             ledger_entries=(),
+            # spec: REQ-043
             public_records=records_behind(capabilities, snapshot.public_records),
+            # spec: REQ-008
             skipped=(
                 f"範囲を媒体「{channel}」に絞ったので、他の媒体の提示物と、"
                 "職務経歴書の台帳と、この媒体の看板が束ねていない機能は見ていない。"
@@ -468,6 +485,7 @@ class ConsistencyService:
 
     def _unknown_scope_notes(self, snapshot: SourceSnapshot, scope: str) -> list[str]:
         """範囲の名前が実在しないときの断り。拒否ではなく、実在する範囲の一覧を返す。"""
+        # spec: REQ-010
         return [
             f"範囲「{scope}」は、媒体の名前にも提示物のファイル名にも無い。",
             "実在する範囲: "
@@ -477,6 +495,7 @@ class ConsistencyService:
 
     def _unrecorded_positioning_notes(self) -> list[str]:
         """決めが 1 件も無いときの断り。2 つの制約は判定を保留し、次の一手を添える。"""
+        # spec: REQ-015
         return [
             f"決めが未登記なので、「{PACKAGE_FRESHNESS}」と「{OFFERING_CLAIM_MATCHES}」は"
             "判定を保留した。比べる相手（いまの看板と、その決めの日付）が無いためである。",
@@ -501,7 +520,9 @@ class ConsistencyService:
 
         for positioning in target.positionings:
             package = packages.get(positioning.headline_package)
+            # spec: REQ-016
             if package is None:
+                # spec: REQ-017
                 notes.append(
                     f"{positioning.decided_on} の決め（適用範囲 {positioning.scope}）が前面に出す束"
                     f"「{positioning.headline_package}」がパッケージ定義に無いので、鮮度は判定できない。"
@@ -512,6 +533,7 @@ class ConsistencyService:
             if package.id in seen:
                 continue
             seen.add(package.id)
+            # spec: REQ-011
             if package.updated_on >= positioning.decided_on:
                 continue
             violations.append(
@@ -537,11 +559,14 @@ class ConsistencyService:
         labels = snapshot.labels()
 
         for presentation in target.presentations:
+            # spec: REQ-018
             positioning = applicable_positioning(snapshot.positionings, presentation.channel)
             if positioning is None:
                 continue
+            # spec: REQ-013
             if _is_listed_as_exception(positioning, presentation):
                 continue
+            # spec: REQ-012
             if presentation.declared_package == positioning.headline_package:
                 continue
             violations.append(
@@ -566,6 +591,7 @@ class ConsistencyService:
         self, snapshot: SourceSnapshot, target: InspectionScope
     ) -> list[Violation]:
         """機能の裏づけに書いた ID が、職歴の枠・受託案件・公開記録の ID として実在するかを見る。"""
+        # spec: REQ-022
         headings = snapshot.evidence_targets()
         violations: list[Violation] = []
 
@@ -600,6 +626,7 @@ class ConsistencyService:
 
         for package in target.packages:
             for wanted in package.capabilities:
+                # spec: REQ-041
                 if wanted in names:
                     continue
                 trouble = (
@@ -648,6 +675,7 @@ class ConsistencyService:
             )
             if readable:
                 continue
+            # spec: REQ-023
             violations.append(
                 Violation(
                     constraint=ORIGIN_SECTION_EXISTS,
@@ -694,6 +722,7 @@ class ConsistencyService:
                 }
                 for label, allowed, key in fields:
                     value = written[label]
+                    # spec: REQ-039
                     if not value or value in allowed:
                         continue
                     violations.append(
@@ -712,6 +741,7 @@ class ConsistencyService:
 
         categories = self.settings.capability_categories
         for capability in target.capabilities:
+            # spec: REQ-040
             if capability.category in categories:
                 continue
             violations.append(
@@ -743,8 +773,10 @@ class ConsistencyService:
         URL を持たない公開記録（紙媒体）も、照らす相手には入れない。
         """
         if not self.settings.has_file(PUBLIC_RECORDS_KEY):
+            # spec: REQ-035
             return [], [NO_PUBLIC_RECORDS_FILE_NOTE]
 
+        # spec: REQ-033
         known = [
             (record, normalize_url(record.url))
             for record in snapshot.public_records
@@ -755,12 +787,14 @@ class ConsistencyService:
 
         violations: list[Violation] = []
         for entry in self._urls_in_scope(snapshot, target):
+            # spec: REQ-034
             if url_host(entry.normalized) not in hosts:
                 continue
             if any(entry.normalized == normalized for _, normalized in known):
                 continue
             violations.append(self._url_violation(entry, known))
 
+        # spec: REQ-037
         return violations, self._uncarried_public_record_notes(snapshot, target)
 
     @staticmethod
@@ -782,6 +816,7 @@ class ConsistencyService:
         """
         host = url_host(entry.normalized)
         tail = url_tail(entry.normalized)
+        # spec: REQ-031
         same_place = next(
             (
                 record
@@ -803,6 +838,7 @@ class ConsistencyService:
                 candidates=[str(same_place.url)],
             )
 
+        # spec: REQ-030
         return Violation(
             constraint=PRESENTATION_URL_MATCHES,
             file=entry.path,
@@ -836,6 +872,7 @@ class ConsistencyService:
             return []
 
         names = [record.name for record in missing]
+        # spec: REQ-038
         return [
             f"看板の裏づけになっている公開記録 {len(behind)} 件のうち、"
             f"この範囲の提示物にどれも載っていないものが {len(missing)} 件ある"
@@ -949,6 +986,7 @@ class ConsistencyService:
                 )
                 if readable:
                     continue
+                # spec: REQ-020
                 violations.append(
                     Violation(
                         constraint=NOTE_AND_SOURCE_SECTION,
@@ -962,6 +1000,7 @@ class ConsistencyService:
         notes: list[str] = []
         if remaining:
             where = fold_names(list(dict.fromkeys(remaining)), keep=NAME_SAMPLE_COUNT)
+            # spec: REQ-021
             notes.append(
                 f"未反映の注記が {len(remaining)} 件残っている（{where}）。"
                 "注記の中身を正本に書き、書いたら提示物の注記の行を消す。"
@@ -1001,6 +1040,7 @@ class ConsistencyService:
                 continue
 
             engagement = engagements[section]
+            # spec: REQ-019
             if engagement.disclosure.startswith(PRIVATE_DISCLOSURE_PREFIX):
                 violations.append(
                     Violation(
