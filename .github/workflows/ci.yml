@@ -20,7 +20,9 @@ jobs:
         uses: actions/checkout@v7
 
       - name: uv を用意する
-        uses: astral-sh/setup-uv@v10
+        # この部品はメジャー版の札（v10 の形）を出していないので、公式の案内どおり
+        # コミットの識別子で固定し、版をコメントで添える。
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           # 動く下限の版で走らせる（「3.12 以上で動く」という宣言どおりかを毎回見る）。
           python-version: "3.12"
