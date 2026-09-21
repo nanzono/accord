@@ -77,6 +77,7 @@ def latest_positioning(positionings: list[Positioning], scope: str) -> Positioni
     matching = [(index, item) for index, item in enumerate(positionings) if item.scope == scope]
     if not matching:
         return None
+    # spec: REQ-160
     return max(matching, key=lambda pair: (pair[1].decided_on, pair[0]))[1]
 
 
@@ -102,6 +103,7 @@ def positioning_input_type() -> str:
     entry = positioning_type()
     if entry is None:
         return ""
+    # spec: REQ-167
     return "、".join(
         f"{field.label}（{field.type}・{'必須' if field.required else '任意'}）"
         for field in entry.fields
@@ -158,14 +160,18 @@ def defect_notes(settings: Settings, snapshot: SourceSnapshot) -> list[str]:
 
 def unrecorded_positioning_next_step() -> str:
     """決めが 1 件も無いときに返す、次の一手の 1 行。読みの 2 つと検査が同じ文を返す。"""
+    # spec: REQ-166
     return f"先に決めを登記する（{RECORD_OPERATION}）。入力の型: {positioning_input_type()}"
 
 
 def unknown_channel_notes(settings: Settings, channel: str, operation: str) -> list[str]:
     """媒体の名前が実在しないときの案内。拒否ではなく、実在する名前の一覧を返す。"""
     return [
+        # spec: REQ-169
         f"媒体「{channel}」は、設定ファイル {settings.config_path.name} の媒体の一覧に無い。",
+        # spec: REQ-170
         "実在する媒体: " + " / ".join(settings.channels),
+        # spec: REQ-171
         f"上の名前のどれかをそのまま渡して、もう一度 {operation} を呼ぶ。",
     ]
 
@@ -183,9 +189,11 @@ class PositioningService:
         媒体を省くと「全体」の決めを返す。決めが 1 件も無いときと、媒体の名前が実在しないときは、
         拒否ではなく断りと次の一手を warnings に載せて返す。正本は 1 バイトも読み替えない。
         """
+        # spec: REQ-168
         if channel is not None and channel not in self.settings.channels:
             return PositioningView(
                 warnings=unknown_channel_notes(self.settings, channel, READ_OPERATION)
+                # spec: REQ-172
                 + [f"媒体を省いて呼ぶと、適用範囲「{WHOLE_SCOPE}」の決めが返る。"]
             )
 
@@ -193,48 +201,61 @@ class PositioningService:
         # 欄が欠けていて決めとして読めなかったブロックは、断りの先頭に出す。
         warnings: list[str] = defect_notes(self.settings, snapshot)
 
+        # spec: REQ-164
         if not snapshot.positionings:
             return PositioningView(
                 warnings=warnings
                 + [
+                    # spec: REQ-165
                     "決めが未登記である。いま何を前面に出すかは、まだどこにも登記されていない。",
                     unrecorded_positioning_next_step(),
                 ]
             )
 
         if channel is None:
+            # spec: REQ-157
             positioning = latest_positioning(snapshot.positionings, WHOLE_SCOPE)
         else:
+            # spec: REQ-158
             positioning = latest_positioning(snapshot.positionings, channel)
             if positioning is None:
+                # spec: REQ-162
                 positioning = latest_positioning(snapshot.positionings, WHOLE_SCOPE)
                 if positioning is not None:
+                    # spec: REQ-163
                     warnings.append(
                         f"媒体「{channel}」を名指しした決めは無いので、"
                         f"適用範囲「{WHOLE_SCOPE}」の決めを返した。"
                     )
 
+        # spec: REQ-173
         if positioning is None:
+            # spec: REQ-174
             scopes = " / ".join(dict.fromkeys(item.scope for item in snapshot.positionings))
             return PositioningView(
                 warnings=warnings
                 + [
                     f"この呼び方に当たる決めが無い。登記されている決めの適用範囲は {scopes} である。",
+                    # spec: REQ-175
                     unrecorded_positioning_next_step(),
                 ]
             )
 
+        # spec: REQ-159
         package = next(
             (item for item in snapshot.packages if item.id == positioning.headline_package),
             None,
         )
+        # spec: REQ-176
         if package is None:
+            # spec: REQ-177
             listed = " / ".join(
                 labelled(item.id, {item.id: item.name}) for item in snapshot.packages
             )
             warnings.append(
                 f"決めが前面に出す束「{positioning.headline_package}」が、"
                 f"パッケージ定義に無い ID である。実在する束: {listed}。"
+                # spec: REQ-178
                 f"束の ID を直して {RECORD_OPERATION} で決めを登記し直す。"
             )
 
@@ -267,23 +288,30 @@ class PositioningService:
                 for entry in draft.exceptions
             ],
         )
+        # spec: REQ-179
         self.repository.append_positioning(positioning)
 
         stale, outdated = self._checks_after_record(positioning)
         return WriteResult(
             accepted=True,
             recorded={
+                # spec: REQ-180
                 "登記した決め": positioning.model_dump(mode="json"),
+                # spec: REQ-181
                 PACKAGE_FRESHNESS: [violation.as_note() for violation in stale]
                 or [
                     f"「{positioning.headline_package}」の定義の最終更新は、"
+                    # spec: REQ-182
                     f"この決めの日付 {positioning.decided_on} より古くない。"
                 ],
                 OFFERING_CLAIM_MATCHES: {
+                    # spec: REQ-183
                     "件数": len(outdated),
+                    # spec: REQ-184
                     "ファイル": [violation.file for violation in outdated],
                 },
             },
+            # spec: REQ-185
             warnings=[violation.as_note() for violation in stale + outdated],
         )
 
@@ -292,32 +320,44 @@ class PositioningService:
     def _rejection(self, snapshot: SourceSnapshot, draft: PositioningDraft) -> Rejection | None:
         """入力を制約に当てる。通れば None を返し、通らなければ次の一手つきの拒否を返す。"""
         missing = missing_required_fields(POSITIONING_TYPE_NAME, draft)
+        # spec: REQ-188
         if missing:
             return Rejection(
+                # spec: REQ-189
                 constraint=POSITIONING_REQUIRED_FIELDS,
                 reason=(
                     "決めの必須の欄"
+                    # spec: REQ-190
                     + "、".join(f"「{field.label}」" for field in missing)
                     + "が無い。欄のそろわない決めは、いまの看板として読めない。"
                 ),
                 next_action=NextAction(
+                    # spec: REQ-191
                     operation=RECORD_OPERATION,
+                    # spec: REQ-192
                     missing_fields=[field.label for field in missing],
+                    # spec: REQ-193
                     example="\n".join(field_example(field) for field in missing),
                 ),
             )
 
         scopes = [WHOLE_SCOPE, *self.settings.channels]
+        # spec: REQ-194
         if draft.scope not in scopes:
             return Rejection(
+                # spec: REQ-195
                 constraint=POSITIONING_SCOPE_ENUM,
                 reason=(
+                    # spec: REQ-196
                     f"適用範囲「{draft.scope}」は、媒体の名前でも「{WHOLE_SCOPE}」でもない。"
                     f"媒体の名前は設定ファイル {self.settings.config_path.name} の一覧に限る。"
                 ),
                 next_action=NextAction(
+                    # spec: REQ-197
                     operation=RECORD_OPERATION,
+                    # spec: REQ-198
                     candidates=scopes,
+                    # spec: REQ-199
                     example=(
                         f"すべての媒体に効かせるなら「{WHOLE_SCOPE}」、"
                         "媒体 1 つに限るなら上の候補の媒体名をそのまま渡す。"
@@ -326,18 +366,25 @@ class PositioningService:
             )
 
         names = [item.id for item in snapshot.packages]
+        # spec: REQ-200
         if draft.headline_package not in names:
             labels = snapshot.labels()
             candidates = close_names(str(draft.headline_package), names, labels)
             return Rejection(
+                # spec: REQ-201
                 constraint=HEADLINE_PACKAGE_EXISTS,
                 reason=(
+                    # spec: REQ-202
                     f"前面に出す束「{draft.headline_package}」は、パッケージ定義に無い ID である。"
+                    # spec: REQ-203
                     + candidate_text(candidates, labels)
                 ),
                 next_action=NextAction(
+                    # spec: REQ-204
                     operation=RECORD_OPERATION,
+                    # spec: REQ-205
                     candidates=candidates,
+                    # spec: REQ-206
                     example=(
                         "上の候補をそのまま前面に出す束に渡して、"
                         f"もう一度 {RECORD_OPERATION} を呼ぶ。"

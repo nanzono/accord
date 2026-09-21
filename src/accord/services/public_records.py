@@ -75,8 +75,10 @@ class PublicRecordService:
             origin_section=_value(draft.origin_section),
             source=_value(draft.source),
         )
+        # spec: REQ-207
         self.repository.append_public_record(record)
 
+        # spec: REQ-209
         return WriteResult(accepted=True, recorded={"公開記録": record.model_dump(mode="json")})
 
     # ------------------------------------------------------------ 登記の部品
@@ -87,22 +89,29 @@ class PublicRecordService:
         見る順は、置き場が設定にあるか、必須の欄、ID の形式と一意性、種類の語彙、役割の語彙、
         由来の節の実在である。1 つ目に当たった時点で返すので、正本は 1 バイトも変わらない。
         """
+        # spec: REQ-214
         if not self.settings.has_file(PUBLIC_RECORDS_KEY):
             return self._missing_file_rejection()
 
         missing = missing_required_fields(PUBLIC_RECORD_TYPE_NAME, draft)
+        # spec: REQ-219
         if missing:
             return Rejection(
+                # spec: REQ-220
                 constraint=PUBLIC_RECORD_REQUIRED_FIELDS,
                 reason=(
                     "公開記録の必須の欄"
+                    # spec: REQ-221
                     + "、".join(f"「{field.label}」" for field in missing)
                     + "が無い。名前と種類と日付と発行元か主催と役割がそろって初めて、"
                     "外から確かめられる 1 件になる。"
                 ),
                 next_action=NextAction(
+                    # spec: REQ-222
                     operation=REGISTER_OPERATION,
+                    # spec: REQ-223
                     missing_fields=[field.label for field in missing],
+                    # spec: REQ-224
                     example="\n".join(field_example(field) for field in missing),
                 ),
             )
@@ -123,14 +132,18 @@ class PublicRecordService:
     def _missing_file_rejection(self) -> Rejection:
         """公開記録の置き場が設定に無いときの拒否。足す鍵 3 つを名前で返す。"""
         return Rejection(
+            # spec: REQ-215
             constraint=PUBLIC_RECORDS_FILE_SETTING,
             reason=(
+                # spec: REQ-216
                 f"設定ファイル {self.settings.config_path.name} に公開記録の置き場が無いので、"
                 "書き足す先が決まらない。この正本は公開記録を使わない正本として動いている。"
             ),
             next_action=NextAction(
+                # spec: REQ-217
                 operation=REGISTER_OPERATION,
                 example=(
+                    # spec: REQ-218
                     f"設定の [source.files] に {PUBLIC_RECORDS_KEY} = "
                     '"public_records.md" を足し、[vocabulary] に '
                     f"{PUBLIC_RECORD_KINDS_KEY} と {PUBLIC_RECORD_ROLES_KEY} を"
@@ -142,21 +155,28 @@ class PublicRecordService:
     def _vocabulary_rejection(self, draft: PublicRecordDraft) -> Rejection | None:
         """種類と役割が、設定の語の一覧にあるかを見る。種類を先に見る。"""
         for label, value, words, key in (
+            # spec: REQ-225
             ("種類", draft.kind, self.settings.public_record_kinds, PUBLIC_RECORD_KINDS_KEY),
+            # spec: REQ-231
             ("役割", draft.role, self.settings.public_record_roles, PUBLIC_RECORD_ROLES_KEY),
         ):
             if value in words:
                 continue
             return Rejection(
+                # spec: REQ-226
                 constraint=PUBLIC_RECORD_VOCABULARY,
                 reason=(
+                    # spec: REQ-227
                     f"{label}「{value}」は、設定ファイル {self.settings.config_path.name} の "
                     f"{key} が持つ語の一覧に無い。"
                 ),
                 next_action=NextAction(
+                    # spec: REQ-228
                     operation=REGISTER_OPERATION,
+                    # spec: REQ-229
                     candidates=list(words),
                     example=(
+                        # spec: REQ-230
                         f"{label}には「{words[0]}」のように、上の候補のどれかをそのまま渡す。"
                         if words
                         else f"設定の [vocabulary] の {key} に、渡したい語を足してから呼び直す。"
@@ -170,6 +190,7 @@ class PublicRecordService:
     ) -> Rejection | None:
         """由来の節の ID が、職歴の枠か受託案件の ID として実在するかを見る。空なら見ない。"""
         origin = _value(draft.origin_section)
+        # spec: REQ-213
         if origin is None:
             return None
 
@@ -178,19 +199,27 @@ class PublicRecordService:
             return None
 
         trouble = (
+            # spec: REQ-240
             f"由来の節「{origin}」は ID の形に合わない（{ID_FORMAT_TEXT}）。"
             "見出しをそのまま渡しているなら、その節の ID に置き換える。"
             if not is_id(origin)
+            # spec: REQ-239
             else f"由来の節「{origin}」は、職歴の枠にも受託案件にも無い ID である。"
         )
         labels = snapshot.labels()
         candidates = close_names(origin, headings, labels)
+        # spec: REQ-237
         return Rejection(
+            # spec: REQ-238
             constraint=ORIGIN_SECTION_EXISTS,
+            # spec: REQ-241
             reason=trouble + candidate_text(candidates, labels),
             next_action=NextAction(
+                # spec: REQ-242
                 operation=REGISTER_OPERATION,
+                # spec: REQ-243
                 candidates=candidates,
+                # spec: REQ-244
                 example=(
                     f"上の候補をそのまま由来の節に渡して、もう一度 {REGISTER_OPERATION} を呼ぶ。"
                     "元になった仕事が正本に無いなら、由来の節は空のままでよい。"
@@ -201,6 +230,7 @@ class PublicRecordService:
 
 def _value(text: str | None) -> str | None:
     """入力の任意の欄を、値か「持たない」にそろえる。空を表す語（「なし」など）も持たないとして読む。"""
+    # spec: REQ-212
     if text is None or text.strip() in EMPTY_WORDS:
         return None
     return text.strip()
