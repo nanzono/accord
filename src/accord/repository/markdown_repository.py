@@ -673,9 +673,12 @@ class MarkdownRepository:
         for key in EVIDENCE_SOURCE_KEYS:
             blocks, rule = self._blocks(key)
             for section in blocks:
+                # spec: REQ-303
                 identifier = read_fields(section, rule).get(ID_LABEL, "").strip()
+                # spec: REQ-304
                 if identifier:
                     bodies.setdefault(
+                        # spec: REQ-301
                         identifier, drop_field_lines(section.body, (ID_LABEL,), rule)
                     )
         return bodies

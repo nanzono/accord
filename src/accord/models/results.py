@@ -219,33 +219,47 @@ def id_rejection(
     taken は、すでに使われている ID と、その ID を持つ項目の表示名の対応である。
     """
     value = (identifier or "").strip()
+    # spec: REQ-305
     if not is_id(value):
         examples = list(taken)[:FALLBACK_COUNT]
         return Rejection(
+            # spec: REQ-306
             constraint=constraint,
             reason=(
+                # spec: REQ-307
                 f"ID「{value}」は形に合わない（{ID_FORMAT_TEXT}）。"
+                # spec: REQ-308
                 "正本にすでにある ID を例にすると "
                 + " / ".join(labelled(name, taken) for name in examples)
                 + "。"
             ),
             next_action=NextAction(
+                # spec: REQ-309
                 operation=operation,
+                # spec: REQ-310
                 candidates=examples,
+                # spec: REQ-311
                 example="ID は「teramina-delivery」のように、意味の分かる短い語をハイフンでつなぐ。",
             ),
         )
 
+    # spec: REQ-312
     if value in taken:
         return Rejection(
+            # spec: REQ-313
             constraint=constraint,
             reason=(
+                # spec: REQ-314
                 f"ID「{value}」は、すでに「{taken[value]}」が使っている。"
+                # spec: REQ-315
                 "ID は正本全体で 1 つの項目にしか付けられない。"
             ),
             next_action=NextAction(
+                # spec: REQ-316
                 operation=operation,
+                # spec: REQ-317
                 candidates=[],
+                # spec: REQ-318
                 example="まだどの項目も使っていない ID を渡して呼び直す。",
             ),
         )

@@ -296,6 +296,18 @@
 - 関係するファイル: `src/accord/services/offering.py`
 - 検証手順: `uv run pytest tests/test_offering.py -k REQ_156`
 
+## REQ-320
+もし機能の登記で 2 つ以上の制約が同時に外れているなら、accord は必須の欄・分類の語彙・ID の形と重なり・裏づけの節の順で先に当たった 1 件だけを断りに返す。
+
+- 関係するファイル: `src/accord/services/offering.py`
+- 検証手順: `uv run pytest tests/test_offering.py -k REQ_320`
+
+## REQ-321
+もしパッケージの改訂で 2 つ以上の制約が同時に外れているなら、accord は必須の欄・ID の形と重なり・仮説の状態・束ねる機能の順で先に当たった 1 件だけを断りに返す。
+
+- 関係するファイル: `src/accord/services/offering.py`
+- 検証手順: `uv run pytest tests/test_offering.py -k REQ_321`
+
 ## 未決の質問
 
 - 無し。

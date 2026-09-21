@@ -737,3 +737,91 @@ def test_REQ_156_hypothesis_state_rejection_shows_how_to_pass_a_candidate(settin
     example = _rejection_of(_hypothesis_state_result(settings)).next_action.example
 
     assert settings.package_hypothesis_states[0] in example, example
+
+
+# ---------------------------------------------------------------- 制約を見る順
+
+
+# 制約を同時に崩すときに渡す、形の外の ID と、設定の節に無い分類。
+OUT_OF_FORMAT_ID = "Collect_Milestones"
+UNKNOWN_CATEGORY = "思いつきの分類"
+
+
+def test_REQ_320_only_the_first_broken_rule_is_returned_when_registering_a_capability(
+    settings,
+) -> None:
+    """機能の登記は、必須の欄・分類・ID・裏づけの節の順で、先に当たった 1 件だけを返す。
+
+    後ろの段から 1 つずつ前の段を崩していき、返る断りが前の段のものに入れ替わることを見る。
+    順を入れ替えると、崩した段より後ろの断りが返って落ちる。
+    """
+    service = OfferingService(settings)
+
+    def draft(**changes) -> CapabilityDraft:
+        values = {
+            "id": "collect-milestones",
+            "name": "工程の期日を 1 枚に集める",
+            "description": "部署ごとに持っている予定を 1 枚にまとめ、遅れを早く見つける",
+            "category": settings.capability_categories[2],
+            "evidence_sections": [UNKNOWN_EVIDENCE_ID],
+        }
+        values.update(changes)
+        return CapabilityDraft(**values)
+
+    # 裏づけの節だけが正本に無い ID なら、いちばん後に見る裏づけの節の断りが返る。
+    evidence_only = service.register_capability(draft())
+    assert _rejection_of(evidence_only).constraint == "裏づけ節名の実在"
+
+    # ID も形の外にすると、裏づけの節より先に見る ID の断りが返る。
+    with_id = service.register_capability(draft(id=OUT_OF_FORMAT_ID))
+    assert _rejection_of(with_id).constraint == "ID の形式と一意性"
+
+    # 分類も設定の節の外にすると、ID より先に見る分類の断りが返る。
+    with_category = service.register_capability(
+        draft(id=OUT_OF_FORMAT_ID, category=UNKNOWN_CATEGORY)
+    )
+    assert _rejection_of(with_category).constraint == "機能の分類の列挙"
+
+    # 必須の欄も欠くと、分類より先に見る必須の欄の断りが返る。
+    with_missing = service.register_capability(
+        draft(id=OUT_OF_FORMAT_ID, category=UNKNOWN_CATEGORY, name="", description="")
+    )
+    assert _rejection_of(with_missing).constraint == "機能の必須欄"
+
+
+def test_REQ_321_only_the_first_broken_rule_is_returned_when_revising_a_package(
+    settings,
+) -> None:
+    """パッケージの改訂は、必須の欄・ID・仮説の状態・束ねる機能の順で、先の 1 件だけを返す。"""
+    service = OfferingService(settings)
+
+    def draft(**changes) -> PackageDraft:
+        values = {
+            "id": PACKAGE_ID,
+            "name": PACKAGE_NAME,
+            "capabilities": [UNREGISTERED_CAPABILITY],
+            "buyer": BUYER,
+            "hypothesis_state": settings.package_hypothesis_states[1],
+        }
+        values.update(changes)
+        return PackageDraft(**values)
+
+    # 束ねる機能だけが台帳に無い ID なら、いちばん後に見る束ねる機能の断りが返る。
+    capability_only = service.revise_package(draft())
+    assert _rejection_of(capability_only).constraint == "束ねる機能名の一致"
+
+    # 仮説の状態も設定の語の外にすると、束ねる機能より先に見る仮説の状態の断りが返る。
+    with_state = service.revise_package(draft(hypothesis_state=UNKNOWN_HYPOTHESIS_STATE))
+    assert _rejection_of(with_state).constraint == "仮説の状態の列挙"
+
+    # ID も形の外にすると、仮説の状態より先に見る ID の断りが返る。
+    with_id = service.revise_package(
+        draft(id=OUT_OF_FORMAT_ID, hypothesis_state=UNKNOWN_HYPOTHESIS_STATE)
+    )
+    assert _rejection_of(with_id).constraint == "ID の形式と一意性"
+
+    # 必須の欄も欠くと、ID より先に見る必須の欄の断りが返る。
+    with_missing = service.revise_package(
+        draft(id=OUT_OF_FORMAT_ID, hypothesis_state=UNKNOWN_HYPOTHESIS_STATE, buyer="")
+    )
+    assert _rejection_of(with_missing).constraint == "パッケージの必須欄"

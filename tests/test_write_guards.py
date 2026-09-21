@@ -1,10 +1,12 @@
-"""書きの操作 4 つに共通の、2 つの約束を確かめる。
+"""書きの操作 4 つに共通の、4 つの約束を確かめる。
 
-1 つは、拒否の返り値が必ず「次に何をすべきか」を持つこと。何が悪いかだけを返すと、
-受け取った側は正本を読み直して直し方を自分で探す羽目になり、規則が行動の瞬間に効かない。
-もう 1 つは、拒否のときに正本のバイト列が 1 つも変わらないこと。
+3 つは、拒否の返り値が必ず「次に何をすべきか」を持つことである。次に呼ぶ操作の名前、
+欠けた欄の名前と候補と書き方の例のうち少なくとも 1 つ、そして何が通らなかったかの理由を返す。
+何が悪いかだけを返すと、受け取った側は正本を読み直して直し方を自分で探す羽目になり、
+規則が行動の瞬間に効かない。もう 1 つは、拒否のときに正本のバイト列が 1 つも変わらないことである。
 
 到達できる拒否の経路を、4 つの操作ぶんすべて並べて回す。経路を 1 つ足したら、この表に 1 行足す。
+表が、書きの操作の執行する制約をすべて覆っていることは、型の正本と突き合わせて機械で見る。
 """
 
 from __future__ import annotations
@@ -13,6 +15,7 @@ from datetime import date
 
 import pytest
 
+from accord.models.constraints import CONSTRAINTS
 from accord.models.results import (
     CapabilityDraft,
     PackageDraft,
@@ -25,6 +28,17 @@ from accord.services.positioning import PositioningService
 from accord.services.public_records import PublicRecordService
 from accord.vocabulary.settings import Settings
 from conftest import source_digest
+
+# 制約の現れ方のうち、書きの操作で拒否として現れるもの。型の正本の語をそのまま使う。
+REJECTING = "拒否"
+
+# 正本に書く 4 つの操作の名前。型の正本の enforced_by に書かれている語と同じにする。
+WRITE_OPERATIONS = {
+    "record_positioning",
+    "register_capability",
+    "revise_package",
+    "register_public_record",
+}
 
 # 同梱のサンプルにある ID と見出し。通る入力の土台にして、1 か所だけ崩す。
 # 節を探すのは見出し（表示名）、ほかの項目を指すのは ID なので、両方を持つ。
@@ -135,8 +149,8 @@ REJECTION_PATHS = {
 
 
 @pytest.mark.parametrize("path", sorted(REJECTION_PATHS))
-def test_every_rejection_names_the_next_action(settings: Settings, path: str) -> None:
-    """どの拒否も、次に何をすべきかの欄を持ち、その欄が空でない。"""
+def test_REQ_322_every_rejection_names_the_next_operation(settings: Settings, path: str) -> None:
+    """どの拒否も、次に呼ぶ操作の名前を返し、その欄が空でない。"""
     result = REJECTION_PATHS[path](settings)
 
     assert result.accepted is False, path
@@ -144,16 +158,37 @@ def test_every_rejection_names_the_next_action(settings: Settings, path: str) ->
 
     next_action = result.rejection.next_action
     assert next_action.operation, f"{path}: 次に呼ぶ操作の名前が空"
-    # 欠けた欄・候補・書き方の例のうち、少なくとも 1 つは埋まっていること。
+
+
+@pytest.mark.parametrize("path", sorted(REJECTION_PATHS))
+def test_REQ_323_every_rejection_carries_a_next_step(settings: Settings, path: str) -> None:
+    """どの拒否も、欠けた欄の名前・候補・書き方の例のうち、少なくとも 1 つを返す。"""
+    result = REJECTION_PATHS[path](settings)
+
+    assert result.accepted is False, path
+    assert result.rejection is not None, path
+
+    next_action = result.rejection.next_action
     # 3 つとも空だと「次に何をすべきか」が操作の名前だけになり、呼び直せない。
     assert (
         next_action.missing_fields or next_action.candidates or next_action.example
     ), f"{path}: 次の一手の中身が空"
+
+
+@pytest.mark.parametrize("path", sorted(REJECTION_PATHS))
+def test_REQ_324_every_rejection_names_what_failed(settings: Settings, path: str) -> None:
+    """どの拒否も、何が通らなかったかを理由に返す。"""
+    result = REJECTION_PATHS[path](settings)
+
+    assert result.accepted is False, path
+    assert result.rejection is not None, path
     assert result.rejection.reason, f"{path}: 何が通らなかったかが空"
 
 
 @pytest.mark.parametrize("path", sorted(REJECTION_PATHS))
-def test_rejected_write_leaves_source_untouched(settings: Settings, path: str) -> None:
+def test_REQ_325_a_rejected_write_leaves_the_source_untouched(
+    settings: Settings, path: str
+) -> None:
     """拒否のあと、正本のディレクトリ配下の全ファイルのバイト列が呼び出しの前と一致する。"""
     before = source_digest(settings.source_dir)
 
@@ -161,3 +196,25 @@ def test_rejected_write_leaves_source_untouched(settings: Settings, path: str) -
 
     assert result.accepted is False, path
     assert source_digest(settings.source_dir) == before, path
+
+
+def test_the_rejection_paths_cover_every_write_constraint(settings: Settings) -> None:
+    """拒否の経路の表が、書きの操作が拒否として執行する制約をすべて覆っている。
+
+    表を手で書いたまま、型の正本の側で制約が増えても気づけない、という穴を塞ぐ。制約が 1 つ
+    増えたのに経路を足していなければ、このテストが落ちる。
+    """
+    seen = set()
+    for path in sorted(REJECTION_PATHS):
+        result = REJECTION_PATHS[path](settings)
+        assert result.rejection is not None, path
+        seen.add(result.rejection.constraint)
+
+    wanted = {
+        item.name
+        for item in CONSTRAINTS
+        if item.appears_as == REJECTING and set(item.enforced_by) & WRITE_OPERATIONS
+    }
+
+    assert wanted, "書きの操作が拒否として執行する制約が 1 件も見つからない"
+    assert wanted <= seen, sorted(wanted - seen)

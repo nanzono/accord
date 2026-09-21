@@ -893,6 +893,7 @@ class ConsistencyService:
         capabilities = [item for item in snapshot.capabilities if item.id in bundled]
         return records_behind(capabilities, snapshot.public_records)
 
+    # spec: REQ-291
     def _check_id_format_and_uniqueness(self, snapshot: SourceSnapshot) -> list[Violation]:
         """指される側の 5 つの型の ID が、形に合い、正本全体で重ならないかを見る。
 
@@ -935,20 +936,24 @@ class ConsistencyService:
 
         violations: list[Violation] = []
         for identifier, file_name, location in entries:
+            # spec: REQ-292
             if not is_id(identifier):
                 violations.append(
                     Violation(
                         constraint=ID_FORMAT_AND_UNIQUENESS,
                         file=file_name,
+                        # spec: REQ-293
                         location=f"{location}の「{ID_LABEL}」",
                         expected=(
                             f"ID「{identifier}」は形に合わない（{ID_FORMAT_TEXT}）。"
+                            # spec: REQ-294
                             "この行を形に合う値に直し、この ID を指している側も同じ値に直す。"
                         ),
                     )
                 )
                 continue
             same = places[identifier]
+            # spec: REQ-295
             if len(same) > 1:
                 violations.append(
                     Violation(
@@ -956,9 +961,11 @@ class ConsistencyService:
                         file=file_name,
                         location=f"{location}の「{ID_LABEL}」",
                         expected=(
+                            # spec: REQ-296
                             f"ID「{identifier}」が {len(same)} か所で使われている"
                             f"（{fold_names(same, keep=NAME_SAMPLE_COUNT)}）。"
                             "ID は正本全体で 1 つの項目にしか付けられないので、"
+                            # spec: REQ-297
                             "どちらか一方を別の値に直し、その ID を指している側も同じ値に直す。"
                         ),
                     )

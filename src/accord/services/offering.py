@@ -274,6 +274,7 @@ class OfferingService:
         labels = {
             identifier: label
             for identifier, label in snapshot.labels().items()
+            # spec: REQ-319
             if previous is None or identifier != previous.id
         }
         id_problem = id_rejection(

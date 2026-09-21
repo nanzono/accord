@@ -232,6 +232,7 @@ class MaterialService:
                 # spec: REQ-087
                 evidence.append(
                     {
+                        # spec: REQ-300
                         EVIDENCE_HEADING_KEY: heading,
                         EVIDENCE_ID_KEY: section_id,
                         EVIDENCE_DISCLOSURE_KEY: disclosure,
