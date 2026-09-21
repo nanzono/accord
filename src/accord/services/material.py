@@ -59,6 +59,7 @@ class MaterialService:
     def assemble(self, request: MaterialRequest) -> Material:
         """材料を組み立てる。正本は 1 バイトも書き換えない。"""
         channel = request.channel
+        # spec: REQ-101
         if channel not in self.settings.channels:
             return Material(
                 channel=channel,
@@ -66,9 +67,11 @@ class MaterialService:
             )
 
         snapshot = self.repository.load()
+        # spec: REQ-084
         view = PositioningService(self.settings, self.repository).current(channel)
         warnings = list(view.warnings)
 
+        # spec: REQ-103
         if view.positioning is None:
             # 決めが未登記（または当たる決めが無い）。読む側の次の一手は view が持っている。
             return Material(channel=channel, warnings=warnings)
@@ -89,7 +92,9 @@ class MaterialService:
         warnings.extend(evidence_warnings)
         warnings.extend(self._unused_public_record_warnings(snapshot))
 
+        # spec: REQ-090
         channel_rules = self.repository.channel_rules(channel)
+        # spec: REQ-091
         forbidden_phrases = self.repository.forbidden_phrases()
         warnings.extend(
             self._presentation_rule_warnings(channel, channel_rules, forbidden_phrases)
@@ -98,6 +103,7 @@ class MaterialService:
         warnings.extend(self._inspection_warnings(channel))
 
         if request.opportunity is not None:
+            # spec: REQ-106
             warnings.append(
                 f"案件「{request.opportunity}」は受け取ったが、第 1 版の材料には反映しない。"
                 "求人票の必須条件とこの材料の突き合わせは、材料を読む側が行う。"
@@ -128,6 +134,7 @@ class MaterialService:
         if request.package is None:
             return headline, []
 
+        # spec: REQ-085
         found = next((item for item in snapshot.packages if item.id == request.package), None)
         if found is not None:
             return found, []
@@ -138,8 +145,10 @@ class MaterialService:
                 f"package を省くと、この媒体の決めが前面に出す束"
                 f"「{headline.name}」（{headline.id}）で組み立てる。"
             )
+        # spec: REQ-099
         return None, [
             f"パッケージ「{request.package}」は、パッケージ定義に無い ID である。",
+            # spec: REQ-100
             "実在するパッケージ: "
             + " / ".join(labelled(item.id, {item.id: item.name}) for item in snapshot.packages),
             f"上の ID のどれかを package に渡して、もう一度 {ASSEMBLE_OPERATION} を呼ぶ。"
@@ -154,9 +163,11 @@ class MaterialService:
         found: list[Capability] = []
         warnings: list[str] = []
 
+        # spec: REQ-086
         for name in package.capabilities:
             capability = by_id.get(name)
             if capability is None:
+                # spec: REQ-095
                 warnings.append(
                     f"束「{package.name}」が束ねる機能「{name}」が機能の台帳に無いので、"
                     f"この機能の裏づけは材料に入っていない。直し先は {INSPECT_OPERATION} が返す。"
@@ -190,12 +201,15 @@ class MaterialService:
                     continue
                 seen.add(section_id)
 
+                # spec: REQ-088
                 if section_id in records:
                     public_records.append(records[section_id])
+                    # spec: REQ-089
                     continue
 
                 disclosure = snapshot.disclosure_of(section_id)
                 if disclosure is None:
+                    # spec: REQ-096
                     warnings.append(
                         f"機能「{capability.name}」の裏づけの節「{section_id}」は、"
                         "職歴の枠にも受託案件にも公開記録にも無い ID なので、材料に入っていない。"
@@ -204,7 +218,9 @@ class MaterialService:
                     continue
 
                 heading = labels.get(section_id, section_id)
+                # spec: REQ-093
                 if snapshot.is_private(section_id):
+                    # spec: REQ-094
                     warnings.append(
                         f"{NOTE_AND_SOURCE_SECTION}: 裏づけの節「{heading}」（{section_id}）は"
                         f"公開可否が「{disclosure}」なので、材料から落とした。"
@@ -213,6 +229,7 @@ class MaterialService:
                     )
                     continue
 
+                # spec: REQ-087
                 evidence.append(
                     {
                         EVIDENCE_HEADING_KEY: heading,
@@ -243,6 +260,7 @@ class MaterialService:
         ]
         if not unused:
             return []
+        # spec: REQ-108
         return [
             f"裏づけに使われていない公開記録が {len(unused)} 件ある"
             f"（{fold_names(unused, keep=NAME_SAMPLE_COUNT)}）。"
@@ -255,11 +273,13 @@ class MaterialService:
         """見せ方の正本に、その媒体の節と禁じた言い回しの節があるかを断る。"""
         file_name = self.settings.files[PRESENTATION_RULES_KEY]
         warnings: list[str] = []
+        # spec: REQ-097
         if not channel_rules:
             warnings.append(
                 f"見せ方の正本 {file_name} に媒体「{channel}」の節が無いので、媒体の規約は空である。"
                 f"文字数の上限や書き出しの決まりがあるなら、この媒体の名前の節を作って箇条書きで書く。"
             )
+        # spec: REQ-098
         if not forbidden_phrases:
             warnings.append(
                 f"見せ方の正本 {file_name} に禁じた言い回しの節が無いので、その一覧は空である。"
@@ -278,6 +298,7 @@ class MaterialService:
         report = ConsistencyService(self.settings, self.repository).inspect(channel)
         # 違反を 1 行に均すときに候補を落とすと、「下の候補」の実体が材料に届かない。
         # 1 行にする書き方は違反の型が持っているので、ここでは組み立て直さない。
+        # spec: REQ-107
         warnings = [violation.as_note() for violation in report.violations]
         warnings.extend(report.notes)
         return warnings

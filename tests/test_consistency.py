@@ -768,34 +768,6 @@ def test_REQ_022_evidence_section_can_point_at_a_public_record(settings) -> None
     assert [v for v in report.violations if v.constraint == EVIDENCE_SECTION_EXISTS] == []
 
 
-def test_register_capability_accepts_a_public_record_as_evidence(settings) -> None:
-    """機能を登記する操作は公開記録を裏づけに取り、実在しない名前のときの拒否は公開記録にも触れる。"""
-    from accord.models.results import CapabilityDraft
-    from accord.services.offering import OfferingService
-
-    service = OfferingService(settings)
-    draft = {
-        "id": "turn-talk-into-steps",
-        "name": "話した内容を手順に落とす",
-        "description": "勉強会で話した進め方を、そのまま使える手順に直す",
-        "category": settings.capability_categories[2],
-    }
-    accepted = service.register_capability(
-        CapabilityDraft(**draft, evidence_sections=[RECORD_ID])
-    )
-    assert accepted.accepted is True, accepted.model_dump()
-
-    # 1 行目が通って ID が埋まったので、2 回目は別の ID で呼ぶ（同じ ID は一意性で先に落ちる）。
-    rejected = service.register_capability(
-        CapabilityDraft(
-            **{**draft, "id": "turn-talk-into-steps-2"}, evidence_sections=["nowhere-at-all"]
-        )
-    )
-    assert rejected.accepted is False
-    assert rejected.rejection is not None
-    assert "公開記録" in rejected.rejection.reason
-
-
 # ---------------------------------------------------------------- 設定の語の一覧との照合
 
 

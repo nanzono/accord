@@ -68,37 +68,50 @@ class OfferingService:
         labels = snapshot.labels()
 
         missing = missing_required_fields(CAPABILITY_TYPE_NAME, draft)
+        # spec: REQ-115
         if missing:
             return WriteResult(
                 accepted=False,
                 rejection=Rejection(
+                    # spec: REQ-116
                     constraint=CAPABILITY_REQUIRED_FIELDS,
+                    # spec: REQ-117
                     reason=(
                         "機能の必須の欄"
                         + "、".join(f"「{field.label}」" for field in missing)
                         + "が無い。名前と説明と裏づけがそろって初めて、仕事をしたと言える機能になる。"
                     ),
                     next_action=NextAction(
+                        # spec: REQ-118
                         operation=REGISTER_OPERATION,
+                        # spec: REQ-119
                         missing_fields=[field.label for field in missing],
+                        # spec: REQ-120
                         example="\n".join(field_example(field) for field in missing),
                     ),
                 ),
             )
 
+        # spec: REQ-109
         categories = self.settings.capability_categories
+        # spec: REQ-121
         if draft.category not in categories:
             return WriteResult(
                 accepted=False,
                 rejection=Rejection(
+                    # spec: REQ-122
                     constraint=CAPABILITY_CATEGORY_ENUM,
+                    # spec: REQ-123
                     reason=(
                         f"分類「{draft.category}」は機能の台帳の節に無い。"
                         f"分類は設定ファイル {self.settings.config_path.name} が持つ節の名前に限る。"
                     ),
                     next_action=NextAction(
+                        # spec: REQ-124
                         operation=REGISTER_OPERATION,
+                        # spec: REQ-125
                         candidates=list(categories),
+                        # spec: REQ-126
                         example=f"分類には「{categories[0]}」のように、上の候補のどれかをそのまま渡す。",
                     ),
                 ),
@@ -110,13 +123,17 @@ class OfferingService:
         if id_problem is not None:
             return WriteResult(accepted=False, rejection=id_problem)
 
+        # spec: REQ-110
         headings = snapshot.evidence_targets()
         unknown = [name for name in draft.evidence_sections if name not in headings]
+        # spec: REQ-127
         if unknown:
+            # spec: REQ-129
             trouble = (
                 f"裏づけの節「{unknown[0]}」は ID の形に合わない（{ID_FORMAT_TEXT}）。"
                 "見出しや名前をそのまま渡しているなら、その節の ID に置き換える。"
                 if not is_id(unknown[0])
+                # spec: REQ-131
                 else (
                     f"裏づけの節「{unknown[0]}」は、"
                     "職歴の枠にも受託案件にも公開記録にも無い ID である。"
@@ -126,11 +143,16 @@ class OfferingService:
             return WriteResult(
                 accepted=False,
                 rejection=Rejection(
+                    # spec: REQ-128
                     constraint=EVIDENCE_SECTION_EXISTS,
+                    # spec: REQ-130
                     reason=trouble + candidate_text(candidates, labels),
                     next_action=NextAction(
+                        # spec: REQ-132
                         operation=REGISTER_OPERATION,
+                        # spec: REQ-133
                         candidates=candidates,
+                        # spec: REQ-134
                         example=(
                             "上の候補をそのまま裏づけの節に渡して、"
                             f"もう一度 {REGISTER_OPERATION} を呼ぶ。"
@@ -151,7 +173,9 @@ class OfferingService:
         # 公開記録は定義により公開されているものなので、公開可否の欄を持たない。
         # 「不明」と並べると外に出せないものと読めるので、公開記録であることをそのまま書く。
         # 鍵は ID だが、読む人に伝わるのは表示名なので「表示名（ID）」で並べる。
+        # spec: REQ-113
         record_ids = {record.id for record in snapshot.public_records}
+        # spec: REQ-112
         disclosure = {
             f"{labels.get(section_id, section_id)}（{section_id}）": (
                 PUBLIC_RECORD_DISCLOSURE
@@ -160,6 +184,7 @@ class OfferingService:
             )
             for section_id in capability.evidence_sections
         }
+        # spec: REQ-114
         warnings = [
             f"裏づけの節「{heading}」は {state} なので、対外の文面には出せない。"
             for heading, state in disclosure.items()
@@ -192,17 +217,20 @@ class OfferingService:
         previous = next((item for item in snapshot.packages if item.name == draft.name), None)
         carried, warnings = self._carried_over(previous, draft)
 
+        # spec: REQ-137
         package = Package(
             id=draft.id.strip(),
             name=draft.name,
             buyer=draft.buyer,
             hypothesis_state=draft.hypothesis_state,
             capabilities=list(draft.capabilities),
+            # spec: REQ-138
             updated_on=date.today(),
             basis=carried["basis"],
             source=carried["source"],
             breaks_when=carried["breaks_when"],
         )
+        # spec: REQ-135
         self.repository.write_package(package)
 
         return WriteResult(
@@ -210,6 +238,7 @@ class OfferingService:
             recorded={
                 "改訂したパッケージ": package.model_dump(mode="json"),
                 "最終更新": package.updated_on.isoformat(),
+                # spec: REQ-136
                 "新しい節か": previous is None,
             },
             warnings=warnings,
@@ -254,23 +283,31 @@ class OfferingService:
             return id_problem
 
         states = self.settings.package_hypothesis_states
+        # spec: REQ-151
         if draft.hypothesis_state not in states:
             return Rejection(
+                # spec: REQ-152
                 constraint=PACKAGE_HYPOTHESIS_STATE_ENUM,
+                # spec: REQ-153
                 reason=(
                     f"仮説の状態「{draft.hypothesis_state}」は、"
                     f"設定ファイル {self.settings.config_path.name} が持つ語の一覧に無い。"
                 ),
                 next_action=NextAction(
+                    # spec: REQ-154
                     operation=REVISE_OPERATION,
+                    # spec: REQ-155
                     candidates=list(states),
+                    # spec: REQ-156
                     example=f"仮説の状態には「{states[0]}」のように、上の候補のどれかをそのまま渡す。",
                 ),
             )
 
         names = [item.id for item in snapshot.capabilities]
         unknown = [name for name in draft.capabilities if name not in names]
+        # spec: REQ-144
         if unknown:
+            # spec: REQ-146
             trouble = (
                 f"束ねる機能「{unknown[0]}」は ID の形に合わない（{ID_FORMAT_TEXT}）。"
                 "機能名をそのまま渡しているなら、その機能の ID に置き換える。"
@@ -279,11 +316,16 @@ class OfferingService:
             )
             candidates = close_names(unknown[0], names, snapshot.labels())
             return Rejection(
+                # spec: REQ-145
                 constraint=PACKAGE_CAPABILITY_MATCHES,
+                # spec: REQ-147
                 reason=trouble + candidate_text(candidates, snapshot.labels()),
                 next_action=NextAction(
+                    # spec: REQ-148
                     operation=REVISE_OPERATION,
+                    # spec: REQ-149
                     candidates=candidates,
+                    # spec: REQ-150
                     example=(
                         "上の候補をそのまま束ねる機能に渡して、"
                         f"もう一度 {REVISE_OPERATION} を呼ぶ。"
@@ -314,13 +356,17 @@ class OfferingService:
         warnings: list[str] = []
         for name, label in (("basis", "判定根拠"), ("source", "出典")):
             if carried[name] is None and getattr(previous, name) is not None:
+                # spec: REQ-141
                 carried[name] = getattr(previous, name)
+                # spec: REQ-142
                 warnings.append(
                     f"「{label}」は入力に無かったので、前の定義の値をそのまま残した。"
                     f"変えるなら、{REVISE_OPERATION} にこの欄を入れてもう一度呼ぶ。"
                 )
+        # spec: REQ-139
         if previous.breaks_when is not None:
             carried["breaks_when"] = previous.breaks_when
+            # spec: REQ-140
             warnings.append(
                 f"「{CARRIED_OVER_LABEL}」はこの操作の入力に無い欄なので、"
                 "前の定義の値をそのまま残した。変えるなら正本を直す。"
