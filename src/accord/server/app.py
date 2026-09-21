@@ -32,6 +32,7 @@ from accord.services.public_records import PublicRecordService
 from accord.vocabulary.settings import Settings
 
 # ツールと資源の名前。README の「動かす」の表と同じ綴りで、変えない。
+# spec: REQ-336
 TOOL_NAMES = (
     "get_positioning",
     "assemble_material",
@@ -211,6 +212,7 @@ def create_server(settings: Settings) -> MCPServer:
         """
         return consistency_service.inspect(scope)
 
+    # spec: REQ-337
     @mcp.resource(ONTOLOGY_URI)
     def ontology() -> Ontology:
         """型・関係・制約の定義を返す。セッションの初めに読む。"""

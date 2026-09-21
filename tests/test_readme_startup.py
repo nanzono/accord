@@ -9,6 +9,10 @@
 突き合わせの本体は、README の文面（str）を受けて違いの一覧（違いが無ければ空リスト）を返す
 関数として書く。テスト関数はその関数を呼んで `assert not diffs` の形で見る。こうしておくと、
 自己試験で「わざと壊した文面」を同じ関数にそのまま渡せる。
+
+要件 1 件につきテストを 1 本置くので、突き合わせの関数は「どの観点を見るか」を引数で絞れる。
+絞らずに呼ぶと、もとの 1 本が見ていた観点をすべて見る（自己試験はこの形で呼ぶ）。観点ごとに
+絞った呼び出しをすべて足すと、絞らない呼び出しと同じ違いの一覧になる。
 """
 
 from __future__ import annotations
@@ -29,6 +33,10 @@ PINNED_COMMAND = "uvx"
 
 # 版を上げないと古い版が動き続ける、という注意書きに必ず入る 2 つの語。
 VERSION_WARNING_WORDS = ("version", "上げ")
+
+# 突き合わせの観点。要件 1 件につき 1 つを選んで渡す。既定は「全部」で、もとの 1 本と同じ。
+MCP_ASPECTS = ("example_present", "in_place")
+BOTH_WAYS_ASPECTS = ("in_place", "pinned")
 
 
 # ---------------------------------------------------------------- 節の切り出し
@@ -75,8 +83,12 @@ def _real_readme_text() -> str:
 # ---------------------------------------------------------------- 突き合わせ（違いの一覧を返す）
 
 
-def diff_mcp_example(readme_text: str) -> list[str]:
-    """`.mcp.json` の例が、手元の木をその場で動かす起動になっているかを見る。"""
+def diff_mcp_example(readme_text: str, aspects: tuple[str, ...] = MCP_ASPECTS) -> list[str]:
+    """AI から呼ぶときの設定の例があり、手元の木をその場で動かす起動になっているかを見る。
+
+    aspects を絞ると、例が置かれているかと、その起動の形かの片方だけを見る。例が読めない
+    （節が無い・ブロックが無い・JSON として読めない）ときは、どの観点でも同じ 1 件を返す。
+    """
     section = extract_section(readme_text)
     if section is None:
         return [f"README に見出し「{SECTION_HEADING}」が無い。"]
@@ -91,7 +103,13 @@ def diff_mcp_example(readme_text: str) -> list[str]:
     except json.JSONDecodeError as error:
         return [f"節の ```json のコードブロックが JSON として読めない: {error}"]
 
-    entry = document.get("mcpServers", {}).get("accord", {})
+    servers = document.get("mcpServers", {})
+    if "example_present" in aspects and "accord" not in servers:
+        diffs.append("節の ```json のコードブロックに mcpServers.accord の項目が無い。")
+    if "in_place" not in aspects:
+        return diffs
+
+    entry = servers.get("accord", {})
     command = entry.get("command")
     if command != "uv":
         diffs.append(f"mcpServers.accord.command が「{command}」で、「uv」ではない。")
@@ -104,16 +122,18 @@ def diff_mcp_example(readme_text: str) -> list[str]:
     return diffs
 
 
-def diff_both_ways(readme_text: str) -> list[str]:
-    """2 通りの起動が、どちらも節に書かれているかを見る。"""
+def diff_both_ways(readme_text: str, aspects: tuple[str, ...] = BOTH_WAYS_ASPECTS) -> list[str]:
+    """2 通りの起動が、どちらも節に書かれているかを見る。aspects を絞ると片方だけを見る。"""
     section = extract_section(readme_text)
     if section is None:
         return [f"README に見出し「{SECTION_HEADING}」が無い。"]
 
     diffs: list[str] = []
-    if not any(IN_PLACE_COMMAND in line for line in section.splitlines()):
+    if "in_place" in aspects and not any(
+        IN_PLACE_COMMAND in line for line in section.splitlines()
+    ):
         diffs.append(f"節に「{IN_PLACE_COMMAND}」を含む行が無い（手元の木を動かす起動の案内）。")
-    if not any(PINNED_COMMAND in line for line in section.splitlines()):
+    if "pinned" in aspects and not any(PINNED_COMMAND in line for line in section.splitlines()):
         diffs.append(f"節に「{PINNED_COMMAND}」を含む行が無い（版を固定する起動の案内）。")
     return diffs
 
@@ -138,19 +158,31 @@ def diff_uvx_warning(readme_text: str) -> list[str]:
 # ---------------------------------------------------------------- テスト
 
 
-def test_the_mcp_example_runs_the_checkout_in_place() -> None:
-    """`.mcp.json` の例が、手元の木をその場で動かす `uv run --project` の形になっている。"""
-    diffs = diff_mcp_example(_real_readme_text())
+def test_REQ_357_the_startup_section_shows_a_client_config() -> None:
+    """節に、AI から呼ぶときの設定の例（`.mcp.json` の書き方）が置かれている。"""
+    diffs = diff_mcp_example(_real_readme_text(), aspects=("example_present",))
     assert not diffs, "\n".join(diffs)
 
 
-def test_the_section_shows_both_ways_to_start() -> None:
-    """節に、手元の木を動かす起動と、版を固定して入れて使う起動の両方が書かれている。"""
-    diffs = diff_both_ways(_real_readme_text())
+def test_REQ_358_the_client_config_runs_the_checkout_in_place() -> None:
+    """設定の例の起動が、手元の木をその場で動かす `uv run --project` の形になっている。"""
+    diffs = diff_mcp_example(_real_readme_text(), aspects=("in_place",))
     assert not diffs, "\n".join(diffs)
 
 
-def test_the_uvx_way_carries_the_version_warning() -> None:
+def test_REQ_359_the_startup_section_shows_the_in_place_way() -> None:
+    """節に、指した場所のソースをそのまま動かす起動の書き方が置かれている。"""
+    diffs = diff_both_ways(_real_readme_text(), aspects=("in_place",))
+    assert not diffs, "\n".join(diffs)
+
+
+def test_REQ_360_the_startup_section_shows_the_pinned_way() -> None:
+    """節に、版を固定して入れて使う起動の書き方が置かれている。"""
+    diffs = diff_both_ways(_real_readme_text(), aspects=("pinned",))
+    assert not diffs, "\n".join(diffs)
+
+
+def test_REQ_361_the_pinned_way_carries_the_version_warning() -> None:
     """版を固定する起動には、版を上げないと古い版が動き続けるという注意書きが付いている。"""
     diffs = diff_uvx_warning(_real_readme_text())
     assert not diffs, "\n".join(diffs)

@@ -76,6 +76,7 @@ class Ontology(BaseModel):
     @property
     def relation_edge_count(self) -> int:
         """関係の辺の総数（種の数ではなく、本数）。"""
+        # spec: REQ-330
         return sum(relation.edge_count for relation in self.relations)
 
     def type_named(self, name: str) -> OntologyType | None:
@@ -94,10 +95,13 @@ def load_ontology(path: Path | None = None) -> Ontology:
 
     return Ontology(
         version=document.get("version", 1),
+        # spec: REQ-327
         types=[OntologyType.model_validate(entry) for entry in document.get("types", [])],
+        # spec: REQ-328
         relations=[
             OntologyRelation.model_validate(entry) for entry in document.get("relations", [])
         ],
+        # spec: REQ-329
         constraints=list(CONSTRAINTS),
     )
 

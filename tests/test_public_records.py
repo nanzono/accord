@@ -24,6 +24,10 @@ KNOWN_SECTION_HEADING = "ナギサ書房 刊行計画の進行管理"
 UNKNOWN_KIND = "ポッドキャスト"
 UNKNOWN_ROLE = "司会"
 
+# 公開記録の型が必須で持つ 6 つの欄。型の正本からは導かず、ここに文字どおり書く。
+# 導くと、正本から欄を 1 つ消しても回す場合が 1 つ減るだけで、テストは通ってしまう。
+PUBLIC_RECORD_REQUIRED_FIELDS = ("id", "name", "kind", "published_on", "publisher", "role")
+
 # 設定から抜くと、公開記録を使わない正本（この段より前の設定と同じ形）になる 3 行の書き出し。
 PUBLIC_RECORD_SETTING_LINES = (
     "public_records = ",
@@ -252,14 +256,19 @@ def test_REQ_218_missing_public_records_file_rejection_lists_the_three_keys(
 
 
 def test_REQ_219_missing_required_fields_are_not_registered(settings: Settings) -> None:
-    """必須の欄を空にした入力は受け付けず、正本のバイト列も変えない。"""
+    """必須の 6 つの欄それぞれを空にした入力を、どれも受け付けず、正本のバイト列も変えない。
+
+    欄の顔ぶれは上の定数に文字どおり書いてあり、型の正本からは導かない。導くと、正本から欄を
+    1 つ消したときにこのテストが回す場合も 1 つ減り、断らなくなったことに気づけない。
+    """
     before = source_digest(settings.source_dir)
 
-    result = _register(settings, name="", role="")
+    for field in PUBLIC_RECORD_REQUIRED_FIELDS:
+        result = _register(settings, **{field: ""})
 
-    assert result.accepted is False
-    assert result.rejection is not None
-    assert source_digest(settings.source_dir) == before
+        assert result.accepted is False, field
+        assert result.rejection is not None, field
+        assert source_digest(settings.source_dir) == before, field
 
 
 def test_REQ_220_missing_required_fields_rejection_names_the_constraint(

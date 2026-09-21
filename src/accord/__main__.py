@@ -43,10 +43,12 @@ def main(argv: list[str] | None = None) -> int:
     server = create_server(settings)
 
     if args.list:
+        # spec: REQ-339
         for name in sorted(tool.name for tool in asyncio.run(server.list_tools())):
             print(name)
         for uri in sorted(str(resource.uri) for resource in asyncio.run(server.list_resources())):
             print(uri)
+        # spec: REQ-338
         return 0
 
     server.run("stdio")

@@ -1075,6 +1075,7 @@ class ConsistencyService:
 # 機能の分類の列挙は ontology.yaml の制約 12 件に無い名前（型 Capability の欄の定義）なので、
 # この表には並ばない。照合そのものは _check_vocabulary が公開記録の語彙と同じ場所で行う。
 
+# spec: REQ-334
 ENFORCEMENT: dict[str, dict[str, tuple[Callable[..., Any], ...]]] = {
     POSITIONING_REQUIRED_FIELDS: {
         "record_positioning": (PositioningService.record,),

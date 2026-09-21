@@ -3,6 +3,11 @@
 突き合わせの本体は、README の文面（str）と Ontology を受けて、違いの一覧（違いが無ければ
 空リスト）を返す関数として書く。テスト関数はその関数を呼んで `assert not diffs` の形で見る。
 こうしておくと、自己試験で「わざと壊した文面」を同じ関数にそのまま渡せる。
+
+要件 1 件につきテストを 1 本置くので、突き合わせの関数は「どの観点を見るか」を引数で絞れる。
+絞らずに呼ぶと、もとの 1 本が見ていた観点をすべて見る（自己試験はこの形で呼ぶ）。観点ごとに
+絞った呼び出しをすべて足すと、絞らない呼び出しと同じ違いの一覧になる。だから 1 本を数本に
+割っても、見ているものは減らない。
 """
 
 from __future__ import annotations
@@ -30,6 +35,13 @@ NODE_PATTERN = re.compile(r'^\s*(\w+)\["([^"]+)"\]\s*$', re.MULTILINE)
 
 # Mermaid の矢印 1 行。例: Positioning -->|前面に出す| Package
 EDGE_PATTERN = re.compile(r"^\s*(\w+)\s*-->\|([^|]+)\|\s*(\w+)\s*$", re.MULTILINE)
+
+# 突き合わせの観点。要件 1 件につき 1 つを選んで渡す。既定は「全部」で、もとの 1 本と同じ。
+ALL_COUNT_KEYS = tuple(COUNT_PATTERNS)
+NODE_ASPECTS = ("one_diagram", "missing_nodes", "unknown_nodes", "labels")
+EDGE_ASPECTS = ("missing_edges", "unknown_edges")
+RULE_TABLE_ASPECTS = ("rows", "appears_as")
+SVG_ASPECTS = ("type_labels", "relation_names")
 
 
 # ---------------------------------------------------------------- 節の切り出し
@@ -90,11 +102,13 @@ def _real_readme_text() -> str:
 # ---------------------------------------------------------------- 突き合わせ（違いの一覧を返す）
 
 
-def diff_heading_and_counts(readme_text: str, ontology: Ontology) -> list[str]:
+def diff_heading_and_counts(
+    readme_text: str, ontology: Ontology, keys: tuple[str, ...] = ALL_COUNT_KEYS
+) -> list[str]:
     """見出しの有無と、冒頭の段落の数（型・関係・矢印・ルール）が正本と一致するかを見る。
 
     数は決め打ちせず、load_ontology() の中身（型・関係・関係を to で展開した矢印・制約の
-    それぞれの件数）から数える。
+    それぞれの件数）から数える。keys を絞ると、その数だけを見る。
     """
     section = extract_section(readme_text)
     if section is None:
@@ -108,6 +122,8 @@ def diff_heading_and_counts(readme_text: str, ontology: Ontology) -> list[str]:
     }
     diffs: list[str] = []
     for key, pattern in COUNT_PATTERNS.items():
+        if key not in keys:
+            continue
         match = re.search(pattern, section)
         if match is None:
             diffs.append(
@@ -124,8 +140,14 @@ def diff_heading_and_counts(readme_text: str, ontology: Ontology) -> list[str]:
     return diffs
 
 
-def diff_mermaid_nodes(readme_text: str, ontology: Ontology) -> list[str]:
-    """図のノードの集合と各ノードの表示名が、型の name と label に過不足なく一致するかを見る。"""
+def diff_mermaid_nodes(
+    readme_text: str, ontology: Ontology, aspects: tuple[str, ...] = NODE_ASPECTS
+) -> list[str]:
+    """節の図が 1 つであることと、ノードの集合・表示名が型の name と label に一致するかを見る。
+
+    aspects を絞ると、その観点だけを見る。図が無い・2 つ以上あるときは、どの観点でも同じ
+    1 件を返す（ノードを数える相手が定まらないため）。
+    """
     section = extract_section(readme_text)
     if section is None:
         return [f"README に見出し「{SECTION_HEADING}」が無い。"]
@@ -142,24 +164,28 @@ def diff_mermaid_nodes(readme_text: str, ontology: Ontology) -> list[str]:
 
     diffs: list[str] = []
     missing = expected_names - found_names
-    if missing:
+    if "missing_nodes" in aspects and missing:
         diffs.append(f"図に無いノード: {', '.join(sorted(missing))}")
     extra = found_names - expected_names
-    if extra:
+    if "unknown_nodes" in aspects and extra:
         diffs.append(f"正本に無いノードが図にある: {', '.join(sorted(extra))}")
-    for entry in ontology.types:
-        if entry.name in nodes and nodes[entry.name] != entry.label:
-            diffs.append(
-                f"ノード {entry.name} の表示名が「{nodes[entry.name]}」だが、"
-                f"正本の label は「{entry.label}」。"
-            )
+    if "labels" in aspects:
+        for entry in ontology.types:
+            if entry.name in nodes and nodes[entry.name] != entry.label:
+                diffs.append(
+                    f"ノード {entry.name} の表示名が「{nodes[entry.name]}」だが、"
+                    f"正本の label は「{entry.label}」。"
+                )
     return diffs
 
 
-def diff_mermaid_edges(readme_text: str, ontology: Ontology) -> list[str]:
+def diff_mermaid_edges(
+    readme_text: str, ontology: Ontology, aspects: tuple[str, ...] = EDGE_ASPECTS
+) -> list[str]:
     """図の矢印の集合（from・関係名・to の 3 つ組）が、関係を to ごとに展開した集合と一致するかを見る。
 
     裏づけの関係は to を 3 つ、由来は 2 つ持つので、矢印としてはその本数に展開して比べる。
+    aspects を絞ると、足りない矢印か、正本に無い矢印かの片方だけを見る。
     """
     section = extract_section(readme_text)
     if section is None:
@@ -177,12 +203,12 @@ def diff_mermaid_edges(readme_text: str, ontology: Ontology) -> list[str]:
 
     diffs: list[str] = []
     missing = expected_edges - found_edges
-    if missing:
+    if "missing_edges" in aspects and missing:
         diffs.append(
             "図に無い矢印: " + "; ".join(f"{f} -->|{r}| {t}" for f, r, t in sorted(missing))
         )
     extra = found_edges - expected_edges
-    if extra:
+    if "unknown_edges" in aspects and extra:
         diffs.append(
             "正本に無い矢印が図にある: "
             + "; ".join(f"{f} -->|{r}| {t}" for f, r, t in sorted(extra))
@@ -204,8 +230,13 @@ def diff_type_table(readme_text: str, ontology: Ontology) -> list[str]:
     return diffs
 
 
-def diff_rule_table(readme_text: str, ontology: Ontology) -> list[str]:
-    """ルールの表に、制約ごとの name を 1 列目に持つ行があり、appears_as の語を含むかを見る。"""
+def diff_rule_table(
+    readme_text: str, ontology: Ontology, aspects: tuple[str, ...] = RULE_TABLE_ASPECTS
+) -> list[str]:
+    """ルールの表に、制約ごとの name を 1 列目に持つ行があり、appears_as の語を含むかを見る。
+
+    aspects を絞ると、行があるかと、現れ方の語が書かれているかの片方だけを見る。
+    """
     section = extract_section(readme_text)
     if section is None:
         return [f"README に見出し「{SECTION_HEADING}」が無い。"]
@@ -215,7 +246,10 @@ def diff_rule_table(readme_text: str, ontology: Ontology) -> list[str]:
     for constraint in ontology.constraints:
         matching_rows = [row for row in rows if row and row[0] == constraint.name]
         if not matching_rows:
-            diffs.append(f"ルールの表に制約名「{constraint.name}」を 1 列目に持つ行が無い。")
+            if "rows" in aspects:
+                diffs.append(f"ルールの表に制約名「{constraint.name}」を 1 列目に持つ行が無い。")
+            continue
+        if "appears_as" not in aspects:
             continue
         if not any(constraint.appears_as in "|".join(row) for row in matching_rows):
             diffs.append(
@@ -225,41 +259,103 @@ def diff_rule_table(readme_text: str, ontology: Ontology) -> list[str]:
     return diffs
 
 
-# ---------------------------------------------------------------- テスト（受け入れ条件 1〜5）
+# ---------------------------------------------------------------- テスト（冒頭の段落の数）
 
 
-def test_heading_and_counts_match_ontology() -> None:
-    """節の見出しがあり、冒頭の段落の型・関係・矢印・ルールの数が正本の件数と一致する。"""
+def test_REQ_341_the_readme_states_the_type_count() -> None:
+    """冒頭の段落の「型 N つ」が、正本から数えた型の件数と一致する。"""
     ontology = load_ontology()
-    diffs = diff_heading_and_counts(_real_readme_text(), ontology)
+    diffs = diff_heading_and_counts(_real_readme_text(), ontology, keys=("型",))
     assert not diffs, "\n".join(diffs)
 
 
-def test_mermaid_nodes_match_types() -> None:
-    """図のノードの集合と各ノードの表示名が、型の name と label に過不足なく一致する。"""
+def test_REQ_342_the_readme_states_the_relation_count() -> None:
+    """冒頭の段落の「関係 N 種類」が、正本から数えた関係の件数と一致する。"""
     ontology = load_ontology()
-    diffs = diff_mermaid_nodes(_real_readme_text(), ontology)
+    diffs = diff_heading_and_counts(_real_readme_text(), ontology, keys=("関係",))
     assert not diffs, "\n".join(diffs)
 
 
-def test_mermaid_edges_match_relations() -> None:
-    """図の矢印の集合が、関係を相手ごとに展開した 11 本と過不足なく一致する。"""
+def test_REQ_343_the_readme_states_the_edge_count() -> None:
+    """冒頭の段落の「矢印 N 本」が、関係を相手の型ごとに展開した本数と一致する。"""
     ontology = load_ontology()
-    diffs = diff_mermaid_edges(_real_readme_text(), ontology)
+    diffs = diff_heading_and_counts(_real_readme_text(), ontology, keys=("矢印",))
     assert not diffs, "\n".join(diffs)
 
 
-def test_type_table_lists_every_label() -> None:
-    """型の表に、8 つの label それぞれを 1 列目に持つ行がある。"""
+def test_REQ_344_the_readme_states_the_rule_count() -> None:
+    """冒頭の段落の「ルール N つ」が、正本から数えた制約の件数と一致する。"""
+    ontology = load_ontology()
+    diffs = diff_heading_and_counts(_real_readme_text(), ontology, keys=("ルール",))
+    assert not diffs, "\n".join(diffs)
+
+
+# ---------------------------------------------------------------- テスト（節の中の図）
+
+
+def test_REQ_345_the_readme_has_exactly_one_diagram() -> None:
+    """節に ```mermaid のコードブロックが 1 つだけある。"""
+    ontology = load_ontology()
+    diffs = diff_mermaid_nodes(_real_readme_text(), ontology, aspects=("one_diagram",))
+    assert not diffs, "\n".join(diffs)
+
+
+def test_REQ_346_the_diagram_has_every_type_as_a_node() -> None:
+    """図に、正本が挙げる型がすべてノードとして置かれている。"""
+    ontology = load_ontology()
+    diffs = diff_mermaid_nodes(_real_readme_text(), ontology, aspects=("missing_nodes",))
+    assert not diffs, "\n".join(diffs)
+
+
+def test_REQ_347_the_diagram_has_no_unknown_node() -> None:
+    """図に、正本に無いノードが置かれていない。"""
+    ontology = load_ontology()
+    diffs = diff_mermaid_nodes(_real_readme_text(), ontology, aspects=("unknown_nodes",))
+    assert not diffs, "\n".join(diffs)
+
+
+def test_REQ_348_the_diagram_node_labels_match_the_ontology() -> None:
+    """図のノードの表示名が、正本のその型の label と同じである。"""
+    ontology = load_ontology()
+    diffs = diff_mermaid_nodes(_real_readme_text(), ontology, aspects=("labels",))
+    assert not diffs, "\n".join(diffs)
+
+
+def test_REQ_349_the_diagram_has_every_edge() -> None:
+    """図に、関係を相手の型ごとに展開した矢印がすべて置かれている。"""
+    ontology = load_ontology()
+    diffs = diff_mermaid_edges(_real_readme_text(), ontology, aspects=("missing_edges",))
+    assert not diffs, "\n".join(diffs)
+
+
+def test_REQ_350_the_diagram_has_no_unknown_edge() -> None:
+    """図に、正本に無い矢印が置かれていない。"""
+    ontology = load_ontology()
+    diffs = diff_mermaid_edges(_real_readme_text(), ontology, aspects=("unknown_edges",))
+    assert not diffs, "\n".join(diffs)
+
+
+# ---------------------------------------------------------------- テスト（節の中の表）
+
+
+def test_REQ_351_the_type_table_lists_every_type_label() -> None:
+    """型の表に、正本の型の label それぞれを 1 列目に持つ行がある。"""
     ontology = load_ontology()
     diffs = diff_type_table(_real_readme_text(), ontology)
     assert not diffs, "\n".join(diffs)
 
 
-def test_rule_table_lists_every_constraint_with_appears_as() -> None:
-    """ルールの表に、12 の制約名それぞれを 1 列目に持つ行があり、その行に appears_as の語が含まれる。"""
+def test_REQ_352_the_rule_table_lists_every_rule_name() -> None:
+    """ルールの表に、正本の制約の name それぞれを 1 列目に持つ行がある。"""
     ontology = load_ontology()
-    diffs = diff_rule_table(_real_readme_text(), ontology)
+    diffs = diff_rule_table(_real_readme_text(), ontology, aspects=("rows",))
+    assert not diffs, "\n".join(diffs)
+
+
+def test_REQ_353_the_rule_table_shows_how_each_rule_appears() -> None:
+    """ルールの表の制約の行に、正本のその制約の appears_as の語が含まれる。"""
+    ontology = load_ontology()
+    diffs = diff_rule_table(_real_readme_text(), ontology, aspects=("appears_as",))
     assert not diffs, "\n".join(diffs)
 
 
@@ -356,24 +452,44 @@ def test_self_check_swapping_appears_as_word_is_caught() -> None:
 # ---------------------------------------------------------------- 画像にした図（docs/ontology.svg）
 
 
-def diff_svg_labels(svg_text: str, ontology: Ontology) -> list[str]:
-    """画像にした図に、型の表示名 8 つと関係の名前 8 つがすべて文字として入っているかを見る。
+def diff_svg_labels(
+    svg_text: str, ontology: Ontology, aspects: tuple[str, ...] = SVG_ASPECTS
+) -> list[str]:
+    """画像にした図に、型の表示名と関係の名前がすべて文字として入っているかを見る。
 
     画像は Mermaid の原稿から描いたもので、原稿を直したら描き直す。描き直し忘れをここで拾う。
+    aspects を絞ると、型の表示名か関係の名前かの片方だけを見る。
     """
     diffs: list[str] = []
-    for entry in ontology.types:
-        if entry.label not in svg_text:
-            diffs.append(f"画像の図に型の表示名「{entry.label}」が無い。")
-    for relation in ontology.relations:
-        if relation.name not in svg_text:
-            diffs.append(f"画像の図に関係の名前「{relation.name}」が無い。")
+    if "type_labels" in aspects:
+        for entry in ontology.types:
+            if entry.label not in svg_text:
+                diffs.append(f"画像の図に型の表示名「{entry.label}」が無い。")
+    if "relation_names" in aspects:
+        for relation in ontology.relations:
+            if relation.name not in svg_text:
+                diffs.append(f"画像の図に関係の名前「{relation.name}」が無い。")
     return diffs
 
 
-def test_svg_figure_lists_every_type_and_relation() -> None:
-    """docs/ontology.svg があり、型の表示名 8 つと関係の名前 8 つをすべて含む。"""
+def test_REQ_354_the_repository_ships_the_diagram_image() -> None:
+    """節の図を画像にしたもの（docs/ontology.svg）が同梱されている。"""
+    assert SVG_PATH.exists(), f"画像にした図 {SVG_PATH} が無い。"
+
+
+def test_REQ_355_the_image_carries_every_type_label() -> None:
+    """画像にした図に、正本が挙げる型の表示名がすべて入っている。"""
     assert SVG_PATH.exists(), f"画像にした図 {SVG_PATH} が無い。"
     ontology = load_ontology()
-    diffs = diff_svg_labels(SVG_PATH.read_text(encoding="utf-8"), ontology)
+    diffs = diff_svg_labels(SVG_PATH.read_text(encoding="utf-8"), ontology, aspects=("type_labels",))
+    assert not diffs, "\n".join(diffs)
+
+
+def test_REQ_356_the_image_carries_every_relation_name() -> None:
+    """画像にした図に、正本が挙げる関係の名前がすべて入っている。"""
+    assert SVG_PATH.exists(), f"画像にした図 {SVG_PATH} が無い。"
+    ontology = load_ontology()
+    diffs = diff_svg_labels(
+        SVG_PATH.read_text(encoding="utf-8"), ontology, aspects=("relation_names",)
+    )
     assert not diffs, "\n".join(diffs)

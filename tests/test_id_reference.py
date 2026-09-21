@@ -1,10 +1,10 @@
 """正本どうしの結びを ID で行うことの受け入れ条件のテスト。
 
-見るのは 6 つ。指された値が読めないときの言い分けを 4 つの指し方（機能の裏づけの節・
+見るのは 5 つ。指された値が読めないときの言い分けを 4 つの指し方（機能の裏づけの節・
 公開記録の由来の節・職務経歴書の台帳の出典の節・提示物の未反映の注記が指す節）ごとに確かめること、
 正本全体での ID の形式と一意性、見出しを書き換えても参照が切れないこと、材料の本文から ID の行が
-落ちること、書きの操作が ID を書き込みの瞬間に断ること、そして型の正本が 5 つの型に必須の ID の欄を
-持つことである。
+落ちること、そして書きの操作が ID を書き込みの瞬間に断ることである。型の正本が 5 つの型に必須の
+ID の欄を持つことは、型の正本の欄の定義なので tests/test_ontology.py が見る。
 
 指された値が読めないときの言い分けは、指し方が 4 つあっても同じ約束が成り立つ。だから 4 つとも、
 読めたとき・ID の形に合わないとき・照らす相手が 1 件も読めていないときの 3 通りを同じ形で確かめる。
@@ -22,7 +22,6 @@ from pathlib import Path
 import pytest
 
 from accord.models.constraints import CONSTRAINTS
-from accord.models.ontology import load_ontology
 from accord.models.results import (
     ID_FORMAT_TEXT,
     CapabilityDraft,
@@ -40,9 +39,6 @@ from accord.services.offering import OfferingService
 from accord.services.public_records import PublicRecordService
 from accord.vocabulary.settings import Settings, load_settings
 from conftest import source_digest
-
-# ID を持つ 5 つの型。指される側だけがこの欄を持つ。
-ID_BEARING_TYPES = ("CareerFrame", "Engagement", "PublicRecord", "Capability", "Package")
 
 EVIDENCE_SECTION_EXISTS = "裏づけ節名の実在"
 ID_FORMAT_AND_UNIQUENESS = "ID の形式と一意性"
@@ -381,26 +377,6 @@ def _id_rejection(settings: Settings, operation: str, identifier: str) -> Reject
     assert result.accepted is False, operation
     assert result.rejection is not None, operation
     return result.rejection
-
-
-# ---------------------------------------------------------------- 型の正本
-
-
-def test_five_types_require_an_id_field() -> None:
-    """指される側の 5 つの型が、必須の text の欄 id を持ち、制約は 12 件ある。"""
-    ontology = load_ontology()
-
-    for name in ID_BEARING_TYPES:
-        entry = ontology.type_named(name)
-        assert entry is not None, name
-        field = next((item for item in entry.fields if item.name == "id"), None)
-        assert field is not None, f"{name} に欄 id が無い"
-        assert field.required is True, name
-        assert field.type == "text", name
-        assert field.label == "ID", name
-
-    assert len(ontology.constraints) == 12
-    assert any(item.name == ID_FORMAT_AND_UNIQUENESS for item in ontology.constraints)
 
 
 # ---------------- 指された値が読めないとき 1: 機能の裏づけの節
