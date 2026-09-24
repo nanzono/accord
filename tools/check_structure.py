@@ -514,7 +514,7 @@ def evaluate(state):
     for name, check in CHECKS:
         try:
             result, detail, lines = check(state)
-        except Exception as exc:  # noqa: BLE001 — 項目の不具合は不合格の側で扱う
+        except Exception as exc:  # noqa: BLE001 — 項目の不具合は不合格の側で扱う（決め: 0010）
             result, detail, lines = RESULT_FAIL, "項目の実行中に例外: %r" % (exc,), []
         results.append((name, result, detail, lines))
     return results

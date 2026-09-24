@@ -2,8 +2,9 @@
 # -*- coding: utf-8 -*-
 """要件・テスト・実装の目印を、要件の番号で突き合わせる検査。
 
-見るのは 6 項目で、どれも「番号の文字列がそろっているか」だけを見る。要件の文が
-正しいかどうか、テストの中身が要件を確かめているかどうかは見ない。そこは人が読む。
+見るのは、番号の文字列がそろっているかの項目と、要件文に要件に書かない語が無いかの
+項目である。要件の文が正しいかどうか、テストの中身が要件を確かめているかどうかは
+見ない。そこは人が読む。
 
 読む範囲は 5 つ。
 
@@ -59,6 +60,17 @@ TESTS_DIR_SHOWN = TESTS_DIR + "/"
 
 # 要件を置かない案内のファイル名（`docs/specs/` の中でこの名前だけは読まない）。
 GUIDE_NAME = "README.md"
+
+# 要件文に書かない語。案内の「要件に書かないこと」の節に挙げた語と同じ並びで、
+# 一致は自己試験が見る。頭の「〜」は、前に何が来てもよいことを表し、探すときは外す。
+FORBIDDEN_WORDS = (
+    "適切に",
+    "必要に応じて",
+    "堅牢に",
+    "最適化して",
+    "〜が望ましい",
+    "可能であれば",
+)
 
 # ---------------------------------------------------------------------------
 # 条件の行
@@ -206,10 +218,18 @@ def collect_requirements(root):
                         "where": where(path, root, line_number),
                         "superseded_by": None,
                         "superseded_where": None,
+                        "text": None,
+                        "text_where": None,
                     }
                     requirements.append(current)
                 continue
-            if current is None or current["superseded_by"] is not None:
+            if current is None:
+                continue
+            if current["text"] is None and line.strip() and not line.lstrip().startswith("- "):
+                # 要件文。見出しの後で、箇条（添える 2 項目と取って代わられた印）でない最初の行。
+                current["text"] = line.strip()
+                current["text_where"] = where(path, root, line_number)
+            if current["superseded_by"] is not None:
                 continue
             found = SUPERSEDED_RE.match(line)
             if found:
@@ -760,6 +780,31 @@ def check_conditions_have_marks(state):
     )
 
 
+def check_forbidden_words(state):
+    """要件文（見出しの直下の文）に、要件に書かない語が無いか。取って代わられた要件も見る。"""
+    lines = []
+    looked = 0
+    for requirement in state["requirements"]:
+        text = requirement["text"]
+        if text is None:
+            continue
+        looked += 1
+        for word in FORBIDDEN_WORDS:
+            if word.lstrip("〜") in text:
+                lines.append(
+                    "%s（%s の要件文）: 「%s」を含む。機械で確かめられる振る舞いの文に書き直す"
+                    "（守らなくてよいことなら要件から外す）"
+                    % (label(requirement["number"]), requirement["text_where"], word)
+                )
+    if lines:
+        return RESULT_FAIL, "要件に書かない語 %d 件" % len(lines), lines
+    return (
+        RESULT_PASS,
+        "要件文 %d 件のどれにも、要件に書かない語 %d 語が無い" % (looked, len(FORBIDDEN_WORDS)),
+        [],
+    )
+
+
 # 検査項目の表。読み手に向けて項目番号を使わず、この項目名で呼ぶ。
 CHECKS = [
     ("要件にテストがある", check_tests_exist),
@@ -770,6 +815,7 @@ CHECKS = [
     ("取って代わった先が実在する", check_supersede_target_exists),
     ("条件が指す要件が実在する", check_conditions_point_to_requirements),
     ("条件に印がある", check_conditions_have_marks),
+    ("要件に書かない語", check_forbidden_words),
 ]
 
 
@@ -790,7 +836,7 @@ def evaluate(state):
     for name, check in CHECKS:
         try:
             result, detail, lines = check(state)
-        except Exception as exc:  # noqa: BLE001 — 項目の不具合は不合格の側で扱う
+        except Exception as exc:  # noqa: BLE001 — 項目の不具合は不合格の側で扱う（決め: 0010）
             result, detail, lines = RESULT_FAIL, "項目の実行中に例外: %r" % (exc,), []
         results.append((name, result, detail, lines))
     return results

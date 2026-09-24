@@ -19,6 +19,7 @@
 終了コード: 0（全ケースが期待どおり）／1（食い違いが 1 件以上）
 """
 
+import importlib.util
 import re
 import subprocess
 import sys
@@ -53,6 +54,11 @@ ITEM_NUMBER_FORM = "番号の形と重なり"
 ITEM_SUPERSEDE_TARGET = "取って代わった先が実在する"
 ITEM_CONDITION_TARGET = "条件が指す要件が実在する"
 ITEM_CONDITION_MARK = "条件に印がある"
+ITEM_FORBIDDEN_WORDS = "要件に書かない語"
+
+# 要件に書かない語の一覧が、案内のどの節の語と一致するべきか。
+REAL_GUIDE = SCRIPT_DIR.parent / "docs" / "specs" / "README.md"
+FORBIDDEN_SECTION_HEADING = "## 要件に書かないこと"
 
 
 # ---------------------------------------------------------------------------
@@ -411,6 +417,53 @@ CASES = [
         (ITEM_NUMBER_FORM,),
         "REQ-050",
     ),
+    # 要件に書かない語。
+    (
+        "要件文に要件に書かない語がある",
+        changed(
+            {
+                SPEC_FILE: GOOD_SPEC.replace(
+                    "常に、accord は正本の置き場を設定ファイルから読む。",
+                    "常に、accord は正本の置き場を必要に応じて設定ファイルから読む。",
+                )
+            }
+        ),
+        1,
+        (ITEM_FORBIDDEN_WORDS,),
+        (ITEM_TESTS_EXIST, ITEM_NUMBER_FORM),
+        "REQ-001（docs/specs/writing.md:4 の要件文）: 「必要に応じて」を含む",
+    ),
+    (
+        "取って代わられた要件の要件文も見る",
+        changed(
+            {
+                SPEC_FILE: GOOD_SPEC.replace(
+                    "もし正本の置き場が見つからないなら、accord は断る。",
+                    "もし正本の置き場が見つからないなら、accord は断ることが望ましい。",
+                )
+            }
+        ),
+        1,
+        (ITEM_FORBIDDEN_WORDS,),
+        (ITEM_SUPERSEDED_TESTS, ITEM_SUPERSEDE_TARGET),
+        "「〜が望ましい」を含む",
+    ),
+    (
+        "要件文でない箇条の語は数えない",
+        changed(
+            {
+                SPEC_FILE: GOOD_SPEC.replace(
+                    "- 関係するファイル: `src/example/writing.py`\n- 検証手順: `pytest tests/test_writing.py -k REQ_001`",
+                    "- 関係するファイル: `src/example/writing.py`（可能であれば分ける）\n"
+                    "- 検証手順: `pytest tests/test_writing.py -k REQ_001`",
+                )
+            }
+        ),
+        0,
+        (),
+        (ITEM_FORBIDDEN_WORDS,),
+        "要件文 3 件のどれにも",
+    ),
     # 条件の行の印（`--spec-dir` を渡したときだけ走る 2 項目）。
     (
         "条件の行に印がそろった仕様書（3 つの印と、並べた番号と範囲）",
@@ -679,6 +732,39 @@ def run_case(
     return True
 
 
+def guide_forbidden_words():
+    """案内の「要件に書かないこと」の節から、「」で囲んだ語を並びどおりに拾う。"""
+    words = []
+    inside = False
+    for line in REAL_GUIDE.read_text(encoding="utf-8").splitlines():
+        if line.startswith("#"):
+            inside = line.strip() == FORBIDDEN_SECTION_HEADING
+            continue
+        if inside:
+            words.extend(re.findall(r"「([^」]+)」", line))
+    return words
+
+
+def check_words_agree_with_guide():
+    """検査の持つ語の一覧が、案内の「要件に書かないこと」の節の語と一致するか。"""
+    spec = importlib.util.spec_from_file_location("check_req_coverage", CHECK_SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    in_check = list(module.FORBIDDEN_WORDS)
+    try:
+        in_guide = guide_forbidden_words()
+    except OSError as exc:
+        print("NG 案内を読めない: %s（%s）" % (REAL_GUIDE, exc))
+        return False
+    if in_check == in_guide:
+        print("OK 要件に書かない語 %d 語が、案内の「要件に書かないこと」の節と一致する" % len(in_check))
+        return True
+    print(
+        "NG 要件に書かない語が案内と食い違う — 検査: %s、案内: %s" % (in_check, in_guide)
+    )
+    return False
+
+
 def main():
     if not CHECK_SCRIPT.is_file():
         print("ERROR: 検査本体が見つからない: %s" % CHECK_SCRIPT, file=sys.stderr)
@@ -687,7 +773,9 @@ def main():
     for case in CASES:
         if not run_case(*case):
             failures += 1
-    print("ケース %d 件・食い違い %d 件" % (len(CASES), failures))
+    if not check_words_agree_with_guide():
+        failures += 1
+    print("ケース %d 件・食い違い %d 件" % (len(CASES) + 1, failures))
     return 1 if failures else 0
 
 

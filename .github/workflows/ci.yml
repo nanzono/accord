@@ -5,6 +5,9 @@
 # src/accord/ の直下に層に載っていない置き場ができていないかを見る。
 # 置き場の検査の段は、層の中の入れ子の置き場、生成器が accord を読まないこと、
 # 設定を読むモジュールが標準ライブラリと同じ層の中だけを読むことを見る。
+# 迂回の検査の段は、検査を黙らせる印を持つ行が決めの記録の番号を持ち、その記録が印を
+# 名指ししているか、層の契約が緩んでいないか、__init__.py で読み直していないかを見る。
+# テストより前に置くのは、テストを飛ばす印も、この段で先に見るためである。
 name: CI
 
 on:
@@ -50,6 +53,12 @@ jobs:
         # 設計文書はこのリポジトリの外にあるので、ここでは渡さない。
         # 渡さないと、実装層の表を見る項目だけが省略になる（残りの 4 項目は走る）。
         run: uv run python tools/check_structure.py
+
+      - name: 迂回の検査そのものを試す
+        run: uv run python tools/check_bypass_selftest.py
+
+      - name: 検査を黙らせる印と契約の緩みを見る
+        run: uv run python tools/check_bypass.py
 
       - name: テストを走らせる
         run: uv run pytest

@@ -15,6 +15,7 @@
 - [要件とテストを番号で結び、機械で突き合わせる](0007-link-requirements-and-tests-by-number.md) — 採用 / 2026-09-20
 - [層の依存を契約として書き、機械で確かめる](0008-check-layer-dependencies-with-a-contract.md) — 採用 / 2026-09-20
 - [ルール 1 件に判定を 1 つ](0009-one-check-per-rule.md) — 採用 / 2026-09-24
+- [検査を黙らせる印には、決めの記録を 1 本ずつ結ぶ](0010-record-every-check-bypass.md) — 採用 / 2026-09-25
 
 ## 記録の扱い
 
