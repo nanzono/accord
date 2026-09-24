@@ -117,7 +117,7 @@ def test_REQ_083_alt_sample_loads_every_type(alt_settings) -> None:
     assert repository.forbidden_phrases()
 
 
-def test_alt_record_positioning_rejects_missing_date(alt_settings) -> None:
+def test_REQ_188_alt_record_positioning_rejects_missing_date(alt_settings) -> None:
     """日付の欄を欠いた決めは、第 2 の正本でも受け付けず、正本を 1 バイトも変えない。"""
     before = source_digest(alt_settings.source_dir)
 
@@ -171,7 +171,7 @@ def test_REQ_013_alt_check_consistency_skips_claim_listed_as_exception(alt_setti
     assert [v.file for v in outdated] == ["nagiho/skill_sheet.md"]
 
 
-def test_alt_register_capability_rejects_unknown_evidence_section(alt_settings) -> None:
+def test_REQ_127_alt_register_capability_rejects_unknown_evidence_section(alt_settings) -> None:
     """実在しない節名を裏づけにすると、第 2 の正本でも受け付けず、近い見出しを返す。"""
     before = source_digest(alt_settings.source_dir)
     headings = MarkdownRepository(alt_settings).load().section_headings()
@@ -195,7 +195,7 @@ def test_alt_register_capability_rejects_unknown_evidence_section(alt_settings) 
     assert source_digest(alt_settings.source_dir) == before
 
 
-def test_alt_revise_package_rejects_unregistered_capability(alt_settings) -> None:
+def test_REQ_144_alt_revise_package_rejects_unregistered_capability(alt_settings) -> None:
     """機能の台帳に無い名前を束ねると、第 2 の正本でも書かずに拒否する。"""
     before = source_digest(alt_settings.source_dir)
 
@@ -237,7 +237,7 @@ def test_REQ_019_alt_check_consistency_detects_private_source_section_in_ledger(
     assert "テラミナ物流 配送データの置き場づくり" in ledger[0].expected, ledger[0].expected
 
 
-def test_alt_assemble_material_drops_private_section_and_warns(alt_settings) -> None:
+def test_REQ_093_alt_assemble_material_drops_private_section_and_warns(alt_settings) -> None:
     """公開不可の節は材料に出さず、落としたことと節の名前を警告に書く。"""
     _rewrite(alt_settings.path_for("engagements"), *MAKE_PRIVATE)
 
@@ -279,7 +279,7 @@ def test_REQ_021_alt_remaining_pending_notes_are_counted_in_a_note(alt_settings)
     assert any("未反映の注記が 1 件残っている" in note for note in report.notes), report.notes
 
 
-def test_alt_assemble_material_returns_channel_rules_and_forbidden_phrases(alt_settings) -> None:
+def test_REQ_090_alt_assemble_material_returns_channel_rules_and_forbidden_phrases(alt_settings) -> None:
     """媒体ごとのファイルの規約と、表で書かれた禁じた言い回しが、材料に載って返る。"""
     material = MaterialService(alt_settings).assemble(MaterialRequest(channel=CHANNEL))
 

@@ -198,7 +198,7 @@ flowchart TD
 
 なぜこの作りにしたのかは [`docs/decisions/`](docs/decisions/)（決め 1 件ごとの記録）、いまの構造は [`ARCHITECTURE.md`](ARCHITECTURE.md) にあります。accord は、作者 1 人と AI（Claude Code）で作りました。
 
-外から見える振る舞いを 1 件 1 文で書いた要件は [`docs/specs/`](docs/specs/) にあり、書き方と番号の決めはその案内にまとめてあります。要件とテストと実装の目印が番号で結ばれているかは `python3 tools/check_req_coverage.py` で確かめられ、同じ検査が変更のたびに自動でも走ります。
+外から見える振る舞いを 1 件 1 文で書いた要件は [`docs/specs/`](docs/specs/) にあり、書き方と番号の決めはその案内にまとめてあります。要件とテストと実装の目印が番号で結ばれているかは `python3 tools/check_req_coverage.py` で確かめられ、同じ検査が変更のたびに自動でも走ります。検査を黙らせる印（lint の注記やテストを飛ばす印など）を置いた行に決めの記録の番号があり、その記録の 1 行が行のファイルと印を並べて名指ししているかを見る `python3 tools/check_bypass.py` も、変更のたびに走ります。許す理由が妥当かどうかは、この検査では見ません。
 
 ## ライセンス
 

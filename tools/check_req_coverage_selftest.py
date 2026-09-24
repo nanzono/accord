@@ -44,14 +44,19 @@ DEV_SPEC_DIR = "dev_specs"
 DEV_SPEC_FILE = DEV_SPEC_DIR + "/20260101_01_example_spec.md"
 DEV_SPEC_NO_DECL_FILE = DEV_SPEC_DIR + "/20260103_03_no_declaration_spec.md"
 DEV_SPEC_OFF_FILE = DEV_SPEC_DIR + "/20260104_04_declared_off_spec.md"
+# 仕様書として読まないファイル（雛形と判定ファイル）。
+DEV_SPEC_TEMPLATE_FILE = DEV_SPEC_DIR + "/_spec_template.md"
+DEV_SPEC_JUDGEMENT_FILE = DEV_SPEC_DIR + "/20260101_01_example_spec_intent.md"
 
 # 項目名（検査の出力に出るものと同じ文字列）。
 ITEM_TESTS_EXIST = "要件にテストがある"
 ITEM_TESTS_POINT = "テスト名の番号が要件にある"
+ITEM_PLAIN_TESTS = "番号なしのテストに理由がある"
 ITEM_SUPERSEDED_TESTS = "取って代わられた番号のテストが残っていない"
 ITEM_MARKERS = "実装の目印が有効な要件を指す"
 ITEM_NUMBER_FORM = "番号の形と重なり"
 ITEM_SUPERSEDE_TARGET = "取って代わった先が実在する"
+ITEM_DECLARATION = "仕様書に宣言がある"
 ITEM_CONDITION_TARGET = "条件が指す要件が実在する"
 ITEM_CONDITION_MARK = "条件に印がある"
 ITEM_FORBIDDEN_WORDS = "要件に書かない語"
@@ -102,9 +107,56 @@ def read_source_location():
     return "source"
 """
 
-# 番号を持たない、ただのテストだけがある木に置く。
+# 番号を持たない、ただのテストだけがある木に置く。番号を持たないので、docstring の
+# 1 行目に理由を書いておく。
 PLAIN_TEST = """\
 def test_it_runs():
+    \"\"\"番号なし: 見本の木に置く、要件を持たないテスト。
+
+    ここは 3 行目で、理由の行には数えない。
+    \"\"\"
+    assert True
+"""
+
+# 番号を持たないテストの壊し方。docstring が無い・1 行目が「番号なし: 」で始まらない・
+# 理由が空の 3 通り。クラスの中の関数も見る。
+PLAIN_TEST_WITHOUT_DOCSTRING = """\
+def test_it_runs():
+    assert True
+"""
+
+PLAIN_TEST_WITH_OTHER_FIRST_LINE = """\
+def test_it_runs():
+    \"\"\"見本の木に置く、要件を持たないテスト。
+
+    番号なし: 3 行目に書いても数えない。
+    \"\"\"
+    assert True
+"""
+
+PLAIN_TEST_WITH_EMPTY_REASON = """\
+def test_it_runs():
+    \"\"\"番号なし:   \"\"\"
+    assert True
+"""
+
+PLAIN_TEST_IN_A_CLASS = """\
+class TestGroup:
+    def test_inside_a_class(self):
+        assert True
+"""
+
+# 番号を持たないテスト 2 本に理由がある木。番号つきのテストには理由を求めない。
+TWO_PLAIN_TESTS_WITH_REASONS = GOOD_TESTS + """\
+
+
+def test_first_plain():
+    \"\"\"番号なし: 見本の 1 本目。\"\"\"
+    assert True
+
+
+async def test_second_plain():
+    \"\"\"番号なし: 見本の 2 本目。非同期の関数も数える。\"\"\"
     assert True
 """
 
@@ -232,6 +284,28 @@ DEV_SPEC_DECLARED_OFF = """\
 - この行には印が無いが、対象外を宣言しているので読み飛ばされる。
 """
 
+# 雛形と判定ファイル。宣言が無く、あっても印の無い条件の行を持つが、どちらも仕様書ではない
+# ので読まない。読めば「仕様書に宣言がある」か「条件に印がある」が落ちる。
+DEV_SPEC_TEMPLATE = """\
+# 仕様書の雛形
+
+## 受け入れ条件
+
+条件の印: あり
+
+### 機械検査で見る条件
+
+- 雛形の中のこの行には印が無い。
+"""
+
+DEV_SPEC_JUDGEMENT = """\
+# 目的との照合の判定
+
+### 機械検査で見る条件
+
+- 判定ファイルの中のこの行には印が無い。
+"""
+
 # 下の階層に置いた README.md。読まないのは docs/specs/ 直下の案内だけなので、これは読む。
 NESTED_README_FILE = "docs/specs/sub/README.md"
 NESTED_README_WITH_REQUIREMENT = """\
@@ -268,7 +342,9 @@ def without(name):
 # ---------------------------------------------------------------------------
 # ケースの表
 #
-# (ケース名, 木, 期待の終了コード, 落ちるはずの項目, 落ちてはいけない項目, 含まれる語)
+# (ケース名, 木, 期待の終了コード, 落ちるはずの項目, 落ちてはいけない項目, 含まれる語,
+#  仕様書の置き場, 省略になるはずの項目, 検査に足す引数, 含まれてはいけない語)
+# 後ろの 4 つは省略できる。
 # ---------------------------------------------------------------------------
 
 CASES = [
@@ -485,21 +561,68 @@ CASES = [
         DEV_SPEC_DIR,
     ),
     (
-        "宣言の行が無い仕様書は読み飛ばす",
+        "宣言の行が無い仕様書で落ちる（条件の行は読まない）",
         changed(
             {
                 DEV_SPEC_FILE: GOOD_DEV_SPEC,
                 DEV_SPEC_NO_DECL_FILE: DEV_SPEC_WITHOUT_DECLARATION,
             }
         ),
-        0,
-        (),
-        (ITEM_CONDITION_MARK,),
-        "読んだ仕様書 1 本、宣言が無いか対象外で読まなかった仕様書 1 本",
+        1,
+        (ITEM_DECLARATION,),
+        (ITEM_CONDITION_MARK, ITEM_CONDITION_TARGET),
+        "20260103_03_no_declaration_spec.md: 宣言の行が無い",
         DEV_SPEC_DIR,
     ),
     (
-        "「対象外」を宣言した仕様書も読み飛ばす",
+        "「対象外」の後ろに括弧が無い宣言で落ちる",
+        changed(
+            {
+                DEV_SPEC_FILE: GOOD_DEV_SPEC,
+                DEV_SPEC_OFF_FILE: DEV_SPEC_DECLARED_OFF.replace(
+                    "条件の印: 対象外（外から見える振る舞いを変えない単位なので、指せる要件を持たない）",
+                    "条件の印: 対象外",
+                ),
+            }
+        ),
+        1,
+        (ITEM_DECLARATION,),
+        (ITEM_CONDITION_MARK,),
+        "理由の括弧が無い",
+        DEV_SPEC_DIR,
+    ),
+    (
+        "「対象外」の括弧の中が空の宣言で落ちる",
+        changed(
+            {
+                DEV_SPEC_FILE: GOOD_DEV_SPEC,
+                DEV_SPEC_OFF_FILE: DEV_SPEC_DECLARED_OFF.replace(
+                    "条件の印: 対象外（外から見える振る舞いを変えない単位なので、指せる要件を持たない）",
+                    "条件の印: 対象外（ ）",
+                ),
+            }
+        ),
+        1,
+        (ITEM_DECLARATION,),
+        (ITEM_CONDITION_MARK,),
+        "括弧の中の理由が空",
+        DEV_SPEC_DIR,
+    ),
+    (
+        "宣言の値が「あり」でも「対象外」でもないと落ちる",
+        changed(
+            {
+                DEV_SPEC_FILE: GOOD_DEV_SPEC.replace("条件の印: あり", "条件の印: なし"),
+            }
+        ),
+        1,
+        (ITEM_DECLARATION,),
+        (ITEM_CONDITION_MARK,),
+        "宣言の形が違う（いまは「条件の印: なし」）",
+        DEV_SPEC_DIR,
+    ),
+    (
+        "「対象外」を宣言した仕様書は、条件の行を読まずに合格する",
         changed(
             {
                 DEV_SPEC_FILE: GOOD_DEV_SPEC,
@@ -508,8 +631,29 @@ CASES = [
         ),
         0,
         (),
-        (ITEM_CONDITION_MARK,),
-        "読んだ仕様書 1 本、宣言が無いか対象外で読まなかった仕様書 1 本",
+        (ITEM_CONDITION_MARK, ITEM_DECLARATION),
+        (
+            "読んだ仕様書 1 本、宣言が「あり」でないので読まなかった仕様書 1 本",
+            "仕様書 2 本すべてに宣言がある（あり 1・対象外 1）",
+        ),
+        DEV_SPEC_DIR,
+    ),
+    (
+        "雛形と判定ファイルは、宣言も条件の行も読まない",
+        changed(
+            {
+                DEV_SPEC_FILE: GOOD_DEV_SPEC,
+                DEV_SPEC_TEMPLATE_FILE: DEV_SPEC_TEMPLATE,
+                DEV_SPEC_JUDGEMENT_FILE: DEV_SPEC_JUDGEMENT,
+            }
+        ),
+        0,
+        (),
+        (ITEM_DECLARATION, ITEM_CONDITION_MARK),
+        (
+            "仕様書 1 本すべてに宣言がある（あり 1・対象外 0）。雛形と判定ファイル 2 本は読んでいない",
+            "条件の行 8 件すべてに印がある",
+        ),
         DEV_SPEC_DIR,
     ),
     (
@@ -618,14 +762,140 @@ CASES = [
         DEV_SPEC_DIR,
     ),
     (
-        "仕様書の置き場を渡さないと 2 項目が省略になる",
-        changed({DEV_SPEC_FILE: GOOD_DEV_SPEC}),
+        "仕様書の置き場を渡さないと 3 項目が省略になる",
+        changed({DEV_SPEC_FILE: GOOD_DEV_SPEC, DEV_SPEC_NO_DECL_FILE: DEV_SPEC_WITHOUT_DECLARATION}),
         0,
         (),
         (),
         "条件の行 読んでいない",
         None,
-        (ITEM_CONDITION_TARGET, ITEM_CONDITION_MARK),
+        (ITEM_DECLARATION, ITEM_CONDITION_TARGET, ITEM_CONDITION_MARK),
+    ),
+    # 番号を名前に持たないテストの理由（`--spec-dir` を渡さなくても見る）。
+    (
+        "番号なしのテストに docstring が無いと落ちる",
+        {TEST_FILE: PLAIN_TEST_WITHOUT_DOCSTRING},
+        1,
+        (ITEM_PLAIN_TESTS,),
+        (ITEM_TESTS_POINT,),
+        "tests/test_writing.py:1 の test_it_runs: docstring が無い",
+    ),
+    (
+        "番号なしのテストの docstring の 1 行目が「番号なし: 」で始まらないと落ちる",
+        {TEST_FILE: PLAIN_TEST_WITH_OTHER_FIRST_LINE},
+        1,
+        (ITEM_PLAIN_TESTS,),
+        (),
+        "docstring の 1 行目が「番号なし: 」で始まらない",
+    ),
+    (
+        "番号なしのテストの理由が空だと落ちる",
+        {TEST_FILE: PLAIN_TEST_WITH_EMPTY_REASON},
+        1,
+        (ITEM_PLAIN_TESTS,),
+        (),
+        "「番号なし:」の後ろの理由が空",
+    ),
+    (
+        "クラスの中の番号なしのテストも見る",
+        {TEST_FILE: PLAIN_TEST + "\n\n" + PLAIN_TEST_IN_A_CLASS},
+        1,
+        (ITEM_PLAIN_TESTS,),
+        (),
+        (
+            "test_inside_a_class: docstring が無い",
+            "番号を名前に持たないテスト 2 本のうち、理由の無いもの 1 本",
+        ),
+    ),
+    (
+        "番号なしのテストの本数を合格の詳細に出す（番号つきには理由を求めない）",
+        changed({TEST_FILE: TWO_PLAIN_TESTS_WITH_REASONS}),
+        0,
+        (),
+        (ITEM_PLAIN_TESTS,),
+        (
+            "番号を名前に持たないテスト 2 本すべてに、docstring の 1 行目の理由がある",
+            "番号なしのテスト 2 本",
+        ),
+    ),
+    # 対応表（`--spec-table`）。
+    (
+        "対応表の数（仕様書ごとの行と合計、対象外の理由、番号なしのテストの本数）",
+        changed(
+            {
+                TEST_FILE: TWO_PLAIN_TESTS_WITH_REASONS,
+                DEV_SPEC_FILE: GOOD_DEV_SPEC,
+                DEV_SPEC_OFF_FILE: DEV_SPEC_DECLARED_OFF,
+                DEV_SPEC_TEMPLATE_FILE: DEV_SPEC_TEMPLATE,
+            }
+        ),
+        0,
+        (),
+        (),
+        (
+            "| 仕様書 | 条件の行 | 要件に結んだ行 | 無しの行 | これからの行 | 指す要件の番号の種類 |",
+            "| 20260101_01_example_spec.md | 8 | 5 | 2 | 2 | 2 |",
+            "| 合計 | 8 | 5 | 2 | 2 | 2 |",
+            "条件の行 8 件すべてに印がある",
+            "| 20260104_04_declared_off_spec.md | 外から見える振る舞いを変えない単位なので、指せる要件を持たない |",
+            "番号を名前に持たないテスト: 2 本（うち docstring の 1 行目に理由があるもの 2 本）",
+        ),
+        DEV_SPEC_DIR,
+        (),
+        ("--spec-table",),
+        ("_spec_template.md",),
+    ),
+    (
+        "対応表の合計は、仕様書 2 本の和で、番号の種類は重ねて数えない",
+        changed(
+            {
+                DEV_SPEC_FILE: GOOD_DEV_SPEC,
+                DEV_SPEC_DIR + "/20260105_05_second_spec.md": GOOD_DEV_SPEC.replace(
+                    "2026-01-01", "2026-01-05"
+                ),
+            }
+        ),
+        0,
+        (),
+        (),
+        (
+            "| 20260105_05_second_spec.md | 8 | 5 | 2 | 2 | 2 |",
+            "| 合計 | 16 | 10 | 4 | 4 | 2 |",
+            "条件の行 16 件すべてに印がある",
+        ),
+        DEV_SPEC_DIR,
+        (),
+        ("--spec-table",),
+    ),
+    (
+        "対応表は、落ちたときも宣言の足りない仕様書を並べて出す",
+        changed(
+            {
+                DEV_SPEC_FILE: GOOD_DEV_SPEC,
+                DEV_SPEC_NO_DECL_FILE: DEV_SPEC_WITHOUT_DECLARATION,
+            }
+        ),
+        1,
+        (ITEM_DECLARATION,),
+        (),
+        (
+            "宣言の足りない仕様書（1 本）",
+            "| 20260103_03_no_declaration_spec.md | 宣言の行が無い |",
+        ),
+        DEV_SPEC_DIR,
+        (),
+        ("--spec-table",),
+    ),
+    (
+        "対応表を仕様書の置き場なしで頼むと、入力の誤り",
+        good_tree(),
+        2,
+        (),
+        (),
+        "--spec-table は --spec-dir と一緒に渡す",
+        None,
+        (),
+        ("--spec-table",),
     ),
     # 入力が読めない木。
     (
@@ -669,7 +939,7 @@ def build_tree(base, files):
         path.write_text(text, encoding="utf-8")
 
 
-def run_check(root, spec_dir=None):
+def run_check(root, spec_dir=None, extra_args=()):
     """検査本体を別プロセスで起動し、(終了コード, 出力) を返す。
 
     import して関数を呼ぶのではなく別プロセスで起動するのは、終了コードと標準出力という
@@ -681,6 +951,7 @@ def run_check(root, spec_dir=None):
     command = [sys.executable, str(CHECK_SCRIPT), "--root", str(root)]
     if spec_dir is not None:
         command += ["--spec-dir", str(Path(root) / spec_dir)]
+    command += list(extra_args)
     completed = subprocess.run(command, capture_output=True, text=True)
     return completed.returncode, completed.stdout + completed.stderr
 
@@ -694,11 +965,17 @@ def run_case(
     expected_word,
     spec_dir=None,
     must_skip=(),
+    extra_args=(),
+    absent_words=(),
 ):
-    """1 ケースを走らせて、期待どおりなら True を返す。"""
+    """1 ケースを走らせて、期待どおりなら True を返す。
+
+    `expected_word` は 1 語か、すべて出力に含まれるべき語の組。`absent_words` は出力に
+    出てはいけない語の組。
+    """
     with tempfile.TemporaryDirectory() as work:
         build_tree(work, files)
-        code, output = run_check(work, spec_dir)
+        code, output = run_check(work, spec_dir, extra_args)
 
     failed_items = FAIL_LINE_RE.findall(output)
     skipped_items = SKIP_LINE_RE.findall(output)
@@ -715,8 +992,13 @@ def run_case(
     for item in must_skip:
         if item not in skipped_items:
             problems.append("「SKIP %s」の行が無い" % item)
-    if expected_word and expected_word not in output:
-        problems.append("出力に「%s」が無い" % expected_word)
+    words = (expected_word,) if isinstance(expected_word, str) else tuple(expected_word or ())
+    for word in words:
+        if word and word not in output:
+            problems.append("出力に「%s」が無い" % word)
+    for word in absent_words:
+        if word in output:
+            problems.append("出力に出てはいけない「%s」がある" % word)
 
     if problems:
         print("NG %s — %s" % (name, "、".join(problems)))

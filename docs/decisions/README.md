@@ -16,6 +16,7 @@
 - [層の依存を契約として書き、機械で確かめる](0008-check-layer-dependencies-with-a-contract.md) — 採用 / 2026-09-20
 - [ルール 1 件に判定を 1 つ](0009-one-check-per-rule.md) — 採用 / 2026-09-24
 - [検査を黙らせる印には、決めの記録を 1 本ずつ結ぶ](0010-record-every-check-bypass.md) — 採用 / 2026-09-25
+- [要件の番号を持たないテストには、docstring の 1 行目に理由を書く](0011-give-a-reason-to-unnumbered-tests.md) — 採用 / 2026-09-25
 
 ## 記録の扱い
 

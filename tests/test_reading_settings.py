@@ -592,7 +592,7 @@ def test_REQ_081_config_without_the_public_record_file_still_loads(settings) -> 
     assert snapshot.public_records == []
 
 
-def test_assemble_material_returns_no_public_records_without_the_public_record_file(
+def test_REQ_374_assemble_material_returns_no_public_records_without_the_public_record_file(
     settings,
 ) -> None:
     """置き場も語彙も書いていない設定でも、材料の取り出しは公開記録を空で返すだけで壊れない。"""

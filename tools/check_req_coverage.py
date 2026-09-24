@@ -3,7 +3,7 @@
 """要件・テスト・実装の目印を、要件の番号で突き合わせる検査。
 
 見るのは、番号の文字列がそろっているかの項目と、要件文に要件に書かない語が無いかの
-項目である。要件の文が正しいかどうか、テストの中身が要件を確かめているかどうかは
+項目と、番号を名前に持たないテストが理由を書いているかの項目である。要件の文が正しいかどうか、テストの中身が要件を確かめているかどうかは
 見ない。そこは人が読む。
 
 読む範囲は 5 つ。
@@ -11,13 +11,16 @@
   要件        `docs/specs/` 配下の `*.md` の、`REQ-` に数字が続く見出し。
               案内の `README.md` と、コードの囲み（``` と ~~~ で囲んだ範囲）の中は
               読まない。案内や要件の中に書き方の例を置けるようにするため。
-  テスト      `tests/` 配下の `test_*.py` の `def test_REQ_<数字>`。
+  テスト      `tests/` 配下の `test_*.py` の `def test_REQ_<数字>`。名前に番号を
+              持たない `test_` の関数は、docstring の 1 行目も読む。
   実装の目印  `src/` 配下の `*.py` の `# spec: REQ-<数字>`。
   取って代わられた印
               要件の見出しから次の見出しまでの間にある
               `status: superseded by REQ-<数字>` の行。行頭の箇条書きの記号は許す。
   条件の行    `--spec-dir` で渡された置き場の `*.md` の、「機械検査で見る条件」の
-              見出しから次の見出しまでの間にある条件の行。渡されなければ読まない。
+              見出しから次の見出しまでの間にある条件の行と、宣言の行。渡されなければ
+              読まない。名前が `_` で始まる雛形と、名前が `_intent.md` で終わる
+              判定ファイルは、仕様書ではないので読まない。
 
 要件が 0 件でも、実装の目印が 0 件でも合格する。番号の書き方と、要件の書き方は
 `docs/specs/README.md` にある。
@@ -30,11 +33,16 @@
 使い方:
   python3 tools/check_req_coverage.py [--root <リポジトリの直下>]
                                       [--spec-dir <開発の仕様書の置き場>]
+                                      [--spec-table]
+
+`--spec-table` は `--spec-dir` と一緒に渡す。項目の出力の後に、仕様書ごとの条件の行の
+数と印の内訳を Markdown の表で出す。
 
 終了コード: 0（全項目合格。省略は合格に数える）／1（不合格あり）／2（入力が読めない）
 """
 
 import argparse
+import ast
 import os
 import re
 import sys
@@ -99,9 +107,13 @@ FORBIDDEN_WORDS = (
 # `- ` ではなくなるので、条件の行から外れる。内訳が指す要件は、上の太字の行にまとめる。
 #
 # 条件の行を読むのは、宣言の行 `条件の印: あり` を持つ仕様書だけである。
-# `条件の印: 対象外（理由）` の行を持つ仕様書と、どちらの行も無い仕様書は読み飛ばす。
-# 検査に対象の一覧を持たせると、仕様書が増えるたびに一覧の更新を人が覚えておくことに
-# なるので、範囲は仕様書の側の宣言で決める。
+# `条件の印: 対象外（理由）` の行を持つ仕様書は読み飛ばす。検査に対象の一覧を持たせると、
+# 仕様書が増えるたびに一覧の更新を人が覚えておくことになるので、範囲は仕様書の側の宣言で
+# 決める。そのかわり、宣言の無い仕様書と、理由の無い「対象外」は「仕様書に宣言がある」の
+# 項目で落とす（黙って読み飛ばした仕様書の上に「全部覆った」が立たないようにするため）。
+#
+# 置き場のうち、名前が `_` で始まるもの（雛形）と、名前が `_intent.md` で終わるもの
+# （判定ファイル）は仕様書ではないので、宣言も条件の行も読まない。
 # ---------------------------------------------------------------------------
 
 # 条件の節を見分ける語。この語を含む見出しから、次の見出しまでが条件の節である。
@@ -116,6 +128,18 @@ MARK_PENDING_RE = re.compile(r"これから（.+?）")
 DECLARATION_RE = re.compile(r"^条件の印:\s*(\S.*?)\s*$")
 DECLARATION_ON = "あり"
 DECLARATION_OFF = "対象外"
+# 「対象外」の後ろに置く理由。括弧は全角で、中が空でないこと。
+DECLARATION_OFF_RE = re.compile(r"^対象外\s*（(.*)）$")
+DECLARATION_EXAMPLE = "「条件の印: あり」か「条件の印: 対象外（理由）」"
+
+# 仕様書として読まないファイルの名前の形（雛形と判定ファイル）。
+TEMPLATE_PREFIX = "_"
+JUDGEMENT_SUFFIX = "_intent.md"
+
+# 番号を名前に持たないテストの docstring の 1 行目の頭。この後ろに理由の文を書く。
+PLAIN_TEST_PREFIX = "番号なし:"
+PLAIN_TEST_EXAMPLE = "「番号なし: <何を試すテストか。なぜ要件に結ばないか>」"
+NUMBERED_TEST_PREFIX = "test_REQ_"
 
 FENCE_RE = re.compile(r"^\s*(```|~~~)")
 # 表の区切りの行。行頭が `|` で、縦棒とハイフンとコロンと空白だけでできている。
@@ -264,6 +288,44 @@ def collect_tests(root):
     return tests
 
 
+def collect_plain_tests(root):
+    """番号を名前に持たないテスト関数と、その docstring の 1 行目を集める。
+
+    文字列の一致ではなく構文木で読むのは、docstring の中身を確実に取るためである。
+    構文として読めないテストのファイルは、入力の側の誤りとして投げる。
+    """
+    tests_dir = root / TESTS_DIR
+    if not tests_dir.is_dir():
+        raise InputError("テストの置き場が無い: %s" % TESTS_DIR)
+
+    plain = []
+    for path in sorted(tests_dir.rglob("test_*.py")):
+        source = "\n".join(read_lines(path))
+        try:
+            tree = ast.parse(source, filename=str(path))
+        except SyntaxError as exc:
+            raise InputError("テストのファイルを構文として読めない: %s（%s）" % (path, exc))
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if not node.name.startswith("test_") or node.name.startswith(NUMBERED_TEST_PREFIX):
+                continue
+            docstring = ast.get_docstring(node, clean=True)
+            first = None
+            if docstring is not None:
+                lines = docstring.strip().splitlines()
+                first = lines[0].strip() if lines else ""
+            plain.append(
+                {
+                    "name": node.name,
+                    "where": where(path, root, node.lineno),
+                    "first_line": first,
+                }
+            )
+    plain.sort(key=lambda item: item["where"])
+    return plain
+
+
 def collect_markers(root):
     """実装の目印を集める。`src/` が無ければ 0 件（目印は無くてよい）。"""
     src_dir = root / SRC_DIR
@@ -363,27 +425,41 @@ def declaration_of(lines):
     return None
 
 
-def collect_conditions(spec_dir):
-    """開発の仕様書の条件の行を集める。置き場が無ければ入力の側の誤り。
+def is_spec_file(path):
+    """仕様書として読むファイルか。雛形（`_` で始まる）と判定ファイル（`_intent.md` で終わる）は外す。"""
+    return not (path.name.startswith(TEMPLATE_PREFIX) or path.name.endswith(JUDGEMENT_SUFFIX))
 
-    読むのは、宣言の行が `条件の印: あり` の仕様書だけである。返すのは
-    (条件の一覧, 読んだ仕様書の数, 読み飛ばした仕様書の数)。
+
+def collect_conditions(spec_dir):
+    """開発の仕様書の宣言と条件の行を集める。置き場が無ければ入力の側の誤り。
+
+    条件の行を読むのは、宣言の行が `条件の印: あり` の仕様書だけである。返すのは
+    (条件の一覧, 仕様書の一覧, 読まなかった雛形と判定ファイルの数)。仕様書の一覧の
+    1 件は、名前・宣言の値（無ければ None）・その仕様書の条件の行を持つ。
     """
     spec_dir = resolve_given_dir(spec_dir)
     if not spec_dir.is_dir():
         raise InputError("仕様書の置き場が見つからない: %s" % spec_dir)
 
     conditions = []
-    read_count = 0
-    skipped_count = 0
+    specs = []
+    excluded = 0
     for path in sorted(spec_dir.rglob("*.md")):
+        if not is_spec_file(path):
+            excluded += 1
+            continue
         lines = read_lines(path)
         declaration = declaration_of(lines)
+        spec = {
+            "name": path.relative_to(spec_dir).as_posix(),
+            "declaration": declaration,
+            "conditions": [],
+        }
+        specs.append(spec)
         if declaration != DECLARATION_ON:
-            # 宣言が無い仕様書も、`対象外` を宣言した仕様書も、条件の行を読まない。
-            skipped_count += 1
+            # `対象外` を宣言した仕様書と、宣言が無いか形の違う仕様書は、条件の行を読まない。
+            # 後の 2 つは「仕様書に宣言がある」の項目が落とす。
             continue
-        read_count += 1
         inside = False
         fence = None
         fence_line = 0
@@ -411,25 +487,25 @@ def collect_conditions(spec_dir):
                     continue
             elif not (line.startswith("- ") or line.startswith("**")):
                 continue
-            conditions.append(
-                {
-                    "where": where(path, spec_dir, line_number),
-                    "text": line.strip(),
-                    "mark": mark_of(line),
-                }
-            )
+            condition = {
+                "where": where(path, spec_dir, line_number),
+                "text": line.strip(),
+                "mark": mark_of(line),
+            }
+            conditions.append(condition)
+            spec["conditions"].append(condition)
         if fence is not None:
             raise InputError(
                 "コードの囲みが閉じていない: %s。囲みを閉じてから走らせ直す"
                 % where(path, spec_dir, fence_line)
             )
-    return conditions, read_count, skipped_count
+    return conditions, specs, excluded
 
 
 def load_state(root, spec_dir=None):
     """検査対象を読んで、項目の関数に渡す状態を作る。
 
-    `spec_dir` が None のときは条件の行を読まず、条件を見る 2 項目は省略になる。
+    `spec_dir` が None のときは仕様書を読まず、仕様書の宣言と条件の行を見る 3 項目は省略になる。
     """
     root = Path(root)
     if not root.is_dir():
@@ -437,11 +513,16 @@ def load_state(root, spec_dir=None):
 
     requirements = collect_requirements(root)
     tests = collect_tests(root)
+    plain_tests = collect_plain_tests(root)
     markers = collect_markers(root)
     if spec_dir is None:
-        conditions, specs_read, specs_skipped = None, 0, 0
+        conditions, specs, specs_excluded = None, None, 0
     else:
-        conditions, specs_read, specs_skipped = collect_conditions(spec_dir)
+        conditions, specs, specs_excluded = collect_conditions(spec_dir)
+    specs_read = 0 if specs is None else sum(
+        1 for spec in specs if spec["declaration"] == DECLARATION_ON
+    )
+    specs_skipped = 0 if specs is None else len(specs) - specs_read
 
     live = {r["number"] for r in requirements if r["superseded_by"] is None}
     superseded = {r["number"] for r in requirements if r["superseded_by"] is not None}
@@ -450,8 +531,11 @@ def load_state(root, spec_dir=None):
         "spec_dir": None if spec_dir is None else Path(spec_dir),
         "requirements": requirements,
         "tests": tests,
+        "plain_tests": plain_tests,
         "markers": markers,
         "conditions": conditions,
+        "specs": specs,
+        "specs_excluded": specs_excluded,
         "specs_read": specs_read,
         "specs_skipped": specs_skipped,
         "numbers": {r["number"] for r in requirements},
@@ -504,6 +588,92 @@ def check_tests_point_to_requirements(state):
         ]
         return RESULT_FAIL, "要件に無い番号のテスト %d 件" % len(orphans), lines
     return RESULT_PASS, "番号つきのテスト %d 件はどれも要件を指している" % len(state["tests"]), []
+
+
+def plain_test_problem(first_line):
+    """番号なしのテストの docstring の 1 行目の不足を 1 語で返す。足りていれば None。"""
+    if first_line is None:
+        return "docstring が無い"
+    if not first_line.startswith(PLAIN_TEST_PREFIX):
+        return "docstring の 1 行目が「%s 」で始まらない" % PLAIN_TEST_PREFIX
+    if not first_line[len(PLAIN_TEST_PREFIX):].strip():
+        return "「%s」の後ろの理由が空" % PLAIN_TEST_PREFIX
+    return None
+
+
+def check_plain_tests_have_reasons(state):
+    """番号を名前に持たないテストの docstring の 1 行目が、「番号なし: 」と理由の文か。
+
+    `--spec-dir` を渡さなくても見る。
+    """
+    lines = []
+    for test in state["plain_tests"]:
+        problem = plain_test_problem(test["first_line"])
+        if problem is None:
+            continue
+        lines.append(
+            "%s の %s: %s。docstring の 1 行目を%sにする"
+            "（要件を確かめるテストなら、名前を test_REQ_<番号>_<内容> にする）"
+            % (test["where"], test["name"], problem, PLAIN_TEST_EXAMPLE)
+        )
+    if lines:
+        return (
+            RESULT_FAIL,
+            "番号を名前に持たないテスト %d 本のうち、理由の無いもの %d 本"
+            % (len(state["plain_tests"]), len(lines)),
+            lines,
+        )
+    return (
+        RESULT_PASS,
+        "番号を名前に持たないテスト %d 本すべてに、docstring の 1 行目の理由がある"
+        % len(state["plain_tests"]),
+        [],
+    )
+
+
+def declaration_problem(declaration):
+    """宣言の値の不足を 1 語で返す。足りていれば None。"""
+    if declaration is None:
+        return "宣言の行が無い"
+    if declaration == DECLARATION_ON:
+        return None
+    found = DECLARATION_OFF_RE.match(declaration)
+    if found:
+        return None if found.group(1).strip() else "「%s」の括弧の中の理由が空" % DECLARATION_OFF
+    if declaration.startswith(DECLARATION_OFF) and "（" not in declaration:
+        return "「%s」の後ろに理由の括弧が無い" % DECLARATION_OFF
+    return "宣言の形が違う（いまは「条件の印: %s」）" % declaration
+
+
+def check_specs_declare(state):
+    """雛形と判定ファイルを除いた仕様書のすべてが、宣言「あり」か「対象外（理由）」を持つか。
+
+    `--spec-dir` を渡されなければ省略する。
+    """
+    if state["specs"] is None:
+        return RESULT_SKIP, "--spec-dir を渡されていないので、仕様書を読んでいない", []
+
+    lines = []
+    for spec in state["specs"]:
+        problem = declaration_problem(spec["declaration"])
+        if problem is None:
+            continue
+        lines.append(
+            "%s: %s。受け入れ条件の節に%sの行を置く" % (spec["name"], problem, DECLARATION_EXAMPLE)
+        )
+    if lines:
+        return RESULT_FAIL, "宣言の足りない仕様書 %d 本" % len(lines), lines
+    return (
+        RESULT_PASS,
+        "仕様書 %d 本すべてに宣言がある（あり %d・対象外 %d）。雛形と判定ファイル %d 本は読んでいない"
+        % (
+            len(state["specs"]),
+            state["specs_read"],
+            state["specs_skipped"],
+            state["specs_excluded"],
+        ),
+        [],
+    )
 
 
 def check_superseded_tests_gone(state):
@@ -766,7 +936,7 @@ def check_conditions_have_marks(state):
         RESULT_PASS,
         "条件の行 %d 件すべてに印がある（要件に結んだ %d・無し %d・これから %d。"
         "うち %d 件は番号と「これから」を併記）。読んだ仕様書 %d 本、"
-        "宣言が無いか対象外で読まなかった仕様書 %d 本"
+        "宣言が「あり」でないので読まなかった仕様書 %d 本"
         % (
             len(state["conditions"]),
             linked,
@@ -809,10 +979,12 @@ def check_forbidden_words(state):
 CHECKS = [
     ("要件にテストがある", check_tests_exist),
     ("テスト名の番号が要件にある", check_tests_point_to_requirements),
+    ("番号なしのテストに理由がある", check_plain_tests_have_reasons),
     ("取って代わられた番号のテストが残っていない", check_superseded_tests_gone),
     ("実装の目印が有効な要件を指す", check_markers_point_to_live_requirements),
     ("番号の形と重なり", check_number_form),
     ("取って代わった先が実在する", check_supersede_target_exists),
+    ("仕様書に宣言がある", check_specs_declare),
     ("条件が指す要件が実在する", check_conditions_point_to_requirements),
     ("条件に印がある", check_conditions_have_marks),
     ("要件に書かない語", check_forbidden_words),
@@ -842,8 +1014,90 @@ def evaluate(state):
     return results
 
 
-def run(root, spec_dir=None):
+def count_marks(conditions):
+    """条件の行の一覧から、表の 1 行ぶんの数を数える。
+
+    返すのは (条件の行, 要件に結んだ行, 無しの行, これからの行, 指す番号の集合)。
+    番号と「これから」を併記した行は、結んだ行とこれからの行の両方に数える
+    （「条件に印がある」の項目の数え方と同じ）。
+    """
+    linked = none = pending = 0
+    numbers = set()
+    for condition in conditions:
+        mark = condition["mark"]
+        if mark is None:
+            continue
+        if MARK_NONE_RE.match(mark):
+            none += 1
+            continue
+        found, _ = numbers_in_mark(mark)
+        if found:
+            linked += 1
+            numbers.update(found)
+        if MARK_PENDING_RE.search(mark):
+            pending += 1
+    return len(conditions), linked, none, pending, numbers
+
+
+def spec_table_lines(state):
+    """仕様書ごとの条件の行と印の内訳を、Markdown の表の行で返す。"""
+    header = "| 仕様書 | 条件の行 | 要件に結んだ行 | 無しの行 | これからの行 | 指す要件の番号の種類 |"
+    lines = [
+        "## 条件の印の対応表",
+        "",
+        "宣言が「あり」の仕様書（%d 本）" % state["specs_read"],
+        "",
+        header,
+        "|---|---|---|---|---|---|",
+    ]
+    totals = [0, 0, 0, 0]
+    all_numbers = set()
+    off = []
+    missing = []
+    for spec in state["specs"]:
+        declaration = spec["declaration"]
+        if declaration != DECLARATION_ON:
+            if declaration_problem(declaration) is None:
+                off.append((spec["name"], DECLARATION_OFF_RE.match(declaration).group(1).strip()))
+            else:
+                missing.append((spec["name"], declaration_problem(declaration)))
+            continue
+        rows, linked, none, pending, numbers = count_marks(spec["conditions"])
+        for index, value in enumerate((rows, linked, none, pending)):
+            totals[index] += value
+        all_numbers |= numbers
+        lines.append(
+            "| %s | %d | %d | %d | %d | %d |"
+            % (spec["name"], rows, linked, none, pending, len(numbers))
+        )
+    lines.append(
+        "| 合計 | %d | %d | %d | %d | %d |"
+        % (totals[0], totals[1], totals[2], totals[3], len(all_numbers))
+    )
+    lines += ["", "宣言が「対象外」の仕様書（%d 本）" % len(off), ""]
+    if off:
+        lines += ["| 仕様書 | 対象外の理由 |", "|---|---|"]
+        lines += ["| %s | %s |" % (name, reason) for name, reason in off]
+    else:
+        lines.append("無し")
+    if missing:
+        lines += ["", "宣言の足りない仕様書（%d 本）" % len(missing), ""]
+        lines += ["| 仕様書 | 足りないもの |", "|---|---|"]
+        lines += ["| %s | %s |" % (name, problem) for name, problem in missing]
+    reasoned = sum(1 for t in state["plain_tests"] if plain_test_problem(t["first_line"]) is None)
+    lines += [
+        "",
+        "番号を名前に持たないテスト: %d 本（うち docstring の 1 行目に理由があるもの %d 本）"
+        % (len(state["plain_tests"]), reasoned),
+    ]
+    return lines
+
+
+def run(root, spec_dir=None, spec_table=False):
     """検査を 1 回走らせて終了コードを返す。"""
+    if spec_table and spec_dir is None:
+        print("ERROR: --spec-table は --spec-dir と一緒に渡す", file=sys.stderr)
+        return 2
     try:
         state = load_state(root, spec_dir)
     except InputError as exc:
@@ -862,18 +1116,26 @@ def run(root, spec_dir=None):
             for line in lines:
                 print("    %s" % line)
 
+    if spec_table:
+        # 表は合否にかかわらず出す。落ちたときこそ、どこの数が合わないかを見たいため。
+        print()
+        for line in spec_table_lines(state):
+            print(line)
+        print()
+
     if failed:
         print("NG 不合格 %d 項目（省略 %d 項目）" % (failed, skipped))
         return 1
 
     conditions = state["conditions"]
     print(
-        "OK 要件 %d 件（うち取って代わられた %d 件）、番号つきのテスト %d 件、実装の目印 %d 件、"
-        "条件の行 %s（省略 %d 項目）"
+        "OK 要件 %d 件（うち取って代わられた %d 件）、番号つきのテスト %d 件、"
+        "番号なしのテスト %d 本、実装の目印 %d 件、条件の行 %s（省略 %d 項目）"
         % (
             len(state["requirements"]),
             len(state["superseded"]),
             len(state["tests"]),
+            len(state["plain_tests"]),
             len(state["markers"]),
             "読んでいない" if conditions is None else "%d 件" % len(conditions),
             skipped,
@@ -897,11 +1159,17 @@ def main(argv=None):
     parser.add_argument(
         "--spec-dir",
         default=None,
-        help="開発の仕様書の置き場。渡すと、条件の行を見る 2 項目が走る。"
-        "渡さなければその 2 項目は省略になる（既定: 渡さない）",
+        help="開発の仕様書の置き場。渡すと、仕様書の宣言と条件の行を見る 3 項目が走る。"
+        "渡さなければその 3 項目は省略になる（既定: 渡さない）",
+    )
+    parser.add_argument(
+        "--spec-table",
+        action="store_true",
+        help="--spec-dir と一緒に渡す。項目の出力の後に、仕様書ごとの条件の行の数と"
+        "印の内訳を Markdown の表で出す",
     )
     args = parser.parse_args(argv)
-    return run(args.root, args.spec_dir)
+    return run(args.root, args.spec_dir, args.spec_table)
 
 
 if __name__ == "__main__":

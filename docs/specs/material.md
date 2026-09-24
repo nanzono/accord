@@ -174,6 +174,12 @@
 - 関係するファイル: `src/accord/services/material.py`
 - 検証手順: `uv run pytest tests/test_material.py -k REQ_373`
 
+## REQ-374
+公開記録の置き場を書いていない設定で文面の材料を取り出すとき、accord は公開記録を空の一覧で返す。
+
+- 関係するファイル: `src/accord/services/material.py`、`src/accord/vocabulary/settings.py`
+- 検証手順: `uv run pytest tests/test_reading_settings.py -k REQ_374`
+
 ## 未決の質問
 
 - 「その媒体に適用される決めが前面に出す束」（REQ-084）が、その媒体を名指しした決めが 1 件も無いときに何を返すかを決めていません。いまの実装は適用範囲「全体」の決めに落として、落としたことを警告に 1 行足します。この文だけを読むと、名指しの決めが無ければ何も返さない実装も書けます。いまのテストは、媒体を名指しした決めがある見本で確かめているので、落ち方を見ていません。

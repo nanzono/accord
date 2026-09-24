@@ -426,7 +426,9 @@ def test_REQ_353_the_rule_table_shows_how_each_rule_appears() -> None:
 
 
 def test_self_check_removing_one_arrow_line_is_caught() -> None:
-    """本物の節から矢印の行を 1 本消した文面を渡すと、矢印の差分検査が違いを 1 件以上返す。
+    """番号なし: 説明書の図から矢印の行を 1 本消した文面で、矢印を突き合わせる関数が違いを返すかを試す自己試験。accord の振る舞いではなくテストの中の道具を確かめるので、要件に結ばない。
+
+    本物の節から矢印の行を 1 本消した文面を渡すと、矢印の差分検査が違いを 1 件以上返す。
 
     審判（diff_mermaid_edges）自体が壊れていないかを見る自己試験。壊し方が対象を見つけら
     れず文面が変わらなかった場合は、審判の合否と切り分けるためにその時点でテストを落とす。
@@ -448,7 +450,9 @@ def test_self_check_removing_one_arrow_line_is_caught() -> None:
 
 
 def test_self_check_removing_one_type_table_row_is_caught() -> None:
-    """本物の型の表から行を 1 つ消した文面を渡すと、型の表の差分検査が違いを 1 件以上返す。
+    """番号なし: 説明書の型の表から行を 1 つ消した文面で、型の表を突き合わせる関数が違いを返すかを試す自己試験。accord の振る舞いではなくテストの中の道具を確かめるので、要件に結ばない。
+
+    本物の型の表から行を 1 つ消した文面を渡すと、型の表の差分検査が違いを 1 件以上返す。
 
     審判（diff_type_table）自体が壊れていないかを見る自己試験。
     """
@@ -477,7 +481,9 @@ def test_self_check_removing_one_type_table_row_is_caught() -> None:
 
 
 def test_self_check_swapping_appears_as_word_is_caught() -> None:
-    """ルールの表のある行の appears_as の語を別の語に替えた文面を渡すと、違いが 1 件以上返る。
+    """番号なし: 説明書のルールの表の現れ方の語を替えた文面で、ルールの表を突き合わせる関数が違いを返すかを試す自己試験。accord の振る舞いではなくテストの中の道具を確かめるので、要件に結ばない。
+
+    ルールの表のある行の appears_as の語を別の語に替えた文面を渡すと、違いが 1 件以上返る。
 
     審判（diff_rule_table）自体が壊れていないかを見る自己試験。appears_as が「拒否」の制約を
     1 つ選び、その行の「拒否」を「検出」に書き換える。
