@@ -12,7 +12,7 @@
 どの制約に当たると断るか、その断りの理由に何を書くかは、このファイルではなく機能ごとの要件の
 ファイルが持ちます。機能の登記とパッケージの改訂は [offering.md](offering.md)、決めの登記は
 [positioning.md](positioning.md)、公開記録の登記は [public-records.md](public-records.md)、
-ID の形式と一意性は [id-reference.md](id-reference.md) です。要件の書き方と番号の決まりは
+ID の形式と ID の一意性は [id-reference.md](id-reference.md) です。要件の書き方と番号の決まりは
 [README.md](README.md) にあります。
 
 ## REQ-322

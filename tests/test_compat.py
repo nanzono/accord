@@ -58,7 +58,8 @@ MAKE_PRIVATE = (
 
 STALE_PACKAGE_FRESHNESS = "パッケージ定義の鮮度"
 OUTDATED_OFFERING_CLAIM = "提示物の宣言と看板の一致"
-NOTE_AND_SOURCE_SECTION = "注記と出典の節の実在・公開可否"
+NOTE_AND_SOURCE_SECTION_EXISTS = "注記と出典の節の実在"
+SOURCE_AND_EVIDENCE_DISCLOSURE = "出典と裏づけの節の公開可否"
 
 # 見せ方の正本から返る、媒体の規約と禁じた言い回しの実例。
 CHANNEL_RULE_PHRASE = "400 字以内"
@@ -224,7 +225,7 @@ def test_REQ_019_alt_check_consistency_detects_private_source_section_in_ledger(
     ledger = [
         v
         for v in report.violations
-        if v.constraint == NOTE_AND_SOURCE_SECTION
+        if v.constraint == SOURCE_AND_EVIDENCE_DISCLOSURE
         and v.file == alt_settings.files["resume_ledger"]
     ]
     assert len(ledger) == 1, [v.model_dump() for v in report.violations]
@@ -261,7 +262,8 @@ def test_REQ_020_alt_check_consistency_detects_dangling_pending_note(alt_setting
     dangling = [
         v
         for v in report.violations
-        if v.constraint == NOTE_AND_SOURCE_SECTION and v.file == "nagiho/skill_sheet.md"
+        if v.constraint == NOTE_AND_SOURCE_SECTION_EXISTS
+        and v.file == "nagiho/skill_sheet.md"
     ]
     assert len(dangling) == 1, [v.model_dump() for v in report.violations]
     assert PRIVATE_SECTION_ID in dangling[0].candidates

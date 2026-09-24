@@ -62,13 +62,15 @@ FIELDLESS_PRESENTATION_COUNT = 40
 FIELDLESS_PRESENTATION_BODY = "# 下書き\n\n本文だけで、欄を 1 つも持たない。\n"
 
 EVIDENCE_SECTION_EXISTS = "裏づけ節名の実在"
-ID_FORMAT_AND_UNIQUENESS = "ID の形式と一意性"
+ID_FORMAT = "ID の形式"
+ID_UNIQUENESS = "ID の一意性"
 # 決めと提示物はパッケージを ID で指すので、ID と見出し（表示名）の両方を持つ。
 HEADLINE_PACKAGE = "requirements-and-progress"
 HEADLINE_PACKAGE_NAME = "要件定義と進行管理"
 STALE_PACKAGE_FRESHNESS = "パッケージ定義の鮮度"
 OUTDATED_OFFERING_CLAIM = "提示物の宣言と看板の一致"
-NOTE_AND_SOURCE_SECTION = "注記と出典の節の実在・公開可否"
+NOTE_AND_SOURCE_SECTION_EXISTS = "注記と出典の節の実在"
+SOURCE_AND_EVIDENCE_DISCLOSURE = "出典と裏づけの節の公開可否"
 
 
 def _rewrite(path: Path, old: str, new: str, *, last: bool = False) -> None:
@@ -177,7 +179,8 @@ def test_REQ_019_check_consistency_detects_private_source_section_in_ledger(sett
     ledger = [
         v
         for v in report.violations
-        if v.constraint == NOTE_AND_SOURCE_SECTION and v.file == settings.files["resume_ledger"]
+        if v.constraint == SOURCE_AND_EVIDENCE_DISCLOSURE
+        and v.file == settings.files["resume_ledger"]
     ]
     assert len(ledger) == 1, [v.model_dump() for v in report.violations]
     violation = ledger[0]
@@ -199,7 +202,7 @@ def test_REQ_020_check_consistency_detects_dangling_pending_note(settings) -> No
     dangling = [
         v
         for v in report.violations
-        if v.constraint == NOTE_AND_SOURCE_SECTION
+        if v.constraint == NOTE_AND_SOURCE_SECTION_EXISTS
         and v.file == "presentations/nagiho/skill_sheet.md"
     ]
     assert len(dangling) == 1, [v.model_dump() for v in report.violations]
@@ -525,7 +528,7 @@ def test_REQ_028_ledger_source_section_outside_the_reading_range_is_named_as_suc
     ledger = [
         v
         for v in report.violations
-        if v.constraint == NOTE_AND_SOURCE_SECTION
+        if v.constraint == NOTE_AND_SOURCE_SECTION_EXISTS
         and v.file == alt_settings.files["resume_ledger"]
     ]
     assert len(ledger) == 1, [v.model_dump() for v in report.violations]
@@ -771,8 +774,9 @@ def test_REQ_022_evidence_section_can_point_at_a_public_record(settings) -> None
 # ---------------------------------------------------------------- 設定の語の一覧との照合
 
 
-PUBLIC_RECORD_VOCABULARY = "公開記録の種類と役割の語彙"
-CAPABILITY_CATEGORY_ENUM = "機能の分類の列挙"
+PUBLIC_RECORD_KIND_VOCABULARY = "公開記録の種類の語彙"
+PUBLIC_RECORD_ROLE_VOCABULARY = "公開記録の役割の語彙"
+CAPABILITY_CATEGORY_VOCABULARY = "機能の分類の語彙"
 
 # 設定の語の一覧に無い語。どれも架空の語で、写しの正本に手で書いたことにする。
 OUTSIDE_KIND = "ポッドキャスト"
@@ -794,25 +798,28 @@ OUTSIDE_CATEGORY_SECTION = f"""
 OUTSIDE_CATEGORY_CAPABILITY = "進め方を人前で話す"
 
 
-@pytest.mark.parametrize(
-    ("label", "rewrite", "vocabulary_attribute", "written"),
-    [
-        ("種類", WRITE_OUTSIDE_KIND, "public_record_kinds", OUTSIDE_KIND),
-        ("役割", WRITE_OUTSIDE_ROLE, "public_record_roles", OUTSIDE_ROLE),
-    ],
-)
-def test_REQ_039_public_record_word_outside_the_vocabulary_is_listed_as_a_violation(
-    settings, label: str, rewrite: tuple[str, str], vocabulary_attribute: str, written: str
+def _check_one_public_record_word_outside_the_vocabulary(
+    settings,
+    constraint: str,
+    other_constraint: str,
+    label: str,
+    rewrite: tuple[str, str],
+    vocabulary_attribute: str,
+    written: str,
 ) -> None:
-    """公開記録の種類と役割に設定の語の一覧に無い語が書かれていると、違反 1 件として挙げる。"""
+    """公開記録の 1 つの欄に語の一覧の外の語を書き、その欄のルールの名前で違反 1 件が出ることを見る。
+
+    種類と役割は別のルールなので、外れた側の名前で出て、もう一方の名前では出ないことも見る。
+    """
     before = len(_report(settings).violations)
     _rewrite(settings.path_for("public_records"), *rewrite)
 
     report = _report(settings)
 
     assert len(report.violations) == before + 1, [v.model_dump() for v in report.violations]
-    listed = [v for v in report.violations if v.constraint == PUBLIC_RECORD_VOCABULARY]
+    listed = [v for v in report.violations if v.constraint == constraint]
     assert len(listed) == 1, [v.model_dump() for v in report.violations]
+    assert [v for v in report.violations if v.constraint == other_constraint] == []
     violation = listed[0]
     assert violation.file == settings.files["public_records"]
     assert RECORD_NAME in violation.location, violation.location
@@ -820,6 +827,36 @@ def test_REQ_039_public_record_word_outside_the_vocabulary_is_listed_as_a_violat
     assert violation.candidates == getattr(settings, vocabulary_attribute)
     assert written in violation.expected, violation.expected
     assert vocabulary_attribute in violation.expected, violation.expected
+
+
+def test_REQ_368_public_record_kind_outside_the_vocabulary_is_listed_as_a_violation(
+    settings,
+) -> None:
+    """公開記録の種類に設定の種類の語の一覧に無い語が書かれていると、種類の語を候補に違反 1 件を挙げる。"""
+    _check_one_public_record_word_outside_the_vocabulary(
+        settings,
+        PUBLIC_RECORD_KIND_VOCABULARY,
+        PUBLIC_RECORD_ROLE_VOCABULARY,
+        "種類",
+        WRITE_OUTSIDE_KIND,
+        "public_record_kinds",
+        OUTSIDE_KIND,
+    )
+
+
+def test_REQ_369_public_record_role_outside_the_vocabulary_is_listed_as_a_violation(
+    settings,
+) -> None:
+    """公開記録の役割に設定の役割の語の一覧に無い語が書かれていると、役割の語を候補に違反 1 件を挙げる。"""
+    _check_one_public_record_word_outside_the_vocabulary(
+        settings,
+        PUBLIC_RECORD_ROLE_VOCABULARY,
+        PUBLIC_RECORD_KIND_VOCABULARY,
+        "役割",
+        WRITE_OUTSIDE_ROLE,
+        "public_record_roles",
+        OUTSIDE_ROLE,
+    )
 
 
 def test_REQ_040_capability_category_outside_the_vocabulary_is_listed_as_a_violation(
@@ -833,7 +870,7 @@ def test_REQ_040_capability_category_outside_the_vocabulary_is_listed_as_a_viola
     report = _report(settings)
 
     assert len(report.violations) == before + 1, [v.model_dump() for v in report.violations]
-    listed = [v for v in report.violations if v.constraint == CAPABILITY_CATEGORY_ENUM]
+    listed = [v for v in report.violations if v.constraint == CAPABILITY_CATEGORY_VOCABULARY]
     assert len(listed) == 1, [v.model_dump() for v in report.violations]
     violation = listed[0]
     assert violation.file == settings.files["capabilities"]
@@ -869,6 +906,13 @@ OFF_HEADLINE_RECORD_KIND = ("- 種類: 第三者の掲載", f"- 種類: {OUTSIDE
 # 看板の裏づけになっていない公開記録 2 件に、同じ ID を付ける。
 OFF_HEADLINE_DUPLICATE_ID = ("- ID: magazine-column-data", "- ID: case-article-quality")
 OFF_HEADLINE_DUPLICATE_TARGET = "case-article-quality"
+
+# 看板の裏づけになっていない公開記録 1 件の ID を、形に合わない値にする（大文字と下線を含む）。
+OFF_HEADLINE_OUT_OF_FORMAT_TARGET = "Magazine_Column"
+OFF_HEADLINE_OUT_OF_FORMAT_ID = (
+    "- ID: magazine-column-data",
+    f"- ID: {OFF_HEADLINE_OUT_OF_FORMAT_TARGET}",
+)
 
 # 同じ提示物の本文に、正本に無い同じ URL を 2 行書く。
 UNKNOWN_URL_TWICE = (
@@ -923,13 +967,30 @@ def test_REQ_043_channel_scope_checks_only_the_public_records_behind_the_headlin
     whole = _report(settings)
     narrowed = _report(settings, "tsukikusa")
 
-    outside = [v for v in whole.violations if v.constraint == PUBLIC_RECORD_VOCABULARY]
+    outside = [v for v in whole.violations if v.constraint == PUBLIC_RECORD_KIND_VOCABULARY]
     assert len(outside) == 1, [v.model_dump() for v in whole.violations]
     assert [v.model_dump() for v in narrowed.violations] == []
 
 
-def test_REQ_044_narrowed_scope_still_checks_ids_across_the_whole_source(settings) -> None:
-    """範囲を絞っても、ID の形式と一意性は正本全体で見る。
+def test_REQ_362_narrowed_scope_still_checks_id_format_across_the_whole_source(settings) -> None:
+    """範囲を絞っても、ID の形式は正本全体で見る。
+
+    範囲の外にある公開記録 1 件の ID を形に合わない値にし、媒体の範囲でも違反に出ることで確かめる。
+    """
+    _rewrite(settings.path_for("public_records"), *OFF_HEADLINE_OUT_OF_FORMAT_ID)
+
+    report = _report(settings, "tsukikusa")
+
+    out_of_format = [v for v in report.violations if v.constraint == ID_FORMAT]
+    assert len(out_of_format) == 1, [v.model_dump() for v in report.violations]
+    assert OFF_HEADLINE_OUT_OF_FORMAT_TARGET in out_of_format[0].expected, out_of_format[0].expected
+    assert out_of_format[0].file == settings.files["public_records"]
+
+
+def test_REQ_363_narrowed_scope_still_checks_id_uniqueness_across_the_whole_source(
+    settings,
+) -> None:
+    """範囲を絞っても、ID の一意性は正本全体で見る。
 
     範囲の外にある公開記録 2 件に同じ ID を付け、媒体の範囲でも違反に出ることで確かめる。
     """
@@ -937,7 +998,7 @@ def test_REQ_044_narrowed_scope_still_checks_ids_across_the_whole_source(setting
 
     report = _report(settings, "tsukikusa")
 
-    overlapping = [v for v in report.violations if v.constraint == ID_FORMAT_AND_UNIQUENESS]
+    overlapping = [v for v in report.violations if v.constraint == ID_UNIQUENESS]
     assert len(overlapping) == 2, [v.model_dump() for v in report.violations]
     for violation in overlapping:
         assert OFF_HEADLINE_DUPLICATE_TARGET in violation.expected, violation.expected

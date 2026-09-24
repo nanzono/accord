@@ -28,6 +28,26 @@ UNKNOWN_ROLE = "司会"
 # 導くと、正本から欄を 1 つ消しても回す場合が 1 つ減るだけで、テストは通ってしまう。
 PUBLIC_RECORD_REQUIRED_FIELDS = ("id", "name", "kind", "published_on", "publisher", "role")
 
+# 同じ 6 つの欄の、入力の鍵と、断りに出る欄の名前の組。これも型の正本からは導かず、文字どおり書く。
+# 1 つだけを空にした登記を 6 通り回し、どの欄を空にしても必須の欄の断りが返ることを見る。
+# 型の正本からどれか 1 つの欄の必須の宣言を外すと、その欄の回は別のルールの断り
+# （ID の形式、種類や役割の語彙）になるか、登記が通ってしまい、名前の比べで落ちる。
+PUBLIC_RECORD_REQUIRED_FIELD_LABELS = (
+    ("id", "ID"),
+    ("name", "名前"),
+    ("kind", "種類"),
+    ("published_on", "日付"),
+    ("publisher", "発行元か主催"),
+    ("role", "役割"),
+)
+
+# 必須の欄が欠けたときの断りの名前。
+PUBLIC_RECORD_REQUIRED_FIELDS_RULE = "公開記録の必須欄"
+
+# 型の正本のルールの名前。断りにそのまま出る。
+PUBLIC_RECORD_KIND_VOCABULARY = "公開記録の種類の語彙"
+PUBLIC_RECORD_ROLE_VOCABULARY = "公開記録の役割の語彙"
+
 # 設定から抜くと、公開記録を使わない正本（この段より前の設定と同じ形）になる 3 行の書き出し。
 PUBLIC_RECORD_SETTING_LINES = (
     "public_records = ",
@@ -274,11 +294,23 @@ def test_REQ_219_missing_required_fields_are_not_registered(settings: Settings) 
 def test_REQ_220_missing_required_fields_rejection_names_the_constraint(
     settings: Settings,
 ) -> None:
-    """必須の欄を空にした入力の断りは、当たった制約の名前を返す。"""
+    """必須の欄を空にした入力の断りは、当たった制約の名前を返す。
+
+    2 つを空にした 1 通りに加えて、6 つの欄を 1 つずつ空にした 6 通りでも同じ名前が返ることを見る。
+    """
     result = _register(settings, name="", role="")
 
     assert result.rejection is not None
-    assert result.rejection.constraint == "公開記録の必須欄"
+    assert result.rejection.constraint == PUBLIC_RECORD_REQUIRED_FIELDS_RULE
+
+    for field, label in PUBLIC_RECORD_REQUIRED_FIELD_LABELS:
+        single = _register(settings, **{field: ""})
+
+        assert single.rejection is not None, label
+        assert single.rejection.constraint == PUBLIC_RECORD_REQUIRED_FIELDS_RULE, (
+            label,
+            single.rejection.constraint,
+        )
 
 
 def test_REQ_221_missing_required_fields_rejection_names_them_in_the_reason(
@@ -295,6 +327,21 @@ def test_REQ_221_missing_required_fields_rejection_names_them_in_the_reason(
     reason = result.rejection.reason
     assert "「名前」" in reason, reason
     assert "「役割」" in reason, reason
+
+    # 6 つの欄を 1 つずつ空にすると、空にした欄の名前だけがかぎかっこ付きで理由に並ぶ。
+    for field, label in PUBLIC_RECORD_REQUIRED_FIELD_LABELS:
+        single = _register(settings, **{field: ""})
+
+        assert single.rejection is not None, label
+        single_reason = single.rejection.reason
+        assert f"「{label}」" in single_reason, (label, single_reason)
+        others = [
+            other for _, other in PUBLIC_RECORD_REQUIRED_FIELD_LABELS if other != label
+        ]
+        assert [other for other in others if f"「{other}」" in single_reason] == [], (
+            label,
+            single_reason,
+        )
 
 
 def test_REQ_222_missing_required_fields_rejection_names_the_next_operation(
@@ -316,6 +363,16 @@ def test_REQ_223_missing_required_fields_rejection_lists_the_missing_fields(
     assert result.rejection is not None
     next_action = result.rejection.next_action
     assert next_action.missing_fields == ["名前", "役割"]
+
+    # 6 つの欄を 1 つずつ空にすると、欠けた欄の一覧はその欄 1 つだけになる。
+    for field, label in PUBLIC_RECORD_REQUIRED_FIELD_LABELS:
+        single = _register(settings, **{field: ""})
+
+        assert single.rejection is not None, label
+        assert single.rejection.next_action.missing_fields == [label], (
+            label,
+            single.rejection.next_action.missing_fields,
+        )
 
 
 def test_REQ_224_missing_required_fields_rejection_carries_an_example(
@@ -351,7 +408,7 @@ def test_REQ_226_a_kind_outside_the_vocabulary_rejection_names_the_constraint(
     result = _register(settings, kind=UNKNOWN_KIND)
 
     assert result.rejection is not None
-    assert result.rejection.constraint == "公開記録の種類と役割の語彙"
+    assert result.rejection.constraint == PUBLIC_RECORD_KIND_VOCABULARY
 
 
 def test_REQ_227_a_kind_outside_the_vocabulary_rejection_names_it_in_the_reason(
@@ -415,11 +472,11 @@ def test_REQ_231_a_role_outside_the_vocabulary_is_not_registered(settings: Setti
 def test_REQ_232_a_role_outside_the_vocabulary_rejection_names_the_constraint(
     settings: Settings,
 ) -> None:
-    """設定に無い役割の語の断りは、種類と同じ制約の名前を返す。"""
+    """設定に無い役割の語の断りは、役割の語彙の制約の名前を返す（種類の語彙とは別の名前）。"""
     result = _register(settings, role=UNKNOWN_ROLE)
 
     assert result.rejection is not None
-    assert result.rejection.constraint == "公開記録の種類と役割の語彙"
+    assert result.rejection.constraint == PUBLIC_RECORD_ROLE_VOCABULARY
 
 
 def test_REQ_233_a_role_outside_the_vocabulary_rejection_names_it_in_the_reason(
@@ -579,12 +636,13 @@ def test_REQ_246_only_the_first_broken_rule_is_returned_when_registering(
         settings, kind=UNKNOWN_KIND, origin_section="nagisa-publishng"
     )
     assert kind_before_origin.rejection is not None
-    assert kind_before_origin.rejection.constraint == "公開記録の種類と役割の語彙"
+    assert kind_before_origin.rejection.constraint == PUBLIC_RECORD_KIND_VOCABULARY
     assert UNKNOWN_KIND in kind_before_origin.rejection.reason, kind_before_origin.rejection.reason
 
     # 種類と役割の両方が語の一覧の外にあると、先に見る種類の断りが返る。
     both_words = _register(settings, kind=UNKNOWN_KIND, role=UNKNOWN_ROLE)
     assert both_words.rejection is not None
+    assert both_words.rejection.constraint == PUBLIC_RECORD_KIND_VOCABULARY
     assert UNKNOWN_KIND in both_words.rejection.reason, both_words.rejection.reason
     assert UNKNOWN_ROLE not in both_words.rejection.reason, both_words.rejection.reason
 

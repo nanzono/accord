@@ -3,8 +3,8 @@
 
 書き出す先は 2 つ。
 
-    src/accord/models/types.py        型 7 つの Pydantic モデル
-    src/accord/models/constraints.py  制約 7 つの宣言（class Constraint と CONSTRAINTS）
+    src/accord/models/types.py        型の Pydantic モデル
+    src/accord/models/constraints.py  制約の宣言（class Constraint と CONSTRAINTS）
 
 引数なしで呼ぶと書き出す。`--check` を付けると、書き出す代わりに、いま生成した中身と
 リポジトリにあるファイルを比べる。1 バイトも違わなければ終了コード 0、違えば 1 と差の要約を出す。

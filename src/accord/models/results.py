@@ -210,12 +210,18 @@ class Rejection(BaseModel):
 
 
 def id_rejection(
-    constraint: str, operation: str, identifier: str, taken: dict[str, str]
+    format_constraint: str,
+    uniqueness_constraint: str,
+    operation: str,
+    identifier: str,
+    taken: dict[str, str],
 ) -> Rejection | None:
-    """書きの操作が受け取った ID を、形式と一意性に当てる。通れば None を返す。
+    """書きの操作が受け取った ID を、形式に当て、次に一意性に当てる。通れば None を返す。
 
     ID を持つ項目を書く操作は 3 つあり、どれも同じ形と同じ一意性を見る。判定を 3 か所に書くと、
     片方だけを直したときに、書きで通った ID が検査で違反になる。だからこの 1 か所に集める。
+    形の断りには format_constraint を、重なりの断りには uniqueness_constraint を名乗る。
+    名前はサービスの側が型の正本の宣言から引いて渡す（この層から制約の宣言を引きにいかない）。
     taken は、すでに使われている ID と、その ID を持つ項目の表示名の対応である。
     """
     value = (identifier or "").strip()
@@ -224,7 +230,7 @@ def id_rejection(
         examples = list(taken)[:FALLBACK_COUNT]
         return Rejection(
             # spec: REQ-306
-            constraint=constraint,
+            constraint=format_constraint,
             reason=(
                 # spec: REQ-307
                 f"ID「{value}」は形に合わない（{ID_FORMAT_TEXT}）。"
@@ -247,7 +253,7 @@ def id_rejection(
     if value in taken:
         return Rejection(
             # spec: REQ-313
-            constraint=constraint,
+            constraint=uniqueness_constraint,
             reason=(
                 # spec: REQ-314
                 f"ID「{value}」は、すでに「{taken[value]}」が使っている。"

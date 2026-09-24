@@ -7,12 +7,11 @@
 範囲は 3 通り取れる。正本全体（省略か「全体」）、媒体の名前、提示物のファイル名である。
 範囲の名前が実在しないときは、違反ではなく実在する範囲の一覧を返す。拒否は無い。
 
-執行するのは制約 10 件。書きの操作が書き込みの瞬間に拒否する 5 件（ID の形式と一意性・裏づけ節名の実在・
-束ねる機能名の一致・由来の節の実在・公開記録の種類と役割の語彙）にも後から食い違う経路があるので当て直し、
-書きでは拒否できず後から食い違う 5 件（パッケージ定義の鮮度・提示物の宣言と看板の一致・未反映の注記の実在・
-台帳の出典の節の実在と公開可否・提示物の URL と公開記録の一致）を加えて、正本全体に当てる。
-機能の分類が設定の語の一覧にあるかも、同じ語彙の照合として当てる（この名前は ontology.yaml の
-制約 12 件には無く、登記の操作が拒否のときに名乗る名前と同じものを使う）。
+書きの操作が書き込みの瞬間に拒否する制約（ID の形式・ID の一意性・裏づけ節名の実在・
+束ねる機能名の一致・由来の節の実在・公開記録の種類の語彙・公開記録の役割の語彙・機能の分類の語彙）にも
+後から食い違う経路があるので当て直し、書きでは拒否できず後から食い違う制約（パッケージ定義の鮮度・
+提示物の宣言と看板の一致・注記と出典の節の実在・出典と裏づけの節の公開可否・提示物の URL と公開記録の一致）
+を加えて、正本全体に当てる。
 決めの必須欄と公開記録の必須欄は、それぞれを登記する操作だけが見る
 （正本の ontology.yaml の enforced_by のとおり）。
 どの制約をどの関数が受け持つかは、この文書の末尾の対応表にある。
@@ -58,7 +57,7 @@ from accord.repository.markdown_repository import (
     MarkdownRepository,
 )
 from accord.services.material import MaterialService
-from accord.services.offering import CAPABILITY_CATEGORY_ENUM, OfferingService
+from accord.services.offering import OfferingService
 from accord.services.positioning import (
     WHOLE_SCOPE,
     PositioningService,
@@ -83,10 +82,14 @@ PACKAGE_FRESHNESS = CONSTRAINT_BY_NAME["パッケージ定義の鮮度"].name
 OFFERING_CLAIM_MATCHES = CONSTRAINT_BY_NAME["提示物の宣言と看板の一致"].name
 EVIDENCE_SECTION_EXISTS = CONSTRAINT_BY_NAME["裏づけ節名の実在"].name
 PACKAGE_CAPABILITY_MATCHES = CONSTRAINT_BY_NAME["束ねる機能名の一致"].name
-ID_FORMAT_AND_UNIQUENESS = CONSTRAINT_BY_NAME["ID の形式と一意性"].name
-NOTE_AND_SOURCE_SECTION = CONSTRAINT_BY_NAME["注記と出典の節の実在・公開可否"].name
+ID_FORMAT = CONSTRAINT_BY_NAME["ID の形式"].name
+ID_UNIQUENESS = CONSTRAINT_BY_NAME["ID の一意性"].name
+NOTE_AND_SOURCE_SECTION_EXISTS = CONSTRAINT_BY_NAME["注記と出典の節の実在"].name
+SOURCE_AND_EVIDENCE_DISCLOSURE = CONSTRAINT_BY_NAME["出典と裏づけの節の公開可否"].name
 PUBLIC_RECORD_REQUIRED_FIELDS = CONSTRAINT_BY_NAME["公開記録の必須欄"].name
-PUBLIC_RECORD_VOCABULARY = CONSTRAINT_BY_NAME["公開記録の種類と役割の語彙"].name
+PUBLIC_RECORD_KIND_VOCABULARY = CONSTRAINT_BY_NAME["公開記録の種類の語彙"].name
+PUBLIC_RECORD_ROLE_VOCABULARY = CONSTRAINT_BY_NAME["公開記録の役割の語彙"].name
+CAPABILITY_CATEGORY_VOCABULARY = CONSTRAINT_BY_NAME["機能の分類の語彙"].name
 ORIGIN_SECTION_EXISTS = CONSTRAINT_BY_NAME["由来の節の実在"].name
 PRESENTATION_URL_MATCHES = CONSTRAINT_BY_NAME["提示物の URL と公開記録の一致"].name
 
@@ -366,9 +369,9 @@ class ConsistencyService:
         notes.extend(note_remarks)
 
         violations.extend(self._check_ledger_source_sections(snapshot, target))
-        # ID の形式と一意性は、範囲を絞っても正本全体で見る。一意性は 1 つのブロックだけを
+        # ID の形式と ID の一意性は、範囲を絞っても正本全体で見る。一意性は 1 つのブロックだけを
         # 見ても言えず、絞った範囲の外にある項目と重なっていても違反だからである。
-        # spec: REQ-044
+        # spec: REQ-362
         violations.extend(self._check_id_format_and_uniqueness(snapshot))
 
         return ConsistencyReport(
@@ -703,13 +706,18 @@ class ConsistencyService:
         # 公開記録の置き場を書いていない設定は、公開記録を 0 件として読む。照らす相手も語彙も無い。
         if self.settings.has_file(PUBLIC_RECORDS_KEY):
             records_file = self.settings.files[PUBLIC_RECORDS_KEY]
+            # 種類と役割は別のルールなので、外れた側のルールの名前で違反を挙げる。
             fields = (
+                # spec: REQ-368
                 (
+                    PUBLIC_RECORD_KIND_VOCABULARY,
                     PUBLIC_RECORD_KIND_LABEL,
                     self.settings.public_record_kinds,
                     PUBLIC_RECORD_KINDS_KEY,
                 ),
+                # spec: REQ-369
                 (
+                    PUBLIC_RECORD_ROLE_VOCABULARY,
                     PUBLIC_RECORD_ROLE_LABEL,
                     self.settings.public_record_roles,
                     PUBLIC_RECORD_ROLES_KEY,
@@ -720,14 +728,13 @@ class ConsistencyService:
                     PUBLIC_RECORD_KIND_LABEL: record.kind,
                     PUBLIC_RECORD_ROLE_LABEL: record.role,
                 }
-                for label, allowed, key in fields:
+                for constraint, label, allowed, key in fields:
                     value = written[label]
-                    # spec: REQ-039
                     if not value or value in allowed:
                         continue
                     violations.append(
                         Violation(
-                            constraint=PUBLIC_RECORD_VOCABULARY,
+                            constraint=constraint,
                             file=records_file,
                             location=f"「{record.name}」のブロックの「{label}」の行",
                             expected=(
@@ -746,7 +753,7 @@ class ConsistencyService:
                 continue
             violations.append(
                 Violation(
-                    constraint=CAPABILITY_CATEGORY_ENUM,
+                    constraint=CAPABILITY_CATEGORY_VOCABULARY,
                     file=self.settings.files["capabilities"],
                     location=(
                         f"節「{capability.category}」の機能「{capability.name}」の行"
@@ -893,9 +900,11 @@ class ConsistencyService:
         capabilities = [item for item in snapshot.capabilities if item.id in bundled]
         return records_behind(capabilities, snapshot.public_records)
 
-    # spec: REQ-291
+    # spec: REQ-364
     def _check_id_format_and_uniqueness(self, snapshot: SourceSnapshot) -> list[Violation]:
-        """指される側の 5 つの型の ID が、形に合い、正本全体で重ならないかを見る。
+        """指される側の 5 つの型の ID が、形に合うか（ID の形式）と、正本全体で重ならないか（ID の一意性）を見る。
+
+        形に合わない ID は、形を直すまで重なりを見ない。
 
         形が外れた ID と重なった ID は、ブロックとしては読んだうえでここが違反として挙げる。
         読み込みの層で落とさないのは、落とすと「その節は無い」と読めてしまい、正しい側を
@@ -910,6 +919,7 @@ class ConsistencyService:
             entries.append(
                 (engagement.id, self.settings.files["engagements"], f"「{engagement.heading}」の節")
             )
+        # spec: REQ-366
         if self.settings.has_file(PUBLIC_RECORDS_KEY):
             for record in snapshot.public_records:
                 entries.append(
@@ -932,6 +942,7 @@ class ConsistencyService:
 
         places: dict[str, list[str]] = {}
         for identifier, file_name, location in entries:
+            # spec: REQ-365
             places.setdefault(identifier, []).append(f"{file_name} の{location}")
 
         violations: list[Violation] = []
@@ -940,7 +951,7 @@ class ConsistencyService:
             if not is_id(identifier):
                 violations.append(
                     Violation(
-                        constraint=ID_FORMAT_AND_UNIQUENESS,
+                        constraint=ID_FORMAT,
                         file=file_name,
                         # spec: REQ-293
                         location=f"{location}の「{ID_LABEL}」",
@@ -957,7 +968,7 @@ class ConsistencyService:
             if len(same) > 1:
                 violations.append(
                     Violation(
-                        constraint=ID_FORMAT_AND_UNIQUENESS,
+                        constraint=ID_UNIQUENESS,
                         file=file_name,
                         location=f"{location}の「{ID_LABEL}」",
                         expected=(
@@ -996,7 +1007,7 @@ class ConsistencyService:
                 # spec: REQ-020
                 violations.append(
                     Violation(
-                        constraint=NOTE_AND_SOURCE_SECTION,
+                        constraint=NOTE_AND_SOURCE_SECTION_EXISTS,
                         file=presentation.path,
                         location=f"「未反映の注記」の行「{note}」",
                         expected=expected,
@@ -1017,7 +1028,9 @@ class ConsistencyService:
     def _check_ledger_source_sections(
         self, snapshot: SourceSnapshot, target: InspectionScope
     ) -> list[Violation]:
-        """職務経歴書の台帳の出典の節の ID が、受託案件として実在し、公開可であるかを見る。"""
+        """職務経歴書の台帳の出典の節の ID が、受託案件として実在するか（注記と出典の節の実在）と、
+        実在した節が公開可であるか（出典と裏づけの節の公開可否）を見る。実在しない節は公開可否を見ない。
+        """
         engagements = {item.id: item for item in snapshot.engagements}
         labels = snapshot.labels()
         public = [
@@ -1037,7 +1050,7 @@ class ConsistencyService:
             if not readable:
                 violations.append(
                     Violation(
-                        constraint=NOTE_AND_SOURCE_SECTION,
+                        constraint=NOTE_AND_SOURCE_SECTION_EXISTS,
                         file=self.settings.files["resume_ledger"],
                         location=location,
                         expected=expected,
@@ -1051,7 +1064,7 @@ class ConsistencyService:
             if engagement.disclosure.startswith(PRIVATE_DISCLOSURE_PREFIX):
                 violations.append(
                     Violation(
-                        constraint=NOTE_AND_SOURCE_SECTION,
+                        constraint=SOURCE_AND_EVIDENCE_DISCLOSURE,
                         file=self.settings.files["resume_ledger"],
                         location=location,
                         expected=(
@@ -1070,10 +1083,8 @@ class ConsistencyService:
 #
 # 制約の名前（正本は ontology.yaml）を鍵に、それを執行する操作と関数を引く。
 # 同じ制約が、書きの操作では拒否、読みの操作では警告、検査の操作では一覧として現れるので、
-# 操作の名前ごとに関数を持つ。1 つの操作が 2 か所で執行する制約（注記と出典の節）は 2 つ並ぶ。
+# 操作の名前ごとに関数を持つ。1 つの操作が 2 か所で執行する制約（注記と出典の節の実在）は 2 つ並ぶ。
 # 書きの操作が持つ拒否と、検査が持つ検出は、同じ制約の違う顔である。
-# 機能の分類の列挙は ontology.yaml の制約 12 件に無い名前（型 Capability の欄の定義）なので、
-# この表には並ばない。照合そのものは _check_vocabulary が公開記録の語彙と同じ場所で行う。
 
 # spec: REQ-334
 ENFORCEMENT: dict[str, dict[str, tuple[Callable[..., Any], ...]]] = {
@@ -1096,24 +1107,42 @@ ENFORCEMENT: dict[str, dict[str, tuple[Callable[..., Any], ...]]] = {
         "revise_package": (OfferingService.revise_package,),
         "check_consistency": (ConsistencyService._check_bundled_capabilities,),
     },
-    ID_FORMAT_AND_UNIQUENESS: {
+    ID_FORMAT: {
         "check_consistency": (ConsistencyService._check_id_format_and_uniqueness,),
         "register_capability": (OfferingService.register_capability,),
         "revise_package": (OfferingService.revise_package,),
         "register_public_record": (PublicRecordService.register,),
     },
-    NOTE_AND_SOURCE_SECTION: {
+    ID_UNIQUENESS: {
+        "check_consistency": (ConsistencyService._check_id_format_and_uniqueness,),
+        "register_capability": (OfferingService.register_capability,),
+        "revise_package": (OfferingService.revise_package,),
+        "register_public_record": (PublicRecordService.register,),
+    },
+    NOTE_AND_SOURCE_SECTION_EXISTS: {
         "check_consistency": (
             ConsistencyService._check_pending_notes,
             ConsistencyService._check_ledger_source_sections,
         ),
+    },
+    SOURCE_AND_EVIDENCE_DISCLOSURE: {
+        "check_consistency": (ConsistencyService._check_ledger_source_sections,),
         "assemble_material": (MaterialService.assemble,),
+        "register_capability": (OfferingService.register_capability,),
     },
     PUBLIC_RECORD_REQUIRED_FIELDS: {
         "register_public_record": (PublicRecordService.register,),
     },
-    PUBLIC_RECORD_VOCABULARY: {
+    PUBLIC_RECORD_KIND_VOCABULARY: {
         "register_public_record": (PublicRecordService.register,),
+        "check_consistency": (ConsistencyService._check_vocabulary,),
+    },
+    PUBLIC_RECORD_ROLE_VOCABULARY: {
+        "register_public_record": (PublicRecordService.register,),
+        "check_consistency": (ConsistencyService._check_vocabulary,),
+    },
+    CAPABILITY_CATEGORY_VOCABULARY: {
+        "register_capability": (OfferingService.register_capability,),
         "check_consistency": (ConsistencyService._check_vocabulary,),
     },
     ORIGIN_SECTION_EXISTS: {

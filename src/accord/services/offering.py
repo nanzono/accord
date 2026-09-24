@@ -31,11 +31,13 @@ from accord.vocabulary.settings import Settings
 CONSTRAINT_BY_NAME = {constraint.name: constraint for constraint in CONSTRAINTS}
 EVIDENCE_SECTION_EXISTS = CONSTRAINT_BY_NAME["裏づけ節名の実在"].name
 PACKAGE_CAPABILITY_MATCHES = CONSTRAINT_BY_NAME["束ねる機能名の一致"].name
-ID_FORMAT_AND_UNIQUENESS = CONSTRAINT_BY_NAME["ID の形式と一意性"].name
+ID_FORMAT = CONSTRAINT_BY_NAME["ID の形式"].name
+ID_UNIQUENESS = CONSTRAINT_BY_NAME["ID の一意性"].name
+SOURCE_AND_EVIDENCE_DISCLOSURE = CONSTRAINT_BY_NAME["出典と裏づけの節の公開可否"].name
+CAPABILITY_CATEGORY_VOCABULARY = CONSTRAINT_BY_NAME["機能の分類の語彙"].name
 
-# 次の 4 つは制約 7 つではなく、型 Capability と型 Package の欄の定義である
-# （選べる分類と、選べる仮説の状態の語は設定が持つ）。
-CAPABILITY_CATEGORY_ENUM = "機能の分類の列挙"
+# 次の 3 つは型の正本の制約ではなく、型 Capability と型 Package の欄の定義である
+# （選べる仮説の状態の語は設定が持つ）。
 CAPABILITY_REQUIRED_FIELDS = "機能の必須欄"
 PACKAGE_HYPOTHESIS_STATE_ENUM = "仮説の状態の列挙"
 PACKAGE_REQUIRED_FIELDS = "パッケージの必須欄"
@@ -100,7 +102,7 @@ class OfferingService:
                 accepted=False,
                 rejection=Rejection(
                     # spec: REQ-122
-                    constraint=CAPABILITY_CATEGORY_ENUM,
+                    constraint=CAPABILITY_CATEGORY_VOCABULARY,
                     # spec: REQ-123
                     reason=(
                         f"分類「{draft.category}」は機能の台帳の節に無い。"
@@ -118,7 +120,7 @@ class OfferingService:
             )
 
         id_problem = id_rejection(
-            ID_FORMAT_AND_UNIQUENESS, REGISTER_OPERATION, draft.id, labels
+            ID_FORMAT, ID_UNIQUENESS, REGISTER_OPERATION, draft.id, labels
         )
         if id_problem is not None:
             return WriteResult(accepted=False, rejection=id_problem)
@@ -186,6 +188,8 @@ class OfferingService:
         }
         # spec: REQ-114
         warnings = [
+            # spec: REQ-370
+            f"{SOURCE_AND_EVIDENCE_DISCLOSURE}: "
             f"裏づけの節「{heading}」は {state} なので、対外の文面には出せない。"
             for heading, state in disclosure.items()
             if state.startswith("公開不可")
@@ -251,7 +255,7 @@ class OfferingService:
     ) -> Rejection | None:
         """改訂の入力を制約に当てる。通れば None を返し、通らなければ次の一手つきの拒否を返す。
 
-        見る順は、必須の欄、ID の形式と一意性、仮説の状態の語彙、束ねる機能の実在である。
+        見る順は、必須の欄、ID の形、ID の重なり、仮説の状態の語彙、束ねる機能の実在である。
         """
         missing = missing_required_fields(PACKAGE_TYPE_NAME, draft)
         if missing:
@@ -278,7 +282,7 @@ class OfferingService:
             if previous is None or identifier != previous.id
         }
         id_problem = id_rejection(
-            ID_FORMAT_AND_UNIQUENESS, REVISE_OPERATION, draft.id, labels
+            ID_FORMAT, ID_UNIQUENESS, REVISE_OPERATION, draft.id, labels
         )
         if id_problem is not None:
             return id_problem

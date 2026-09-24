@@ -287,6 +287,7 @@ ID を持つのは、指される側の 5 つの型です。職歴の枠・受�
 
 - 関係するファイル: `src/accord/services/consistency.py`
 - 検証手順: `uv run pytest tests/test_id_reference.py -k REQ_291`
+- status: superseded by REQ-364
 
 ## REQ-292
 もし正本の項目の ID が形に合わないなら、accord はその項目 1 件につき違反を 1 件挙げる。
@@ -329,6 +330,7 @@ ID を持つのは、指される側の 5 つの型です。職歴の枠・受�
 
 - 関係するファイル: `src/accord/services/consistency.py`
 - 検証手順: `uv run pytest tests/test_id_reference.py -k REQ_298`
+- status: superseded by REQ-366
 
 ## REQ-299
 正本の項目の見出しが書き換えられたとき、accord はその項目を ID で指している参照を違反にしない。
@@ -455,6 +457,30 @@ ID のラベルを読み替える設定で呼ばれたとき、accord は読み�
 
 - 関係するファイル: `src/accord/services/offering.py`
 - 検証手順: `uv run pytest tests/test_id_reference.py -k REQ_319`
+
+## REQ-364
+常に、accord は職歴の枠と受託案件と公開記録と機能とパッケージの ID を、正本全体で形式に当てる。
+
+- 関係するファイル: `src/accord/services/consistency.py`
+- 検証手順: `uv run pytest tests/test_id_reference.py -k REQ_364`
+
+## REQ-365
+常に、accord は職歴の枠と受託案件と公開記録と機能とパッケージの ID を、正本全体で一意性に当てる。
+
+- 関係するファイル: `src/accord/services/consistency.py`
+- 検証手順: `uv run pytest tests/test_id_reference.py -k REQ_365`
+
+## REQ-366
+もし設定に公開記録の置き場が無いなら、accord は公開記録の ID を形式の検査に入れない。
+
+- 関係するファイル: `src/accord/services/consistency.py`
+- 検証手順: `uv run pytest tests/test_id_reference.py -k REQ_366`
+
+## REQ-367
+もし設定に公開記録の置き場が無いなら、accord は公開記録の ID を一意性の検査に入れない。
+
+- 関係するファイル: `src/accord/services/consistency.py`
+- 検証手順: `uv run pytest tests/test_id_reference.py -k REQ_367`
 
 ## 未決の質問
 

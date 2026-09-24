@@ -308,6 +308,12 @@
 - 関係するファイル: `src/accord/services/offering.py`
 - 検証手順: `uv run pytest tests/test_offering.py -k REQ_321`
 
+## REQ-370
+もし登記する機能の裏づけの節が公開不可なら、accord は当たった制約の名前を警告に書く。
+
+- 関係するファイル: `src/accord/services/offering.py`
+- 検証手順: `uv run pytest tests/test_offering.py -k REQ_370`
+
 ## 未決の質問
 
 - 無し。

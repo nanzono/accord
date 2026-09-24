@@ -142,6 +142,12 @@
 - 関係するファイル: `README.md`
 - 検証手順: `uv run pytest tests/test_readme_startup.py -k REQ_361`
 
+## REQ-372
+常に、accord は説明書のルールの表に、型の正本に無い制約の名前を 1 列目に持つ行を置かない。
+
+- 関係するファイル: `README.md`、`src/accord/ontology.yaml`
+- 検証手順: `uv run pytest tests/test_readme_ontology.py -k REQ_372`
+
 ## 未決の質問
 
 - 数をどう書くかは、要件の文からは決まりません。いまの突き合わせは決まった 4 つの書き方で数を

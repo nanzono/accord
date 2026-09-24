@@ -70,6 +70,11 @@ QUOTED_CAPABILITY = "plan-from-sketches"
 # 設定の語の一覧に無い、仮説の状態。
 UNKNOWN_HYPOTHESIS_STATE = "だいたい実績あり"
 
+# 型の正本のルールの名前。断りと警告にそのまま出る。
+ID_FORMAT = "ID の形式"
+CAPABILITY_CATEGORY_VOCABULARY = "機能の分類の語彙"
+SOURCE_AND_EVIDENCE_DISCLOSURE = "出典と裏づけの節の公開可否"
+
 CONFIG_TEMPLATE = """[source]
 directory = "source"
 
@@ -310,6 +315,20 @@ def test_REQ_114_private_evidence_of_a_registered_capability_is_named_in_a_warni
     assert "出せない" in listed, listed
 
 
+def test_REQ_370_private_evidence_warning_names_the_rule(settings) -> None:
+    """公開不可の節を裏づけに登記すると、その節の警告の先頭に当たったルールの名前が付く。"""
+    _rewrite(settings.path_for("engagements"), *MAKE_PRIVATE)
+
+    accepted = OfferingService(settings).register_capability(
+        _record_evidence_draft(settings, evidence_sections=[PRIVATE_SECTION_ID])
+    )
+
+    assert accepted.accepted is True, accepted.model_dump()
+    private = [warning for warning in accepted.warnings if PRIVATE_SECTION_NAME in warning]
+    assert len(private) == 1, accepted.warnings
+    assert private[0].startswith(f"{SOURCE_AND_EVIDENCE_DISCLOSURE}: "), private[0]
+
+
 # ---------------------------------------------------------------- 登記の断り（必須の欄）
 
 
@@ -377,7 +396,7 @@ def test_REQ_122_category_rejection_names_the_constraint(sample_copy: Path) -> N
     """分類が設定の一覧に無いときの断りは、当たった制約の名前を返す。"""
     rejected, _ = _old_category_result(sample_copy)
 
-    assert _rejection_of(rejected).constraint == "機能の分類の列挙"
+    assert _rejection_of(rejected).constraint == CAPABILITY_CATEGORY_VOCABULARY
 
 
 def test_REQ_123_category_rejection_quotes_the_given_category(sample_copy: Path) -> None:
@@ -774,13 +793,13 @@ def test_REQ_320_only_the_first_broken_rule_is_returned_when_registering_a_capab
 
     # ID も形の外にすると、裏づけの節より先に見る ID の断りが返る。
     with_id = service.register_capability(draft(id=OUT_OF_FORMAT_ID))
-    assert _rejection_of(with_id).constraint == "ID の形式と一意性"
+    assert _rejection_of(with_id).constraint == ID_FORMAT
 
     # 分類も設定の節の外にすると、ID より先に見る分類の断りが返る。
     with_category = service.register_capability(
         draft(id=OUT_OF_FORMAT_ID, category=UNKNOWN_CATEGORY)
     )
-    assert _rejection_of(with_category).constraint == "機能の分類の列挙"
+    assert _rejection_of(with_category).constraint == CAPABILITY_CATEGORY_VOCABULARY
 
     # 必須の欄も欠くと、分類より先に見る必須の欄の断りが返る。
     with_missing = service.register_capability(
@@ -818,7 +837,7 @@ def test_REQ_321_only_the_first_broken_rule_is_returned_when_revising_a_package(
     with_id = service.revise_package(
         draft(id=OUT_OF_FORMAT_ID, hypothesis_state=UNKNOWN_HYPOTHESIS_STATE)
     )
-    assert _rejection_of(with_id).constraint == "ID の形式と一意性"
+    assert _rejection_of(with_id).constraint == ID_FORMAT
 
     # 必須の欄も欠くと、ID より先に見る必須の欄の断りが返る。
     with_missing = service.revise_package(

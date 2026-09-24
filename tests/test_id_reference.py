@@ -2,7 +2,7 @@
 
 見るのは 5 つ。指された値が読めないときの言い分けを 4 つの指し方（機能の裏づけの節・
 公開記録の由来の節・職務経歴書の台帳の出典の節・提示物の未反映の注記が指す節）ごとに確かめること、
-正本全体での ID の形式と一意性、見出しを書き換えても参照が切れないこと、材料の本文から ID の行が
+正本全体での ID の形式と ID の一意性、見出しを書き換えても参照が切れないこと、材料の本文から ID の行が
 落ちること、そして書きの操作が ID を書き込みの瞬間に断ることである。型の正本が 5 つの型に必須の
 ID の欄を持つことは、型の正本の欄の定義なので tests/test_ontology.py が見る。
 
@@ -41,10 +41,11 @@ from accord.vocabulary.settings import Settings, load_settings
 from conftest import source_digest
 
 EVIDENCE_SECTION_EXISTS = "裏づけ節名の実在"
-ID_FORMAT_AND_UNIQUENESS = "ID の形式と一意性"
+ID_FORMAT = "ID の形式"
+ID_UNIQUENESS = "ID の一意性"
 ORIGIN_SECTION_EXISTS = "由来の節の実在"
 
-# 整合の検査の操作の名前。ID の形式と一意性を執行する 4 つのうち、書きの操作でないのはこれだけ。
+# 整合の検査の操作の名前。ID の形式と ID の一意性を執行する 4 つのうち、書きの操作でないのはこれだけ。
 INSPECT_OPERATION = "check_consistency"
 
 # 同梱のサンプルにある ID と、その表示名。
@@ -124,6 +125,17 @@ OUT_OF_FORMAT_BY_TYPE = {
     "packages": ("- ID: data-platform-setup", "- ID: Data_Platform_Setup"),
 }
 
+# 5 つの型それぞれの ID を 1 つずつ、別の型の項目がすでに使っている ID に書き換える組。
+# 置き場の鍵・書き換える前の 1 行・書き換えた後の 1 行。重なる相手は別の置き場にあるので、
+# 書き換えた置き場に出る重なりの違反は 1 件になる。
+DUPLICATE_BY_TYPE = {
+    "career": ("- ID: agency-employee", "- ID: yukinoha-quality"),
+    "engagements": ("- ID: yukinoha-quality", "- ID: agency-employee"),
+    "public_records": ("- ID: magazine-column-data", "- ID: yukinoha-quality"),
+    "capabilities": ("| collect-sales-data |", "| yukinoha-quality |"),
+    "packages": ("- ID: data-platform-setup", "- ID: yukinoha-quality"),
+}
+
 # 書きの操作に渡す ID の 2 通り。形の外の値と、別の項目がすでに使っている値。
 OUT_OF_FORMAT_ID = "Collect_Milestones"
 TAKEN_ID = ENGAGEMENT_ID
@@ -181,9 +193,14 @@ def _one(violations: list):
     return violations[0]
 
 
-def _id_violations(settings: Settings) -> list:
-    """写しの正本に検査を当て、ID の形式と一意性の違反だけを取り出す。"""
-    return _violations(settings, lambda item: item.constraint == ID_FORMAT_AND_UNIQUENESS)
+def _id_format_violations(settings: Settings) -> list:
+    """写しの正本に検査を当て、ID の形式の違反だけを取り出す。"""
+    return _violations(settings, lambda item: item.constraint == ID_FORMAT)
+
+
+def _id_uniqueness_violations(settings: Settings) -> list:
+    """写しの正本に検査を当て、ID の一意性の違反だけを取り出す。"""
+    return _violations(settings, lambda item: item.constraint == ID_UNIQUENESS)
 
 
 def _labels(settings: Settings) -> dict[str, str]:
@@ -755,23 +772,23 @@ def test_REQ_290_a_dangling_id_names_the_candidate_labels(settings) -> None:
     assert PUBLISHING_HEADING in violation.expected, violation.expected
 
 
-# ---------------------------------------------------------------- ID の形式と一意性
+# ---------------------------------------------------------------- ID の形式と ID の一意性
 
 
 def _out_of_format_id_violations(settings: Settings) -> list:
-    """公開記録 1 件の ID を形の外の値に書き換えて、ID の違反を返す。"""
+    """公開記録 1 件の ID を形の外の値に書き換えて、ID の形式の違反を返す。"""
     _rewrite(settings.path_for("public_records"), DUPLICATE_ID[0], OUT_OF_FORMAT_ID_LINE)
-    return _id_violations(settings)
+    return _id_format_violations(settings)
 
 
 def _duplicate_id_violations(settings: Settings) -> list:
-    """公開記録 1 件の ID を、もう 1 件と同じ値に書き換えて、ID の違反を返す。"""
+    """公開記録 1 件の ID を、もう 1 件と同じ値に書き換えて、ID の一意性の違反を返す。"""
     _rewrite(settings.path_for("public_records"), *DUPLICATE_ID)
-    return _id_violations(settings)
+    return _id_uniqueness_violations(settings)
 
 
-def test_REQ_291_the_id_check_covers_five_types(settings) -> None:
-    """5 つの型のどの ID を崩しても、その置き場を名指しした違反が挙がる。
+def test_REQ_364_the_id_format_check_covers_five_types(settings) -> None:
+    """5 つの型のどの ID を形の外に崩しても、その置き場を名指しした形式の違反が挙がる。
 
     崩すのは 1 つの型ずつで、崩した後は写しを元に戻す。どれか 1 つの型を検査から外しても、
     その型の回で違反が 0 件になって落ちる。
@@ -783,7 +800,28 @@ def test_REQ_291_the_id_check_covers_five_types(settings) -> None:
         assert before in text, key
         path.write_text(text.replace(before, after, 1), encoding="utf-8")
 
-        violations = [item for item in _id_violations(copy) if item.file == copy.files[key]]
+        violations = [item for item in _id_format_violations(copy) if item.file == copy.files[key]]
+        assert len(violations) == 1, (key, [item.model_dump() for item in violations])
+
+        path.write_text(text, encoding="utf-8")
+
+
+def test_REQ_365_the_id_uniqueness_check_covers_five_types(settings) -> None:
+    """5 つの型のどの ID を別の型の ID と重ねても、その置き場を名指しした一意性の違反が挙がる。
+
+    重ねるのは 1 つの型ずつで、重ねた後は写しを元に戻す。どれか 1 つの型を検査から外しても、
+    その型の回で違反が 0 件になって落ちる。
+    """
+    for key, (before, after) in DUPLICATE_BY_TYPE.items():
+        copy = load_settings(settings.config_path)
+        path = copy.path_for(key)
+        text = path.read_text(encoding="utf-8")
+        assert before in text, key
+        path.write_text(text.replace(before, after, 1), encoding="utf-8")
+
+        violations = [
+            item for item in _id_uniqueness_violations(copy) if item.file == copy.files[key]
+        ]
         assert len(violations) == 1, (key, [item.model_dump() for item in violations])
 
         path.write_text(text, encoding="utf-8")
@@ -798,7 +836,7 @@ def test_REQ_292_an_id_out_of_format_raises_one_violation(settings) -> None:
         assert DUPLICATE_ID[0] in text, label
         path.write_text(text.replace(DUPLICATE_ID[0], f"- ID: {written}", 1), encoding="utf-8")
 
-        violations = _id_violations(copy)
+        violations = _id_format_violations(copy)
         assert len(violations) == 1, (label, [item.model_dump() for item in violations])
         assert "形に合わない" in violations[0].expected, label
 
@@ -850,12 +888,36 @@ def test_REQ_297_a_duplicate_id_says_to_rename_one_side(settings) -> None:
         assert "指している側も同じ値に直す" in violation.expected, violation.expected
 
 
-def test_REQ_298_public_records_are_left_out_when_the_file_is_unset(settings) -> None:
-    """設定に公開記録の置き場が無ければ、公開記録の ID は形式と一意性の検査に入らない。"""
+def test_REQ_366_public_records_are_left_out_of_the_format_check_when_the_file_is_unset(
+    settings,
+) -> None:
+    """設定に公開記録の置き場が無ければ、公開記録の ID は形式の検査に入らない。
+
+    置き場があるときは同じ書き換えで形式の違反が出ることを先に確かめ、見ていないだけで
+    合格しているのではないことを押さえる。
+    """
     _rewrite(settings.path_for("public_records"), DUPLICATE_ID[0], OUT_OF_FORMAT_ID_LINE)
+    assert _id_format_violations(settings), "置き場があるときに形式の違反が出ていない"
     plain = _unreadable_sources(settings, public_records=True)
 
-    violations = _id_violations(plain)
+    violations = _id_format_violations(plain)
+
+    assert [item.model_dump() for item in violations] == []
+
+
+def test_REQ_367_public_records_are_left_out_of_the_uniqueness_check_when_the_file_is_unset(
+    settings,
+) -> None:
+    """設定に公開記録の置き場が無ければ、公開記録の ID は一意性の検査に入らない。
+
+    置き場があるときは同じ書き換えで重なりの違反が出ることを先に確かめ、見ていないだけで
+    合格しているのではないことを押さえる。
+    """
+    _rewrite(settings.path_for("public_records"), *DUPLICATE_ID)
+    assert _id_uniqueness_violations(settings), "置き場があるときに重なりの違反が出ていない"
+    plain = _unreadable_sources(settings, public_records=True)
+
+    violations = _id_uniqueness_violations(plain)
 
     assert [item.model_dump() for item in violations] == []
 
@@ -964,7 +1026,7 @@ def test_REQ_306_an_id_out_of_format_rejection_names_the_constraint(settings, op
     """形の外の ID の断りは、当たった制約の名前を返す。"""
     rejection = _id_rejection(settings, operation, OUT_OF_FORMAT_ID)
 
-    assert rejection.constraint == ID_FORMAT_AND_UNIQUENESS, operation
+    assert rejection.constraint == ID_FORMAT, operation
 
 
 @pytest.mark.parametrize("operation", sorted(ID_WRITE_OPERATIONS))
@@ -1029,7 +1091,7 @@ def test_REQ_313_a_taken_id_rejection_names_the_constraint(settings, operation: 
     """すでに使われている ID の断りは、当たった制約の名前を返す。"""
     rejection = _id_rejection(settings, operation, TAKEN_ID)
 
-    assert rejection.constraint == ID_FORMAT_AND_UNIQUENESS, operation
+    assert rejection.constraint == ID_UNIQUENESS, operation
 
 
 @pytest.mark.parametrize("operation", sorted(ID_WRITE_OPERATIONS))
@@ -1088,8 +1150,9 @@ def test_the_id_rejection_table_covers_every_write_operation() -> None:
     表を手で書いたまま、型の正本の側で操作が増えても気づけない、という穴を塞ぐ。操作が一覧から
     消えても、表から 1 行消えても、このテストが落ちる。
     """
-    constraint = next(item for item in CONSTRAINTS if item.name == ID_FORMAT_AND_UNIQUENESS)
+    for name in (ID_FORMAT, ID_UNIQUENESS):
+        constraint = next(item for item in CONSTRAINTS if item.name == name)
 
-    enforced = set(constraint.enforced_by) - {INSPECT_OPERATION}
+        enforced = set(constraint.enforced_by) - {INSPECT_OPERATION}
 
-    assert set(ID_WRITE_OPERATIONS) == enforced, sorted(enforced)
+        assert set(ID_WRITE_OPERATIONS) == enforced, (name, sorted(enforced))

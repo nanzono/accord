@@ -11,7 +11,9 @@ tests/test_id_reference.py にあったものをここへ移した（型の正�
 
 from __future__ import annotations
 
+import ast
 import asyncio
+import inspect
 import json
 import subprocess
 import sys
@@ -34,13 +36,17 @@ CONSTRAINTS_PY = REPO_ROOT / "src" / "accord" / "models" / "constraints.py"
 EXPECTED_TYPES = 8
 EXPECTED_RELATIONS = 8
 EXPECTED_RELATION_EDGES = 11
-EXPECTED_CONSTRAINTS = 12
+EXPECTED_CONSTRAINTS = 16
 
 # ID の欄を必須で持つ、指される側の 5 つの型。
 ID_BEARING_TYPES = ("CareerFrame", "Engagement", "PublicRecord", "Capability", "Package")
 
 # ID の形と一意性を守らせる制約の名前。
-ID_FORMAT_AND_UNIQUENESS = "ID の形式と一意性"
+ID_FORMAT = "ID の形式"
+ID_UNIQUENESS = "ID の一意性"
+
+# サービスの実装が、制約の名前を型の正本の宣言から引くときの辞書の名前。
+CONSTRAINT_LOOKUP = "CONSTRAINT_BY_NAME"
 
 
 def _resource_document(settings) -> dict:
@@ -55,11 +61,32 @@ def _services_source() -> str:
     return "\n".join(path.read_text(encoding="utf-8") for path in sorted(SERVICES_DIR.glob("*.py")))
 
 
+def _names_pulled_from_the_declaration(path: Path) -> set[str]:
+    """ファイルの中で、制約の名前を型の正本の宣言から引いている箇所の名前をすべて返す。
+
+    見るのは `CONSTRAINT_BY_NAME["名前"]` の形の式だけで、構文木から拾う。コメントや文字列の中に
+    名前が書かれているだけでは拾わない（名前を変えたあとに古い名前がコメントに残っていても、
+    引いていることにはならない）。
+    """
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    pulled: set[str] = set()
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Subscript)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == CONSTRAINT_LOOKUP
+            and isinstance(node.slice, ast.Constant)
+            and isinstance(node.slice.value, str)
+        ):
+            pulled.add(node.slice.value)
+    return pulled
+
+
 # ---------------------------------------------------------------- 型の正本の欄の定義
 
 
 def test_REQ_326_five_types_require_an_id_field() -> None:
-    """指される側の 5 つの型が、必須の text の欄 id を持ち、制約は 12 件ある。"""
+    """指される側の 5 つの型が、必須の text の欄 id を持ち、制約は 16 件ある。"""
     ontology = load_ontology()
 
     for name in ID_BEARING_TYPES:
@@ -72,7 +99,8 @@ def test_REQ_326_five_types_require_an_id_field() -> None:
         assert field.label == "ID", name
 
     assert len(ontology.constraints) == EXPECTED_CONSTRAINTS
-    assert any(item.name == ID_FORMAT_AND_UNIQUENESS for item in ontology.constraints)
+    assert any(item.name == ID_FORMAT for item in ontology.constraints)
+    assert any(item.name == ID_UNIQUENESS for item in ontology.constraints)
 
 
 # ---------------------------------------------------------------- 資源が返すもの
@@ -93,7 +121,7 @@ def test_REQ_328_the_resource_returns_every_relation(settings) -> None:
 
 
 def test_REQ_329_the_resource_returns_every_constraint(settings) -> None:
-    """資源 accord://ontology が、正本の制約をすべて返す（いまは 12 件）。"""
+    """資源 accord://ontology が、正本の制約をすべて返す（いまは 16 件）。"""
     document = _resource_document(settings)
 
     assert len(document["constraints"]) == EXPECTED_CONSTRAINTS
@@ -151,8 +179,11 @@ def test_REQ_332_a_stale_generated_file_fails_the_check(tmp_path: Path) -> None:
 
 
 def test_REQ_333_every_rule_is_enforced_where_it_is_declared() -> None:
-    """正本が挙げるルールのそれぞれが、執行するサービスの実装に名前で現れる。
+    """正本が挙げるルールのそれぞれを、執行するサービスの実装が型の正本の宣言から名前で引いている。
 
+    ルールを執行する関数（効かせる先の一覧が結ぶもの）の置かれたファイルごとに、そのファイルが
+    `CONSTRAINT_BY_NAME["名前"]` の式でそのルールの名前を引いているかを見る。名前が本文のどこかに
+    部分一致で現れるかだけを見ると、古い名前がコメントに残っているだけで合格してしまう。
     執行する操作を持たない制約（モジュールの分け方で守る「逆参照を書かない」）は、
     実行時のコードを持たないので対象から外す。
     """
@@ -163,6 +194,21 @@ def test_REQ_333_every_rule_is_enforced_where_it_is_declared() -> None:
         if constraint.enforced_by and constraint.name not in sources
     ]
     assert unimplemented == []
+
+    not_pulled = []
+    for constraint in CONSTRAINTS:
+        if not constraint.enforced_by:
+            continue
+        files = {
+            Path(inspect.getsourcefile(function)).resolve()
+            for operation in constraint.enforced_by
+            for function in enforcement_for(constraint.name).get(operation, ())
+        }
+        assert files, f"{constraint.name} を執行する関数が効かせる先の一覧に無い"
+        for path in sorted(files):
+            if constraint.name not in _names_pulled_from_the_declaration(path):
+                not_pulled.append(f"{constraint.name} / {path.name}")
+    assert not_pulled == []
 
 
 def test_REQ_334_every_declared_operation_has_a_way_to_enforce() -> None:

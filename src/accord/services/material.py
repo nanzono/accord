@@ -4,7 +4,7 @@
 返すのは、適用される決め、看板のパッケージ、束ねる機能、各機能の裏づけの節、裏づけになっている
 公開記録、媒体の規約、禁じた言い回し、そして警告の一覧である。
 
-この操作が執行する制約は 1 つ、「提出物に含まれる事実は公開可の節に限る」である。
+この操作が執行する制約は 1 つ、「出典と裏づけの節の公開可否」である。対外の文面に書く事実を、公開可の節に限る。
 公開不可の節は材料に載せず、落としたことと節の名前を警告に書く。落としたことを黙っていると、
 受け取った側は「その節は無い」と読んで、別の裏づけを探しに正本を開く羽目になるからである。
 
@@ -31,7 +31,7 @@ from accord.vocabulary.settings import PRESENTATION_RULES_KEY, Settings
 
 # 制約は名前で参照する。名前を正本（ontology.yaml）で変えたら、ここで鍵が見つからず落ちる。
 CONSTRAINT_BY_NAME = {constraint.name: constraint for constraint in CONSTRAINTS}
-NOTE_AND_SOURCE_SECTION = CONSTRAINT_BY_NAME["注記と出典の節の実在・公開可否"].name
+SOURCE_AND_EVIDENCE_DISCLOSURE = CONSTRAINT_BY_NAME["出典と裏づけの節の公開可否"].name
 
 # 操作の名前。次の一手にそのまま載せる。
 ASSEMBLE_OPERATION = "assemble_material"
@@ -222,7 +222,8 @@ class MaterialService:
                 if snapshot.is_private(section_id):
                     # spec: REQ-094
                     warnings.append(
-                        f"{NOTE_AND_SOURCE_SECTION}: 裏づけの節「{heading}」（{section_id}）は"
+                        # spec: REQ-371
+                        f"{SOURCE_AND_EVIDENCE_DISCLOSURE}: 裏づけの節「{heading}」（{section_id}）は"
                         f"公開可否が「{disclosure}」なので、材料から落とした。"
                         "この節の中身は文面に書かない。"
                         "別の公開可の節で裏づけるか、公開可否そのものを先に直す。"

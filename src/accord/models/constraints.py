@@ -1,7 +1,7 @@
 # 生成物。直すなら src/accord/ontology.yaml を直す
 """accord が執行する制約の宣言。
 
-制約は 12 つで、正本 src/accord/ontology.yaml が
+制約は 16 つで、正本 src/accord/ontology.yaml が
 挙げる制約に 1 対 1 で対応する。サービスの実装も資源の定義も、この 1 か所を名前で参照する。
 同じ制約が、書きの操作では拒否、読みの操作では警告、検査の操作では一覧として現れる。
 """
@@ -46,11 +46,18 @@ CONSTRAINTS: tuple[Constraint, ...] = (
         next_action="提示物のファイル名と、いまの看板のパッケージ名を返す。",
     ),
     Constraint(
-        name="ID の形式と一意性",
-        watches="指される側の 5 つの型（職歴の枠・受託案件・公開記録・機能・パッケージ）の ID が、英小文字・数字・ハイフンで 3〜40 字・先頭と末尾は英数字の形に合い、正本全体で重ならないか。",
+        name="ID の形式",
+        watches="指される側の 5 つの型（職歴の枠・受託案件・公開記録・機能・パッケージ）の項目が自分に付ける ID が、英小文字・数字・ハイフンで 3〜40 字・先頭と末尾は英数字の形に合うか。",
         enforced_by=("check_consistency", "register_capability", "revise_package", "register_public_record"),
         appears_as="拒否",
-        next_action="形式に合わない ID は直し方を、重なった ID は同じ ID を持つ場所を両方返す。",
+        next_action="形式に合わない ID の直し方を返す。",
+    ),
+    Constraint(
+        name="ID の一意性",
+        watches="指される側の 5 つの型の項目が自分に付ける ID が、正本全体で 2 つ以上の項目に付いていないか。形に合わない ID は、形を直すまで重なりを見ない。",
+        enforced_by=("check_consistency", "register_capability", "revise_package", "register_public_record"),
+        appears_as="拒否",
+        next_action="同じ ID を持つ場所を両方返す。",
     ),
     Constraint(
         name="裏づけ節名の実在",
@@ -67,11 +74,18 @@ CONSTRAINTS: tuple[Constraint, ...] = (
         next_action="近い機能の ID の候補と、先に register_capability を呼ぶことを返す。",
     ),
     Constraint(
-        name="注記と出典の節の実在・公開可否",
-        watches="提示物の未反映の注記が指す ID と、職務経歴書の台帳の出典の節の ID が実在し、公開可の節に限るか。",
-        enforced_by=("check_consistency", "assemble_material"),
+        name="注記と出典の節の実在",
+        watches="提示物の未反映の注記が指す ID と、職務経歴書の台帳の出典の節の ID が、受託案件の ID として実在するか。",
+        enforced_by=("check_consistency",),
         appears_as="検出",
-        next_action="実在する節の ID の候補を返す。公開不可の節は材料から落とし、落とした節の名前を警告に書く。",
+        next_action="実在する受託案件の ID の候補を返す。",
+    ),
+    Constraint(
+        name="出典と裏づけの節の公開可否",
+        watches="職務経歴書の台帳の出典の節と、機能の裏づけの節が、公開可の節か。未反映の注記が指す節は見ない。",
+        enforced_by=("check_consistency", "assemble_material", "register_capability"),
+        appears_as="検出",
+        next_action="公開可の節の ID の候補を返す。材料からは公開不可の節を落とし、落とした節の名前を警告に書く。",
     ),
     Constraint(
         name="公開記録の必須欄",
@@ -81,11 +95,25 @@ CONSTRAINTS: tuple[Constraint, ...] = (
         next_action="欠けた欄の名前と、その欄の書き方の例を返す。",
     ),
     Constraint(
-        name="公開記録の種類と役割の語彙",
-        watches="公開記録の種類と役割が、設定ファイルが持つ語の一覧にあるか。",
+        name="公開記録の種類の語彙",
+        watches="公開記録の種類が、設定ファイルが持つ種類の語の一覧にあるか。",
         enforced_by=("register_public_record", "check_consistency"),
         appears_as="拒否",
-        next_action="設定が持つ語の一覧を返す。",
+        next_action="設定が持つ種類の語の一覧を返す。",
+    ),
+    Constraint(
+        name="公開記録の役割の語彙",
+        watches="公開記録の役割が、設定ファイルが持つ役割の語の一覧にあるか。",
+        enforced_by=("register_public_record", "check_consistency"),
+        appears_as="拒否",
+        next_action="設定が持つ役割の語の一覧を返す。",
+    ),
+    Constraint(
+        name="機能の分類の語彙",
+        watches="機能の分類（機能の台帳の節の見出し）が、設定ファイルが持つ分類の語の一覧にあるか。",
+        enforced_by=("register_capability", "check_consistency"),
+        appears_as="拒否",
+        next_action="設定が持つ分類の語の一覧を返す。",
     ),
     Constraint(
         name="由来の節の実在",

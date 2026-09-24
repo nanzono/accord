@@ -30,6 +30,25 @@ MAKE_PRIVATE = (
     "- 出所: 契約書と、月次の議事録（2025-04 以降）",
 )
 
+# 公開不可の裏づけの節を落としたときの警告の先頭に付く、型の正本のルールの名前。
+SOURCE_AND_EVIDENCE_DISCLOSURE = "出典と裏づけの節の公開可否"
+
+# 看板の束の裏づけになっていない受託案件を公開不可にし、提示物の未反映の注記でその節を指す。
+# 注記が指す節の本文にしか出てこない言い回しが、材料のどこにも混ざらないことを見るのに使う。
+# 看板の裏づけになっている節を選ぶと、材料が注記の指す先を読むように変わっても、裏づけの側で
+# 同じ ID を 1 回だけにする扱いに吸われて、材料の中身が変わらず気づけない。
+NOTE_TARGET_ID = "teramina-delivery"
+NOTE_TARGET_BODY_PHRASE = "全社の数字を出すのに毎月 3 日かかっていた"
+MAKE_NOTE_TARGET_PRIVATE = (
+    "- 公開可否: 公開可\n- 出所: 契約書と、引き渡しの報告書（2022-11）",
+    "- 公開可否: 公開不可（先方の求めで、この案件は対外の文面に出さない）\n"
+    "- 出所: 契約書と、引き渡しの報告書（2022-11）",
+)
+ADD_PENDING_NOTE = (
+    "- 未反映の注記: なし",
+    f"- 未反映の注記: {NOTE_TARGET_ID} — 品質記録の集約の続きを書き足す",
+)
+
 # 見せ方の正本が持つ、媒体の規約と禁じた言い回しの実例。
 CHANNEL_RULE_PHRASE = "400 字以内"
 FORBIDDEN_PHRASE = "フルスタック"
@@ -213,6 +232,46 @@ def test_REQ_094_dropping_a_private_section_is_named_in_a_warning(settings) -> N
     listed = "\n".join(material.warnings)
     assert PRIVATE_SECTION in listed, listed
     assert "落とした" in listed, listed
+
+
+def test_REQ_371_dropping_a_private_section_warning_names_the_rule(settings) -> None:
+    """公開不可の節を落とした警告の先頭に、当たったルールの名前が付く。"""
+    _rewrite(settings.path_for("engagements"), *MAKE_PRIVATE)
+
+    material = _material(settings)
+
+    dropped = [warning for warning in material.warnings if PRIVATE_SECTION in warning]
+    assert len(dropped) == 1, material.warnings
+    assert dropped[0].startswith(f"{SOURCE_AND_EVIDENCE_DISCLOSURE}: "), dropped[0]
+
+
+def test_REQ_373_pending_notes_are_not_used_as_material(settings) -> None:
+    """提示物の未反映の注記が公開不可の節を指していても、その節は材料の中身に入らない。
+
+    注記を足す前と後で材料を取り出して比べる。裏づけの本文と公開記録は同じで、警告の一覧にも
+    注記が指す節の本文は混ざらない。注記の行そのものが警告に出る経路（整合の検査の違反を
+    警告に載せる経路）はあるので、警告の行数が変わること自体は見ない。
+    """
+    # 題材の前提: 公開可のままでも、注記が指す節は看板の裏づけに入っていない。
+    public = _material(settings)
+    assert NOTE_TARGET_ID not in [entry["ID"] for entry in public.evidence], public.evidence
+
+    _rewrite(settings.path_for("engagements"), *MAKE_NOTE_TARGET_PRIVATE)
+    before = _material(settings)
+    assert NOTE_TARGET_ID not in [entry["ID"] for entry in before.evidence], before.evidence
+
+    profile = settings.path_for("presentations") / CHANNEL / "profile.md"
+    _rewrite(profile, *ADD_PENDING_NOTE)
+    after = _material(settings)
+
+    assert after.evidence == before.evidence
+    assert [record.model_dump() for record in after.public_records] == [
+        record.model_dump() for record in before.public_records
+    ]
+    bodies = "\n".join(entry["本文"] for entry in after.evidence)
+    assert NOTE_TARGET_BODY_PHRASE not in bodies
+    listed = "\n".join(after.warnings)
+    assert NOTE_TARGET_BODY_PHRASE not in listed, listed
 
 
 # ---------------------------------------------------------------- 材料に入らなかったものの断り

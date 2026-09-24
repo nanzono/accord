@@ -36,11 +36,13 @@ from accord.vocabulary.settings import (
 # 制約は名前で参照する。名前を正本（ontology.yaml）で変えたら、ここで鍵が見つからず落ちる。
 CONSTRAINT_BY_NAME = {constraint.name: constraint for constraint in CONSTRAINTS}
 PUBLIC_RECORD_REQUIRED_FIELDS = CONSTRAINT_BY_NAME["公開記録の必須欄"].name
-PUBLIC_RECORD_VOCABULARY = CONSTRAINT_BY_NAME["公開記録の種類と役割の語彙"].name
+PUBLIC_RECORD_KIND_VOCABULARY = CONSTRAINT_BY_NAME["公開記録の種類の語彙"].name
+PUBLIC_RECORD_ROLE_VOCABULARY = CONSTRAINT_BY_NAME["公開記録の役割の語彙"].name
 ORIGIN_SECTION_EXISTS = CONSTRAINT_BY_NAME["由来の節の実在"].name
-ID_FORMAT_AND_UNIQUENESS = CONSTRAINT_BY_NAME["ID の形式と一意性"].name
+ID_FORMAT = CONSTRAINT_BY_NAME["ID の形式"].name
+ID_UNIQUENESS = CONSTRAINT_BY_NAME["ID の一意性"].name
 
-# 次の 1 つは制約 12 つではなく、設定に置き場が書かれているかどうかである。
+# 次の 1 つは型の正本の制約ではなく、設定に置き場が書かれているかどうかである。
 # 公開記録の置き場は書かなくてよい鍵なので、書いていない正本では登記そのものが成り立たない。
 PUBLIC_RECORDS_FILE_SETTING = "公開記録の置き場の設定"
 
@@ -86,7 +88,7 @@ class PublicRecordService:
     def _rejection(self, draft: PublicRecordDraft) -> Rejection | None:
         """入力を制約に当てる。通れば None を返し、通らなければ次の一手つきの拒否を返す。
 
-        見る順は、置き場が設定にあるか、必須の欄、ID の形式と一意性、種類の語彙、役割の語彙、
+        見る順は、置き場が設定にあるか、必須の欄、ID の形、ID の重なり、種類の語彙、役割の語彙、
         由来の節の実在である。1 つ目に当たった時点で返すので、正本は 1 バイトも変わらない。
         """
         # spec: REQ-214
@@ -118,7 +120,11 @@ class PublicRecordService:
 
         snapshot: SourceSnapshot = self.repository.load()
         id_problem = id_rejection(
-            ID_FORMAT_AND_UNIQUENESS, REGISTER_OPERATION, str(draft.id or ""), snapshot.labels()
+            ID_FORMAT,
+            ID_UNIQUENESS,
+            REGISTER_OPERATION,
+            str(draft.id or ""),
+            snapshot.labels(),
         )
         if id_problem is not None:
             return id_problem
@@ -153,18 +159,33 @@ class PublicRecordService:
         )
 
     def _vocabulary_rejection(self, draft: PublicRecordDraft) -> Rejection | None:
-        """種類と役割が、設定の語の一覧にあるかを見る。種類を先に見る。"""
-        for label, value, words, key in (
+        """種類と役割が、設定の語の一覧にあるかを見る。種類を先に見る。
+
+        種類と役割は別のルールなので、外れた側のルールの名前を断りに入れる。
+        """
+        for constraint, label, value, words, key in (
             # spec: REQ-225
-            ("種類", draft.kind, self.settings.public_record_kinds, PUBLIC_RECORD_KINDS_KEY),
+            (
+                PUBLIC_RECORD_KIND_VOCABULARY,
+                "種類",
+                draft.kind,
+                self.settings.public_record_kinds,
+                PUBLIC_RECORD_KINDS_KEY,
+            ),
             # spec: REQ-231
-            ("役割", draft.role, self.settings.public_record_roles, PUBLIC_RECORD_ROLES_KEY),
+            (
+                PUBLIC_RECORD_ROLE_VOCABULARY,
+                "役割",
+                draft.role,
+                self.settings.public_record_roles,
+                PUBLIC_RECORD_ROLES_KEY,
+            ),
         ):
             if value in words:
                 continue
             return Rejection(
                 # spec: REQ-226
-                constraint=PUBLIC_RECORD_VOCABULARY,
+                constraint=constraint,
                 reason=(
                     # spec: REQ-227
                     f"{label}「{value}」は、設定ファイル {self.settings.config_path.name} の "

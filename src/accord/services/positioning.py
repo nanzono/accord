@@ -57,7 +57,7 @@ POSITIONING_REQUIRED_FIELDS = CONSTRAINT_BY_NAME["決めの必須欄"].name
 PACKAGE_FRESHNESS = CONSTRAINT_BY_NAME["パッケージ定義の鮮度"].name
 OFFERING_CLAIM_MATCHES = CONSTRAINT_BY_NAME["提示物の宣言と看板の一致"].name
 
-# 次の 2 つは制約 12 つではなく、型 Positioning の欄の定義である（適用範囲は媒体の名前か「全体」、
+# 次の 2 つは型の正本の制約ではなく、型 Positioning の欄の定義である（適用範囲は媒体の名前か「全体」、
 # 前面に出す束はパッケージ定義に実在する ID に限る）。選べる媒体の名前は設定が持つ。
 POSITIONING_SCOPE_ENUM = "適用範囲の列挙"
 HEADLINE_PACKAGE_EXISTS = "前面に出す束の実在"

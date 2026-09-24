@@ -242,6 +242,7 @@ URL を持たない公開記録だけが正本にあるとき、accord は提示
 
 - 関係するファイル: `src/accord/services/consistency.py`
 - 検証手順: `uv run pytest tests/test_consistency.py -k REQ_039`
+- status: superseded by REQ-368
 
 ## REQ-040
 もし機能の台帳に、設定の語の一覧に無い見出しの節があるなら、accord はその節の機能を、設定の分類の語を候補にした違反として挙げる。
@@ -272,12 +273,37 @@ URL を持たない公開記録だけが正本にあるとき、accord は提示
 
 - 関係するファイル: `src/accord/services/consistency.py`
 - 検証手順: `uv run pytest tests/test_consistency.py -k REQ_044`
+- status: superseded by REQ-362
 
 ## REQ-045
 もし同じ提示物が、正本に無い同じ URL を 2 回載せているなら、accord はその URL の違反を 1 件だけ挙げる。
 
 - 関係するファイル: `src/accord/repository/markdown_repository.py`
 - 検証手順: `uv run pytest tests/test_consistency.py -k REQ_045`
+
+## REQ-362
+範囲を絞って呼ばれたとき、accord は ID の形式を正本全体で検査する。
+
+- 関係するファイル: `src/accord/services/consistency.py`
+- 検証手順: `uv run pytest tests/test_consistency.py -k REQ_362`
+
+## REQ-363
+範囲を絞って呼ばれたとき、accord は ID の一意性を正本全体で検査する。
+
+- 関係するファイル: `src/accord/services/consistency.py`
+- 検証手順: `uv run pytest tests/test_consistency.py -k REQ_363`
+
+## REQ-368
+もし公開記録の種類に、設定の種類の語の一覧に無い語が書かれているなら、accord は設定の種類の語の一覧を候補にした違反を 1 件挙げる。
+
+- 関係するファイル: `src/accord/services/consistency.py`
+- 検証手順: `uv run pytest tests/test_consistency.py -k REQ_368`
+
+## REQ-369
+もし公開記録の役割に、設定の役割の語の一覧に無い語が書かれているなら、accord は設定の役割の語の一覧を候補にした違反を 1 件挙げる。
+
+- 関係するファイル: `src/accord/services/consistency.py`
+- 検証手順: `uv run pytest tests/test_consistency.py -k REQ_369`
 
 ## 未決の質問
 

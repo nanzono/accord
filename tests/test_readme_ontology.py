@@ -30,6 +30,14 @@ COUNT_PATTERNS = {
     "ルール": r"ルール (\d+) つ",
 }
 
+# 節の中に 2 か所以上書くことがあり、すべてを拾って正本の数と比べる数の書き方。
+# 冒頭の段落の「ルール N つ」と、ルールの表の前の「ルール N つは次のとおり」の 2 か所がある。
+# 最初の 1 か所だけを見ると、2 か所目が古い数のまま残っても気づけない。
+EVERY_OCCURRENCE_KEYS = ("ルール",)
+
+# ルールの表の見出しの行の 1 列目の書き出し。型の表と見分けるのに使う。
+RULE_TABLE_HEADER_PREFIX = "ルール"
+
 # Mermaid のノードの宣言 1 行。例: Positioning["売り方の決め"]
 NODE_PATTERN = re.compile(r'^\s*(\w+)\["([^"]+)"\]\s*$', re.MULTILINE)
 
@@ -40,7 +48,7 @@ EDGE_PATTERN = re.compile(r"^\s*(\w+)\s*-->\|([^|]+)\|\s*(\w+)\s*$", re.MULTILIN
 ALL_COUNT_KEYS = tuple(COUNT_PATTERNS)
 NODE_ASPECTS = ("one_diagram", "missing_nodes", "unknown_nodes", "labels")
 EDGE_ASPECTS = ("missing_edges", "unknown_edges")
-RULE_TABLE_ASPECTS = ("rows", "appears_as")
+RULE_TABLE_ASPECTS = ("rows", "appears_as", "unknown_rows")
 SVG_ASPECTS = ("type_labels", "relation_names")
 
 
@@ -94,6 +102,35 @@ def _table_rows(section_text: str) -> list[list[str]]:
     return rows
 
 
+def _rule_table_rows(section_text: str) -> list[list[str]] | None:
+    """節の文面から、ルールの表のデータ行（見出しの行と区切り行を除く）を返す。
+
+    ルールの表は、見出しの行の 1 列目が「ルール」で始まる表である。見つからなければ None を返す。
+    型の表の行を混ぜないので、1 列目が制約の名前でない行を「正本に無い名前の行」として拾える。
+    """
+    tables: list[list[list[str]]] = []
+    current: list[list[str]] = []
+    for line in section_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("|"):
+            current.append([cell.strip() for cell in stripped.strip("|").split("|")])
+            continue
+        if current:
+            tables.append(current)
+            current = []
+    if current:
+        tables.append(current)
+
+    for table in tables:
+        if table and table[0] and table[0][0].startswith(RULE_TABLE_HEADER_PREFIX):
+            return [
+                row
+                for row in table[1:]
+                if row and not all(re.fullmatch(r":?-+:?", cell) for cell in row)
+            ]
+    return None
+
+
 def _real_readme_text() -> str:
     """本物の README.md の全文を読む。"""
     return README_PATH.read_text(encoding="utf-8")
@@ -124,19 +161,23 @@ def diff_heading_and_counts(
     for key, pattern in COUNT_PATTERNS.items():
         if key not in keys:
             continue
-        match = re.search(pattern, section)
-        if match is None:
+        matches = list(re.finditer(pattern, section))
+        if not matches:
             diffs.append(
                 f"冒頭の段落に「{key} {expected[key]} ...」の書き方が見つからない"
                 f"（正規表現 {pattern!r} に一致する箇所が無い）。"
             )
             continue
-        found = int(match.group(1))
-        if found != expected[key]:
-            diffs.append(
-                f"冒頭の段落の「{key}」の数が {found} と書かれているが、"
-                f"正本から数えると {expected[key]}。"
-            )
+        # 節の中のすべての書き方を見る数と、最初の 1 か所だけを見る数がある。
+        if key not in EVERY_OCCURRENCE_KEYS:
+            matches = matches[:1]
+        for match in matches:
+            found = int(match.group(1))
+            if found != expected[key]:
+                diffs.append(
+                    f"節の「{match.group(0)}」の「{key}」の数が {found} と書かれているが、"
+                    f"正本から数えると {expected[key]}。"
+                )
     return diffs
 
 
@@ -235,7 +276,8 @@ def diff_rule_table(
 ) -> list[str]:
     """ルールの表に、制約ごとの name を 1 列目に持つ行があり、appears_as の語を含むかを見る。
 
-    aspects を絞ると、行があるかと、現れ方の語が書かれているかの片方だけを見る。
+    あわせて、ルールの表に正本に無い名前を 1 列目に持つ行が無いかを見る（名前を変えたあとの
+    古い名前の行の消し忘れを拾う）。aspects を絞ると、そのうちの 1 つの観点だけを見る。
     """
     section = extract_section(readme_text)
     if section is None:
@@ -243,6 +285,17 @@ def diff_rule_table(
 
     rows = _table_rows(section)
     diffs: list[str] = []
+    if "unknown_rows" in aspects:
+        rule_rows = _rule_table_rows(section)
+        if rule_rows is None:
+            diffs.append(
+                f"見出しの行の 1 列目が「{RULE_TABLE_HEADER_PREFIX}」で始まるルールの表が無い。"
+            )
+        else:
+            names = {constraint.name for constraint in ontology.constraints}
+            for row in rule_rows:
+                if row[0] not in names:
+                    diffs.append(f"ルールの表に、正本に無い制約名「{row[0]}」の行がある。")
     for constraint in ontology.constraints:
         matching_rows = [row for row in rows if row and row[0] == constraint.name]
         if not matching_rows:
@@ -284,7 +337,10 @@ def test_REQ_343_the_readme_states_the_edge_count() -> None:
 
 
 def test_REQ_344_the_readme_states_the_rule_count() -> None:
-    """冒頭の段落の「ルール N つ」が、正本から数えた制約の件数と一致する。"""
+    """節の中の「ルール N つ」のすべてが、正本から数えた制約の件数と一致する。
+
+    冒頭の段落と、ルールの表の前の 2 か所がある。どちらか 1 か所でも古い数なら落ちる。
+    """
     ontology = load_ontology()
     diffs = diff_heading_and_counts(_real_readme_text(), ontology, keys=("ルール",))
     assert not diffs, "\n".join(diffs)
@@ -349,6 +405,13 @@ def test_REQ_352_the_rule_table_lists_every_rule_name() -> None:
     """ルールの表に、正本の制約の name それぞれを 1 列目に持つ行がある。"""
     ontology = load_ontology()
     diffs = diff_rule_table(_real_readme_text(), ontology, aspects=("rows",))
+    assert not diffs, "\n".join(diffs)
+
+
+def test_REQ_372_the_rule_table_has_no_unknown_rule_name() -> None:
+    """ルールの表に、正本に無い制約の名前を 1 列目に持つ行が無い。"""
+    ontology = load_ontology()
+    diffs = diff_rule_table(_real_readme_text(), ontology, aspects=("unknown_rows",))
     assert not diffs, "\n".join(diffs)
 
 
