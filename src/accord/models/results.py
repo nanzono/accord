@@ -460,7 +460,9 @@ class SkippedHeading(BaseModel):
     広げるか正本の節を動かす。その言い分けをするために、外れた見出しを居場所つきで持ち帰る。
     """
 
-    source_key: str = Field(description="どの正本の読み方で外れたか（career / engagements）")
+    source_key: str = Field(
+        description="どの正本の読み方で外れたか（career / engagements / resume_ledger）"
+    )
     heading: str = Field(description="外れた見出しの文字列")
     id: str = Field(
         default="", description="外れた節の ID。ID の行を持たない節では空"
@@ -489,6 +491,17 @@ class SourceSnapshot(BaseModel):
     )
     skipped_headings: list[SkippedHeading] = Field(
         default_factory=list, description="正本にあるが、その正本の読み方では読んでいない見出し"
+    )
+    unread_ledger_sections: list[SkippedHeading] = Field(
+        default_factory=list,
+        description=(
+            "職務経歴書の台帳の節のうち、読み方の深さにあって読み方の絞りで外れたもの。"
+            "深さの外の節（題名の見出しや、読んだブロックの下位の見出し）は入れない"
+        ),
+    )
+    section_fingerprints: dict[str, str] = Field(
+        default_factory=dict,
+        description="職歴の枠と受託案件の節の ID と、その節のいまの本文の指紋の対応",
     )
 
     def section_headings(self) -> list[str]:

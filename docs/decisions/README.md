@@ -17,6 +17,7 @@
 - [ルール 1 件に判定を 1 つ](0009-one-check-per-rule.md) — 採用 / 2026-09-24
 - [検査を黙らせる印には、決めの記録を 1 本ずつ結ぶ](0010-record-every-check-bypass.md) — 採用 / 2026-09-25
 - [要件の番号を持たないテストには、docstring の 1 行目に理由を書く](0011-give-a-reason-to-unnumbered-tests.md) — 採用 / 2026-09-25
+- [写しの古さは、出典の節の本文の指紋で見つける](0012-detect-stale-copies-by-section-fingerprint.md) — 採用 / 2026-09-28
 
 ## 記録の扱い
 

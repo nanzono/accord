@@ -35,8 +35,11 @@ from accord.repository.sections import (
     drop_field_lines,
     find_section,
     find_urls,
+    is_frame_heading,
     leading_number,
+    prefix_matches,
     read_fields,
+    section_fingerprint,
     select_blocks,
     split_sections,
     strip_note,
@@ -47,6 +50,7 @@ from accord.vocabulary.settings import (
     PHRASES_FROM_TABLE,
     PRESENTATION_RULES_KEY,
     PUBLIC_RECORDS_KEY,
+    RESUME_LEDGER_KEY,
     BlockRule,
     Settings,
 )
@@ -109,6 +113,7 @@ LEDGER_LABELS = {
     "自分が決めたこと": "decisions",
     "終わりの状態": "closing",
     "出典の節": "source_section",
+    "出典の指紋": "source_fingerprints",
     "畳み行": "fold_line",
 }
 PRESENTATION_LABELS = {
@@ -116,6 +121,20 @@ PRESENTATION_LABELS = {
     "宣言する束": "declared_package",
     "作成日": "created_on",
 }
+
+# 提示物の宣言の行のうち、写し元を宣言する 2 つ。どちらも任意で、台帳のブロックと同じ書き方をする。
+PRESENTATION_SOURCE_LABEL = "出典の節"
+PRESENTATION_FINGERPRINT_LABEL = "出典の指紋"
+
+# 職務経歴書の台帳のブロックの種類。型の正本の ResumeLedger の欄「種類」が取る語。
+LEDGER_KIND_ENTRY = "案件"
+LEDGER_KIND_FRAME = "在籍職歴の枠"
+
+# 出典の指紋の欄の書き方。「ID=指紋」の組を半角のスラッシュで区切って並べる。
+# 読んだ組は、ID と指紋の 2 つの鍵を持つ辞書の一覧になる（型の正本の mapping の欄）。
+FINGERPRINT_SEPARATOR = "="
+FINGERPRINT_ID_KEY = "ID"
+FINGERPRINT_VALUE_KEY = "指紋"
 # 公開記録の欄。名前は見出しが持つので、この表には無い。
 # 並びは、書き戻すときの行の並びでもある（読むときは並びを見ない）。
 PUBLIC_RECORD_LABELS = {
@@ -154,6 +173,9 @@ CHANNEL_PLACEHOLDER = "{channel}"
 # 裏づけの節と出典の節が指せる正本。どちらも節の見出しで指す。
 EVIDENCE_SOURCE_KEYS = ("career", "engagements")
 
+# 職務経歴書の台帳の正本の役割の名前。
+LEDGER_KEY = RESUME_LEDGER_KEY
+
 # 必須欄の判定（missing_required_fields）を呼ぶときに引く、型の名前。
 # 決めの必須欄は _load_positionings が別の書き方で見ているので、ここには無い。
 PACKAGE_TYPE_NAME = "Package"
@@ -177,6 +199,32 @@ def _split_list(value: str) -> list[str]:
     return items
 
 
+def parse_fingerprints(value: str) -> list[dict[str, str]]:
+    """出典の指紋の欄を、ID と指紋の組の一覧にする。
+
+    「=」を持たない組は、指紋の無い組として ID だけを持たせる（検査はこれを控えの無い写しとして扱う）。
+    """
+    pairs: list[dict[str, str]] = []
+    for item in _split_list(value):
+        identifier, _, fingerprint = item.partition(FINGERPRINT_SEPARATOR)
+        pairs.append(
+            {FINGERPRINT_ID_KEY: identifier.strip(), FINGERPRINT_VALUE_KEY: fingerprint.strip()}
+        )
+    return pairs
+
+
+def format_fingerprints(pairs: list[tuple[str, str]]) -> str:
+    """ID と指紋の組の並びを、出典の指紋の欄にそのまま書ける 1 行にする。"""
+    return f" {LIST_SEPARATOR} ".join(
+        f"{identifier}{FINGERPRINT_SEPARATOR}{fingerprint}" for identifier, fingerprint in pairs
+    )
+
+
+def split_ids(value: str) -> list[str]:
+    """半角のスラッシュで区切った ID の並びを、ID の一覧にする。"""
+    return _split_list(value)
+
+
 def _skip_reasons(section: Section, above: list[str], rule: BlockRule) -> list[str]:
     """その節が、読み方のどの絞りに当たって外れたかを並べる。1 つも当たらなければ空の一覧。
 
@@ -194,8 +242,14 @@ def _skip_reasons(section: Section, above: list[str], rule: BlockRule) -> list[s
     skipped = [name for name in (section.heading, *above) if name in rule.skip_headings]
     if skipped:
         reasons.append(f"skip_headings に挙げた見出し（{' / '.join(skipped)}）の中にある")
-    if rule.heading_prefix and not section.heading.startswith(rule.heading_prefix):
-        reasons.append(f"heading_prefix「{rule.heading_prefix}」で始まっていない")
+    if not prefix_matches(section.heading, rule):
+        if rule.frame_heading_prefix:
+            reasons.append(
+                f"heading_prefix「{rule.heading_prefix}」でも、"
+                f"frame_heading_prefix「{rule.frame_heading_prefix}」でも始まっていない"
+            )
+        else:
+            reasons.append(f"heading_prefix「{rule.heading_prefix}」で始まっていない")
     if rule.skip_sections_without_fields and not read_fields(section, rule):
         reasons.append("欄を 1 つも持たないので、束ねるための見出しとして読み飛ばしている")
     return reasons
@@ -282,7 +336,60 @@ class MarkdownRepository:
                 *ledger_defects,
             ],
             skipped_headings=self._skipped_headings(),
+            unread_ledger_sections=self._unread_ledger_sections(),
+            section_fingerprints=self.section_fingerprints(),
         )
+
+    def _unread_ledger_sections(self) -> list[SkippedHeading]:
+        """職務経歴書の台帳の節のうち、読み方の深さにあって読み方の絞りで外れたものを集める。
+
+        深さの外の節（題名の見出しや、読んだブロックの下位の見出し）は数えない。そうした節は
+        ブロックの一部か台帳全体の題名で、読まなかったと言うと読み手が直す先を取り違えるからである。
+        検査はこの一覧を 1 件の断りにして、何を見なかったかを結果に出す。
+        """
+        rule = self._rule(LEDGER_KEY)
+        levels = set(rule.heading_levels)
+        found: list[SkippedHeading] = []
+        ancestors: list[tuple[int, str]] = []
+        for section in split_sections(self._read(LEDGER_KEY)):
+            while ancestors and ancestors[-1][0] >= section.level:
+                ancestors.pop()
+            above = [heading for _, heading in ancestors]
+            if not section.heading:
+                continue
+            ancestors.append((section.level, section.heading))
+            # spec: REQ-394
+            if section.level not in levels:
+                continue
+            reasons = _skip_reasons(section, above, rule)
+            if not reasons:
+                continue
+            found.append(
+                SkippedHeading(
+                    source_key=LEDGER_KEY,
+                    heading=section.heading,
+                    level=section.level,
+                    parents=above,
+                    reason="、".join(reasons),
+                )
+            )
+        return found
+
+    def section_fingerprints(self) -> dict[str, str]:
+        """職歴の枠と受託案件の節の ID と、その節のいまの本文の指紋の対応を返す。
+
+        本文は accord がその項目を読むのと同じ節で、下位の見出しの本文は含まない。入れ子の正本で
+        受託案件の本文を直しても、上の職歴の枠の指紋は変わらない。ID の行も本文のうちに数える。
+        ID の行を持たない節は、指しようが無いので入れない。
+        """
+        fingerprints: dict[str, str] = {}
+        for key in EVIDENCE_SOURCE_KEYS:
+            blocks, rule = self._blocks(key)
+            for section in blocks:
+                identifier = read_fields(section, rule).get(ID_LABEL, "").strip()
+                if identifier:
+                    fingerprints.setdefault(identifier, section_fingerprint(section.body))
+        return fingerprints
 
     def _skipped_headings(self) -> list[SkippedHeading]:
         """裏づけと出典が指せる 2 種について、読み方の絞りで外れた節を集める。
@@ -535,35 +642,48 @@ class MarkdownRepository:
         return result, defects
 
     def _load_ledger_entries(self) -> tuple[list[ResumeLedger], list[SourceDefect]]:
-        """職務経歴書の台帳を、案件 1 件 1 ブロックで読む。
+        """職務経歴書の台帳を、1 ブロックずつ読む。ブロックは案件か在籍職歴の枠のどちらか。
 
+        見出しが在籍職歴の枠の前置き（frame_heading_prefix）で始まるブロックは在籍職歴の枠、
+        それ以外は案件として読む。必須の欄は種類で変わり（型の正本の required_for_kinds）、
+        在籍職歴の枠には案件だけの欄を求めない。
         必須の欄が欠けたブロックは型にできないので、飛ばしたことを断りに残す。
         """
         result: list[ResumeLedger] = []
         defects: list[SourceDefect] = []
-        blocks, rule = self._blocks("resume_ledger")
+        blocks, rule = self._blocks(LEDGER_KEY)
         for block in blocks:
             fields = read_fields(block, rule)
             values: dict[str, object] = {
                 name: fields.get(label) for label, name in LEDGER_LABELS.items()
             }
+            is_frame = is_frame_heading(block.heading, rule)
+            # spec: REQ-375
+            values["kind"] = LEDGER_KIND_FRAME if is_frame else LEDGER_KIND_ENTRY
             values["heading"] = block.heading
             values["fold_line"] = _optional(values.get("fold_line"))
+            values["source_fingerprints"] = parse_fingerprints(
+                str(values.get("source_fingerprints") or "")
+            )
             # spec: REQ-062
             if rule.entry_number_from_heading:
                 # 案件番号を欄ではなく見出しの数字で持つ書き方。欄があればそちらを優先しない。
-                number = leading_number(block.heading, rule.heading_prefix)
+                # spec: REQ-378
+                prefix = rule.frame_heading_prefix if is_frame else rule.heading_prefix
+                number = leading_number(block.heading, prefix)
                 if number:
                     values["entry_number"] = number
 
+            # spec: REQ-376
             missing = missing_required_fields(RESUME_LEDGER_TYPE_NAME, SimpleNamespace(**values))
             if missing:
+                # spec: REQ-377
                 defects.append(
                     SourceDefect(
-                        file=self.settings.files["resume_ledger"],
+                        file=self.settings.files[LEDGER_KEY],
                         location=f"「{block.heading}」のブロック",
                         missing_fields=[field.label for field in missing],
-                        source_key="resume_ledger",
+                        source_key=LEDGER_KEY,
                         heading=block.heading,
                     )
                 )
@@ -636,6 +756,11 @@ class MarkdownRepository:
                 continue
 
             values["created_on"] = _optional(values.get("created_on"))
+            # spec: REQ-391
+            values["source_sections"] = _split_list(fields.get(PRESENTATION_SOURCE_LABEL, ""))
+            values["source_fingerprints"] = parse_fingerprints(
+                fields.get(PRESENTATION_FINGERPRINT_LABEL, "")
+            )
             values["pending_notes"] = [
                 note
                 for note in fields.get("未反映の注記", "").splitlines()

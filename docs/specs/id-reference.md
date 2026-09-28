@@ -482,6 +482,42 @@ ID のラベルを読み替える設定で呼ばれたとき、accord は読み�
 - 関係するファイル: `src/accord/services/consistency.py`
 - 検証手順: `uv run pytest tests/test_id_reference.py -k REQ_367`
 
+## REQ-379
+台帳の在籍職歴の枠の出典の節が職歴の枠の ID を指しているとき、accord はその参照を違反にしない。
+
+- 関係するファイル: `src/accord/services/consistency.py`
+- 検証手順: `uv run pytest tests/test_id_reference.py -k REQ_379`
+
+## REQ-380
+もし台帳の在籍職歴の枠の出典の節に書いた ID が職歴の枠の ID に無いなら、accord は実在する職歴の枠の ID を候補にした違反を挙げる。
+
+- 関係するファイル: `src/accord/services/consistency.py`
+- 検証手順: `uv run pytest tests/test_id_reference.py -k REQ_380`
+
+## REQ-381
+台帳の在籍職歴の枠の出典の節に ID が半角のスラッシュで区切って複数書かれているとき、accord はそれぞれの ID を別々に照らす。
+
+- 関係するファイル: `src/accord/services/consistency.py`
+- 検証手順: `uv run pytest tests/test_id_reference.py -k REQ_381`
+
+## REQ-382
+もし台帳の在籍職歴の枠が公開不可の職歴の枠を出典にしているなら、accord は公開可の職歴の枠の ID だけを候補にした違反を挙げる。
+
+- 関係するファイル: `src/accord/services/consistency.py`
+- 検証手順: `uv run pytest tests/test_id_reference.py -k REQ_382`
+
+## REQ-383
+もし台帳の案件のブロックの出典の節が職歴の枠の ID を指しているなら、accord は受託案件の ID に無いことを違反の直し先に書く。
+
+- 関係するファイル: `src/accord/services/consistency.py`
+- 検証手順: `uv run pytest tests/test_id_reference.py -k REQ_383`
+
+## REQ-397
+もし提示物の未反映の注記が職歴の枠の ID を指しているなら、accord は受託案件の ID に無いことを違反の直し先に書く。
+
+- 関係するファイル: `src/accord/services/consistency.py`
+- 検証手順: `uv run pytest tests/test_id_reference.py -k REQ_397`
+
 ## 未決の質問
 
 - 「照らす相手が 1 件も読めていない」状態（REQ-254〜256、REQ-264〜266、REQ-274〜276、

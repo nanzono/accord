@@ -24,6 +24,9 @@ version: 1
 #   mapping     名前と値の組の一覧     -> list[dict[str, str]]
 #   flag        真偽                   -> bool
 # required: true の欄は生成したモデルで必須になる。
+# required_for_kinds を持つ欄は、種類の欄（kind）がその一覧の語のブロックでだけ必須になる。
+# 種類によっては持たない欄なので、生成したモデルでは任意の欄になり、必須かどうかは
+# 読み込みの層が種類を見て判定する（例: 台帳の在籍職歴の枠は、案件だけの欄を持たない）。
 
 types:
   - name: Positioning
@@ -319,16 +322,32 @@ types:
         label: 作成日
         type: date
         required: false
+      - name: source_sections
+        label: 出典の節
+        type: text_list
+        required: false
+        description: この文面が写した正本の節（職歴の枠か受託案件）の ID。宣言は任意で、宣言した提示物だけ、写した後に正本の節が変わったかを検査する。複数あるときは半角のスラッシュ「/」で区切る。
+      - name: source_fingerprints
+        label: 出典の指紋
+        type: mapping
+        required: false
+        description: 写したときの出典の節の本文の指紋。「ID=指紋」の組を半角のスラッシュ「/」で区切って並べる。指紋は、節の本文から見出しの行を除き、各行の末尾の空白と前後の空行を落とし、改行を LF にそろえた文字列の SHA-256 の先頭 8 桁（16 進の小文字）。
 
   - name: ResumeLedger
     label: 職務経歴書の台帳
-    description: 職務経歴書の元になる正本の、案件 1 件ぶんのブロック。台帳全体はこのブロックの並びで持つ。
+    description: 職務経歴書の元になる正本の、ブロック 1 つ。ブロックの種類は、案件 1 件ぶんの「案件」と、在籍 1 社ぶんをまとめた「在籍職歴の枠」の 2 つ。台帳全体はこのブロックの並びで持つ。
     source: resume_ledger
     fields:
+      - name: kind
+        label: 種類
+        type: text
+        required: true
+        description: ブロックの種類。「案件」か「在籍職歴の枠」。見出しの前置きで決まる（在籍職歴の枠は設定の frame_heading_prefix で始まる見出し）。
       - name: entry_number
         label: 案件番号
         type: text
-        required: true
+        required: false
+        required_for_kinds: [案件]
         description: 台帳の中での通し番号。違反の一覧はこの番号で場所を指す。
       - name: heading
         label: 見出し
@@ -341,36 +360,46 @@ types:
       - name: scale
         label: 規模
         type: text
-        required: true
+        required: false
+        required_for_kinds: [案件]
       - name: process
         label: 担当工程
         type: text
-        required: true
+        required: false
+        required_for_kinds: [案件]
       - name: role
         label: 役割と任され方
         type: text
-        required: true
+        required: false
+        required_for_kinds: [案件]
       - name: decisions
         label: 自分が決めたこと
         type: text
-        required: true
+        required: false
+        required_for_kinds: [案件]
       - name: closing
         label: 終わりの状態
         type: text
-        required: true
+        required: false
+        required_for_kinds: [案件]
       - name: source_section
         label: 出典の節
         type: text
         required: true
-        description: 写し元の節の ID（受託案件）。実在と公開可否を検査する。
+        description: 写し元の節の ID。案件は受託案件の ID を 1 つ、在籍職歴の枠は職歴の枠の ID を 1 つ以上（複数は半角のスラッシュ「/」で区切る）。実在と公開可否を検査する。
+      - name: source_fingerprints
+        label: 出典の指紋
+        type: mapping
+        required: false
+        description: 写したときの出典の節の本文の指紋。「ID=指紋」の組を半角のスラッシュ「/」で区切って並べる。指紋の作り方は提示物の出典の指紋と同じ。控えた指紋といまの指紋が違うか、出典の ID に組が無いと、写しの鮮度の違反になる。
       - name: fold_line
         label: 畳み行
         type: text
         required: false
 
-# ---------------------------------------------------------------- 関係（8 種・辺 11 本）
+# ---------------------------------------------------------------- 関係（9 種・辺 14 本）
 #
-# 裏づけが相手の型を 3 つ、由来が 2 つ持つので、種は 8、辺は 11 本になる。
+# 裏づけが相手の型を 3 つ、由来と出典の節と提示物の出典が 2 つずつ持つので、種は 9、辺は 14 本になる。
 
 relations:
   - name: 前面に出す
@@ -417,11 +446,16 @@ relations:
 
   - name: 出典の節
     from: ResumeLedger
-    to: [Engagement]
-    cardinality: 台帳の案件 1 件につき節 1 つ
-    description: 台帳の案件が、どの受託案件の節から写したかを指す。
+    to: [Engagement, CareerFrame]
+    cardinality: 台帳の案件 1 件につき受託案件 1 つ、在籍職歴の枠 1 つにつき職歴の枠 1 つ以上
+    description: 台帳のブロックが、どの節から写したかを指す。案件は受託案件の節を、在籍職歴の枠は職歴の枠の節を指す。
+  - name: 提示物の出典
+    from: Presentation
+    to: [CareerFrame, Engagement]
+    cardinality: 提示物 1 件につき節 0 件以上
+    description: 外に出す文面が、どの職歴の枠か受託案件の節から写したかを宣言して指す。宣言は任意。
 
-# ---------------------------------------------------------------- 制約（12）
+# ---------------------------------------------------------------- 制約（17）
 #
 # appears_as は、この制約がどの顔で現れるか。
 #   拒否  書きの操作が入力を受け付けず、代わりの手を返す
@@ -473,13 +507,13 @@ constraints:
     next_action: 近い機能の ID の候補と、先に register_capability を呼ぶことを返す。
 
   - name: 注記と出典の節の実在
-    watches: 提示物の未反映の注記が指す ID と、職務経歴書の台帳の出典の節の ID が、受託案件の ID として実在するか。
+    watches: 提示物の未反映の注記が指す ID と、職務経歴書の台帳の案件の出典の節の ID が、受託案件の ID として実在するか。台帳の在籍職歴の枠の出典の節の ID が職歴の枠の ID として、提示物の出典の節の ID が職歴の枠か受託案件の ID として実在するか。
     enforced_by: [check_consistency]
     appears_as: 検出
-    next_action: 実在する受託案件の ID の候補を返す。
+    next_action: 指す先の型の、実在する ID の候補を返す。
 
   - name: 出典と裏づけの節の公開可否
-    watches: 職務経歴書の台帳の出典の節と、機能の裏づけの節が、公開可の節か。未反映の注記が指す節は見ない。
+    watches: 職務経歴書の台帳の出典の節（案件は受託案件、在籍職歴の枠は職歴の枠）と、機能の裏づけの節が、公開可の節か。未反映の注記が指す節は見ない。
     enforced_by: [check_consistency, assemble_material, register_capability]
     appears_as: 検出
     next_action: 公開可の節の ID の候補を返す。材料からは公開不可の節を落とし、落とした節の名前を警告に書く。
@@ -519,6 +553,12 @@ constraints:
     enforced_by: [check_consistency]
     appears_as: 検出
     next_action: 提示物のファイル名と、正本にある近い URL を返す。経路の書き方だけが違うものは、相手の URL を 1 件返す。
+
+  - name: 写しの鮮度
+    watches: 職務経歴書の台帳のブロックと、出典の節を宣言した提示物が控えた出典の指紋が、出典の節のいまの本文から作った指紋と一致するか。出典の ID に指紋の組が無い写しも、未確認の写しとして見る。写しの文言が正本と合っているかは見ない。
+    enforced_by: [check_consistency]
+    appears_as: 検出
+    next_action: 本文が変わった出典の節の ID と、読み比べた後に写しへ書く「出典の指紋」の行を、いまの本文から作った値で返す。
 
   - name: 逆参照を書かない
     watches: 下の層の正本が上の層を指さないこと。事実の節がパッケージや決めを指す書き方を正本に入れない。

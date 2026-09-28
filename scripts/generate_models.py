@@ -76,6 +76,16 @@ def render_field(field: dict) -> str:
     label = field.get("label", field["name"])
     note = field.get("description", "")
     caption = f"{label}。{note}" if note else f"{label}"
+    # 種類によって必須かどうかが変わる欄は、モデルでは任意の欄にし、どの種類で必須かを説明に足す。
+    # 必須の判定は読み込みの層が種類の欄を見て行うので、モデルの型注釈には表さない。
+    kinds = field.get("required_for_kinds") or []
+    if kinds:
+        if field.get("required", False):
+            raise ValueError(
+                f"欄 '{field.get('name')}' は required と required_for_kinds を同時に持てない"
+            )
+        wanted = "」「".join(str(kind) for kind in kinds)
+        caption = f"{caption}（種類が「{wanted}」のブロックでだけ必須）"
 
     if field.get("required", False):
         annotation = PYTHON_TYPES[kind]

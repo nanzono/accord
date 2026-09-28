@@ -91,6 +91,9 @@ heading_levels = [3]
 # 台帳の案件は「案件1｜…」の形の見出しで、欄は 2 列の表に書く。
 # 案件番号は欄ではなく、見出しの「案件」に続く数字から読む。
 heading_prefix = "案件"
+# 在籍 1 社ぶんをまとめた在籍職歴の枠は「枠1｜…」の形の見出しで、職歴の枠の ID を出典に持つ。
+# 在籍職歴の枠には、案件だけの欄（規模・担当工程・役割と任され方・自分が決めたこと・終わりの状態）は要らない。
+frame_heading_prefix = "枠"
 fields_from_table = true
 bare_labels = ["畳み行"]
 entry_number_from_heading = true

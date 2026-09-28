@@ -299,7 +299,8 @@ def test_REQ_062_entry_number_is_read_from_the_heading(alt_settings) -> None:
 
     entries = MarkdownRepository(alt_settings).load().ledger_entries
 
-    assert [item.entry_number for item in entries] == ["1", "2", "3"]
+    # 見本には在籍職歴の枠のブロックもあるので、案件のブロックの番号だけを見る。
+    assert [item.entry_number for item in entries if item.kind == "案件"] == ["1", "2", "3"]
 
 
 def test_REQ_063_label_note_is_stripped() -> None:
@@ -605,3 +606,133 @@ def test_REQ_374_assemble_material_returns_no_public_records_without_the_public_
 
     material = MaterialService(plain).assemble(MaterialRequest(channel=CHANNEL))
     assert material.public_records == []
+
+
+# ---------------------------------------------------------------- 台帳の在籍職歴の枠
+
+# 第 2 のサンプルの台帳の在籍職歴の枠と、その読み方の鍵。
+FRAME_HEADING = "枠1｜2021-04〜現在 フリーランス"
+FRAME_PREFIX_LINE = 'frame_heading_prefix = "枠"\n'
+FRAME_KIND = "在籍職歴の枠"
+ENTRY_KIND = "案件"
+# 案件のブロックだけが持つ 5 つの欄の、型の欄の名前。
+ENTRY_ONLY_FIELDS = ("scale", "process", "role", "decisions", "closing")
+
+
+def _ledger_frames(settings) -> list:
+    """写しの正本の台帳から、在籍職歴の枠のブロックだけを読む。"""
+    entries = MarkdownRepository(settings).load().ledger_entries
+    return [item for item in entries if item.kind == FRAME_KIND]
+
+
+def _rewrite_ledger(settings, old: str, new: str) -> None:
+    """写しの台帳の 1 か所を書き換える。狙った文字列が無ければ、テストの前提が崩れたとして落とす。"""
+    path = settings.path_for("resume_ledger")
+    text = path.read_text(encoding="utf-8")
+    assert old in text, f"写しに「{old}」が無い: {path}"
+    path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+
+def test_REQ_375_frame_heading_prefix_reads_frame_blocks(alt_settings) -> None:
+    """frame_heading_prefix で始まる見出しの節を、在籍職歴の枠のブロックとして読む。"""
+    frames = _ledger_frames(alt_settings)
+
+    assert [item.heading for item in frames] == [FRAME_HEADING]
+    assert frames[0].source_section == "freelance-solo"
+
+
+def test_REQ_375_without_frame_heading_prefix_the_frame_is_not_read(alt_settings) -> None:
+    """鍵を書かなければ、同じ節は台帳のブロックとして読まない（heading_prefix の意味は変わらない）。"""
+    config = alt_settings.config_path
+    text = config.read_text(encoding="utf-8")
+    assert FRAME_PREFIX_LINE in text
+    config.write_text(text.replace(FRAME_PREFIX_LINE, ""), encoding="utf-8")
+
+    plain = load_settings(config)
+    snapshot = MarkdownRepository(plain).load()
+
+    assert [item.kind for item in snapshot.ledger_entries] == [ENTRY_KIND] * 3
+    assert FRAME_HEADING in [item.heading for item in snapshot.unread_ledger_sections]
+
+
+def test_REQ_375_frame_heading_prefix_is_a_ledger_only_key(alt_settings) -> None:
+    """frame_heading_prefix は台帳の節の鍵で、ほかの正本の節に書くと知らない鍵として止める。"""
+    config = alt_settings.config_path
+    text = config.read_text(encoding="utf-8")
+    config.write_text(
+        text.replace("[reading.career]\n", '[reading.career]\nframe_heading_prefix = "枠"\n', 1),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError) as caught:
+        load_settings(config)
+
+    assert "frame_heading_prefix" in str(caught.value), str(caught.value)
+
+
+def test_REQ_376_frame_blocks_do_not_need_the_entry_only_fields(alt_settings) -> None:
+    """在籍職歴の枠のブロックは、案件だけの 5 欄を持たなくても型にでき、断りにならない。"""
+    snapshot = MarkdownRepository(alt_settings).load()
+    frames = [item for item in snapshot.ledger_entries if item.kind == FRAME_KIND]
+
+    assert frames, "在籍職歴の枠が 1 件も読めていない"
+    for name in ENTRY_ONLY_FIELDS:
+        assert getattr(frames[0], name) is None, name
+    assert [defect.model_dump() for defect in snapshot.defects] == []
+
+
+def test_REQ_376_the_ontology_says_which_fields_only_entry_blocks_need() -> None:
+    """型の正本が、案件だけの 5 欄を「案件のブロックでだけ必須」と定めている（資源を読めば分かる）。"""
+    from accord.models.ontology import load_ontology
+
+    ledger = load_ontology().type_named("ResumeLedger")
+    assert ledger is not None
+    fields = {item.name: item for item in ledger.fields}
+    for name in ENTRY_ONLY_FIELDS:
+        assert fields[name].required is False, name
+        assert fields[name].required_for_kinds == [ENTRY_KIND], name
+    for name in ("heading", "period", "source_section"):
+        assert fields[name].required is True, name
+
+
+def test_REQ_376_entry_blocks_still_need_the_entry_only_fields(alt_settings) -> None:
+    """案件のブロックの必須欄は変わらない。案件だけの欄を消せば、今までどおり読めない。"""
+    _rewrite_ledger(alt_settings, "| 規模 | 従業員 35 名 |\n", "")
+
+    snapshot = MarkdownRepository(alt_settings).load()
+
+    missing = [defect.missing_fields for defect in snapshot.defects]
+    assert missing == [["規模"]], missing
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "label"),
+    [
+        ("| 期間 | 2021-04〜現在 |\n", "", "期間"),
+        ("- 出典の節: freelance-solo\n", "", "出典の節"),
+    ],
+)
+def test_REQ_377_frame_block_without_a_required_field_is_named_in_a_note(
+    alt_settings, old: str, new: str, label: str
+) -> None:
+    """在籍職歴の枠に期間か出典の節が無いと、読んでいないことを欠けた欄の名前つきで断る。"""
+    from accord.services.consistency import ConsistencyService
+
+    _rewrite_ledger(alt_settings, old, new)
+
+    snapshot = MarkdownRepository(alt_settings).load()
+    assert [(defect.heading, defect.missing_fields) for defect in snapshot.defects] == [
+        (FRAME_HEADING, [label])
+    ]
+    notes = "\n".join(ConsistencyService(alt_settings).inspect().notes)
+    assert FRAME_HEADING in notes, notes
+    assert f"「{label}」" in notes, notes
+
+
+def test_REQ_378_frame_number_is_read_from_the_heading(alt_settings) -> None:
+    """在籍職歴の枠の番号は、見出しの frame_heading_prefix に続く数字から読む。"""
+    assert [item.entry_number for item in _ledger_frames(alt_settings)] == ["1"]
+
+    _rewrite_ledger(alt_settings, f"## {FRAME_HEADING}", "## 枠12｜2021-04〜現在 フリーランス")
+
+    assert [item.entry_number for item in _ledger_frames(alt_settings)] == ["12"]

@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass, field
 
@@ -36,6 +37,9 @@ URL_RE = re.compile("https?://[^\\s　<>\"'`)）」、。]+")
 
 # 取った URL の末尾に付いていたら落とす記号。文末の記号を URL に含めないため。
 URL_TAIL_MARKS = ".,、。)）"
+
+# 節の本文の指紋の桁数。SHA-256 の 16 進の先頭からこの桁数を使う。
+FINGERPRINT_LENGTH = 8
 
 
 @dataclass
@@ -106,6 +110,23 @@ def split_document(text: str) -> Document:
 def split_sections(text: str) -> list[Section]:
     """見出しの階層と本文に切り分けた節の一覧を返す。"""
     return split_document(text).sections
+
+
+def section_fingerprint(body: str) -> str:
+    """節の本文の指紋を返す。写しの鮮度の検査と、見本に書く指紋の算出の両方がこの 1 か所を使う。
+
+    本文は見出しの行を含まない（split_document が切り出した body をそのまま渡す）。各行の末尾の
+    空白と前後の空行を落とし、改行を LF にそろえた文字列の SHA-256 を取り、16 進の小文字の
+    先頭 8 桁を返す。行末の空白や空行の足し引きのように、読んで分からない違いでは変わらない。
+    """
+    # spec: REQ-389
+    lines = [line.rstrip() for line in body.splitlines()]
+    while lines and not lines[0]:
+        lines.pop(0)
+    while lines and not lines[-1]:
+        lines.pop()
+    text = "\n".join(lines)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:FINGERPRINT_LENGTH]
 
 
 def find_section(sections: list[Section], heading: str) -> Section | None:
@@ -206,6 +227,24 @@ def table_rows(body: str) -> list[list[str]]:
     return [cells for rows in table_blocks(body) for cells in rows]
 
 
+def is_frame_heading(heading: str, rule: BlockRule = DEFAULT_BLOCK_RULE) -> bool:
+    """その見出しが、在籍職歴の枠の前置き（frame_heading_prefix）で始まるか。前置きが空なら False。"""
+    return bool(rule.frame_heading_prefix) and heading.startswith(rule.frame_heading_prefix)
+
+
+def prefix_matches(heading: str, rule: BlockRule = DEFAULT_BLOCK_RULE) -> bool:
+    """見出しが、読み方の前置きの絞りを通るか。
+
+    heading_prefix が空なら絞らない。空でなければ、その前置きで始まる見出しを通す。
+    台帳の在籍職歴の枠の前置き（frame_heading_prefix）で始まる見出しも通す。選ぶ側（select_blocks）と
+    外れた理由を言う側が同じ判定を使うように、この 1 か所に置く。
+    """
+    if not rule.heading_prefix:
+        return True
+    # spec: REQ-375
+    return heading.startswith(rule.heading_prefix) or is_frame_heading(heading, rule)
+
+
 def select_blocks(sections: list[Section], rule: BlockRule = DEFAULT_BLOCK_RULE) -> list[Section]:
     """節の一覧から、その正本のブロックとして読む節だけを取り出す。
 
@@ -235,7 +274,7 @@ def select_blocks(sections: list[Section], rule: BlockRule = DEFAULT_BLOCK_RULE)
         if any(name in rule.skip_headings for name in above):
             continue
         # spec: REQ-055
-        if rule.heading_prefix and not section.heading.startswith(rule.heading_prefix):
+        if not prefix_matches(section.heading, rule):
             continue
         # spec: REQ-057
         if rule.skip_sections_without_fields and not read_fields(section, rule):

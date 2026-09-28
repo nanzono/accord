@@ -10,8 +10,8 @@
 書きの操作が書き込みの瞬間に拒否する制約（ID の形式・ID の一意性・裏づけ節名の実在・
 束ねる機能名の一致・由来の節の実在・公開記録の種類の語彙・公開記録の役割の語彙・機能の分類の語彙）にも
 後から食い違う経路があるので当て直し、書きでは拒否できず後から食い違う制約（パッケージ定義の鮮度・
-提示物の宣言と看板の一致・注記と出典の節の実在・出典と裏づけの節の公開可否・提示物の URL と公開記録の一致）
-を加えて、正本全体に当てる。
+提示物の宣言と看板の一致・注記と出典の節の実在・出典と裏づけの節の公開可否・提示物の URL と公開記録の一致・
+写しの鮮度）を加えて、正本全体に当てる。
 決めの必須欄と公開記録の必須欄は、それぞれを登記する操作だけが見る
 （正本の ontology.yaml の enforced_by のとおり）。
 どの制約をどの関数が受け持つかは、この文書の末尾の対応表にある。
@@ -53,8 +53,16 @@ from accord.models.types import (
 )
 from accord.repository.markdown_repository import (
     EXCEPTION_PRESENTATION_KEY,
+    FINGERPRINT_ID_KEY,
+    FINGERPRINT_VALUE_KEY,
     ID_LABEL,
+    LEDGER_KEY,
+    LEDGER_KIND_FRAME,
+    PRESENTATION_FINGERPRINT_LABEL,
+    PRESENTATION_SOURCE_LABEL,
     MarkdownRepository,
+    format_fingerprints,
+    split_ids,
 )
 from accord.services.material import MaterialService
 from accord.services.offering import OfferingService
@@ -92,6 +100,7 @@ PUBLIC_RECORD_ROLE_VOCABULARY = CONSTRAINT_BY_NAME["公開記録の役割の語�
 CAPABILITY_CATEGORY_VOCABULARY = CONSTRAINT_BY_NAME["機能の分類の語彙"].name
 ORIGIN_SECTION_EXISTS = CONSTRAINT_BY_NAME["由来の節の実在"].name
 PRESENTATION_URL_MATCHES = CONSTRAINT_BY_NAME["提示物の URL と公開記録の一致"].name
+COPY_FRESHNESS = CONSTRAINT_BY_NAME["写しの鮮度"].name
 
 # 未反映の注記の書き方。「節の見出し — 覚え書き」で、区切りより前がその注記の入る先の節になる。
 # 区切りが無ければ、注記の全文を節の見出しとして読む。
@@ -106,8 +115,19 @@ NAME_SAMPLE_COUNT = 5
 # 見出しが読めていないことを言う 3 か所の、文の頭に置く語。
 EVIDENCE_LABEL = "裏づけの節"
 LEDGER_SOURCE_LABEL = "出典の節"
+FRAME_SOURCE_LABEL = "在籍職歴の枠の出典の節"
+PRESENTATION_SOURCE_TEXT_LABEL = "提示物の出典の節"
 PENDING_NOTE_LABEL = "注記が指す節"
 ORIGIN_SECTION_LABEL = "由来の節"
+
+# 指す先の型ごとの、読み方の絞りで外れた節を探す正本の役割の名前。外れた節の言い分けは、
+# 指す先の型の読み方で外れた節だけを使う。別の型の読み方で外れた節を使うと、合っていない
+# 読み方を広げよという直し方を返してしまう。
+CAREER_KEYS = ("career",)
+ENGAGEMENT_KEYS = ("engagements",)
+
+# 写しの鮮度の違反の文で、出典の指紋の欄を指す語。台帳と提示物で同じ語を使う。
+FINGERPRINT_FIELD_LABEL = PRESENTATION_FINGERPRINT_LABEL
 
 # 設定の語の一覧に照らす 3 つの欄の、正本での欄の名前。違反の文はこの語のまま欄を指す。
 PUBLIC_RECORD_KIND_LABEL = "種類"
@@ -127,6 +147,10 @@ MISSING_HEADING_TEXT = {
         "は、職歴の枠にも受託案件にも無い ID である。実在する ID に書き換える。"
     ),
     LEDGER_SOURCE_LABEL: "は、受託案件の ID に無い。実在する ID に書き換える。",
+    FRAME_SOURCE_LABEL: "は、職歴の枠の ID に無い。実在する ID に書き換える。",
+    PRESENTATION_SOURCE_TEXT_LABEL: (
+        "は、職歴の枠にも受託案件にも無い ID である。実在する ID に書き換える。"
+    ),
     PENDING_NOTE_LABEL: (
         "は、受託案件の ID に無い。実在する ID に書き換える。"
         "この事実をもう正本に書いたのなら、注記の行ごと消す。"
@@ -215,6 +239,7 @@ def explain_heading(
     label: str,
     wanted: str,
     pool: list[str],
+    source_keys: tuple[str, ...] | None = None,
 ) -> tuple[bool, str, list[str]]:
     """指された ID が読めているかと、読めていないときの直し方の文と候補を返す。
 
@@ -227,6 +252,11 @@ def explain_heading(
 
     形の検査を「どこにも無い」より先に置くのは、区切りを取り違えた値（「見出し A・見出し B」の
     ように半角のスラッシュ以外でつないだもの）を、推測ではなく形式で断定するためである。
+
+    読み取り範囲の外の言い分けには、指す先の型の読み方（source_keys）で外れた節だけを使う。
+    別の型として読めている ID も使わない。たとえば職歴の枠の ID は、受託案件の読み方では
+    外れた節に入るが、職歴の枠としては読めているので、受託案件を指す欄に書かれたなら
+    「範囲の外」ではなく「受託案件の ID に無い」と言う。
     """
     labels = snapshot.labels()
     if wanted in pool:
@@ -252,8 +282,15 @@ def explain_heading(
         )
 
     # spec: REQ-028
+    read_elsewhere = set(snapshot.section_headings())
     for skipped in snapshot.skipped_headings:
         if not skipped.id or skipped.id != wanted:
+            continue
+        # spec: REQ-383
+        if source_keys is not None and skipped.source_key not in source_keys:
+            continue
+        # spec: REQ-397
+        if skipped.id in read_elsewhere:
             continue
         where = settings.files.get(skipped.source_key, skipped.source_key)
         if skipped.parents:
@@ -369,10 +406,22 @@ class ConsistencyService:
         notes.extend(note_remarks)
 
         violations.extend(self._check_ledger_source_sections(snapshot, target))
+        violations.extend(self._check_presentation_sources(snapshot, target))
+        copy_violations, copy_notes = self._check_copy_freshness(snapshot, target)
+        violations.extend(copy_violations)
+        notes.extend(copy_notes)
         # ID の形式と ID の一意性は、範囲を絞っても正本全体で見る。一意性は 1 つのブロックだけを
         # 見ても言えず、絞った範囲の外にある項目と重なっていても違反だからである。
         # spec: REQ-362
         violations.extend(self._check_id_format_and_uniqueness(snapshot))
+
+        # 台帳の読まなかった節の断りは先頭に積む。断りの上限は末尾から打ち切るので、
+        # 先頭に置けば、ほかの断りが何件あっても落ちない。台帳を見ない範囲では書かない。
+        if target.label == WHOLE_SCOPE:
+            unread = unread_ledger_note(self.settings, snapshot)
+            # spec: REQ-396
+            if unread is not None:
+                notes.insert(0, unread)
 
         return ConsistencyReport(
             provenance=provenance_of(self.settings),
@@ -1028,55 +1077,249 @@ class ConsistencyService:
     def _check_ledger_source_sections(
         self, snapshot: SourceSnapshot, target: InspectionScope
     ) -> list[Violation]:
-        """職務経歴書の台帳の出典の節の ID が、受託案件として実在するか（注記と出典の節の実在）と、
-        実在した節が公開可であるか（出典と裏づけの節の公開可否）を見る。実在しない節は公開可否を見ない。
+        """職務経歴書の台帳の出典の節の ID が実在するか（注記と出典の節の実在）と、実在した節が
+        公開可であるか（出典と裏づけの節の公開可否）を見る。実在しない節は公開可否を見ない。
+
+        案件のブロックは受託案件の ID を 1 つ、在籍職歴の枠のブロックは職歴の枠の ID を 1 つ以上
+        （半角のスラッシュで区切る）指す。照らす相手も、公開可の候補も、指す先の型から取る。
         """
-        engagements = {item.id: item for item in snapshot.engagements}
+        engagements = {item.id: item.disclosure for item in snapshot.engagements}
+        frames = {item.id: item.disclosure for item in snapshot.career_frames}
         labels = snapshot.labels()
-        public = [
-            identifier
-            for identifier, item in engagements.items()
-            if not item.disclosure.startswith(PRIVATE_DISCLOSURE_PREFIX)
-        ]
         violations: list[Violation] = []
 
         for entry in target.ledger_entries:
-            section = entry.source_section
-            location = f"案件番号 {entry.entry_number}（{entry.heading}）の「出典の節」の行"
+            location = f"{_ledger_place(entry)}の「出典の節」の行"
+            if entry.kind == LEDGER_KIND_FRAME:
+                # spec: REQ-379
+                pool, label, keys = frames, FRAME_SOURCE_LABEL, CAREER_KEYS
+                # spec: REQ-381
+                wanted_ids = split_ids(entry.source_section)
+            else:
+                pool, label, keys = engagements, LEDGER_SOURCE_LABEL, ENGAGEMENT_KEYS
+                wanted_ids = [entry.source_section]
+            public = [
+                identifier
+                for identifier, disclosure in pool.items()
+                if not disclosure.startswith(PRIVATE_DISCLOSURE_PREFIX)
+            ]
 
-            readable, expected, candidates = explain_heading(
-                self.settings, snapshot, LEDGER_SOURCE_LABEL, section, list(engagements)
-            )
-            if not readable:
+            for section in wanted_ids:
+                # spec: REQ-380
+                # spec: REQ-383
+                readable, expected, candidates = explain_heading(
+                    self.settings, snapshot, label, section, list(pool), keys
+                )
+                if not readable:
+                    violations.append(
+                        Violation(
+                            constraint=NOTE_AND_SOURCE_SECTION_EXISTS,
+                            file=self.settings.files[LEDGER_KEY],
+                            location=location,
+                            expected=expected,
+                            candidates=candidates,
+                        )
+                    )
+                    continue
+
+                disclosure = pool[section]
+                # spec: REQ-019
+                # spec: REQ-382
+                if disclosure.startswith(PRIVATE_DISCLOSURE_PREFIX):
+                    violations.append(
+                        Violation(
+                            constraint=SOURCE_AND_EVIDENCE_DISCLOSURE,
+                            file=self.settings.files[LEDGER_KEY],
+                            location=location,
+                            expected=(
+                                f"出典の節「{labelled(section, labels)}」の公開可否は"
+                                f"「{disclosure}」なので、そこから写した中身は外に出せない。"
+                                "公開可の節の ID に差し替えるか、このブロックを台帳から外す。"
+                                + candidate_text(public, labels)
+                            ),
+                            candidates=public,
+                        )
+                    )
+        return violations
+
+    def _check_presentation_sources(
+        self, snapshot: SourceSnapshot, target: InspectionScope
+    ) -> list[Violation]:
+        """提示物が宣言した出典の節の ID が、職歴の枠か受託案件の ID として実在するかを見る。"""
+        pool = snapshot.section_headings()
+        violations: list[Violation] = []
+        for presentation in target.presentations:
+            for section in presentation.source_sections:
+                # spec: REQ-393
+                readable, expected, candidates = explain_heading(
+                    self.settings, snapshot, PRESENTATION_SOURCE_TEXT_LABEL, section, pool
+                )
+                if readable:
+                    continue
                 violations.append(
                     Violation(
                         constraint=NOTE_AND_SOURCE_SECTION_EXISTS,
-                        file=self.settings.files["resume_ledger"],
-                        location=location,
+                        file=presentation.path,
+                        location=f"「{PRESENTATION_SOURCE_LABEL}」の行",
                         expected=expected,
                         candidates=candidates,
                     )
                 )
-                continue
-
-            engagement = engagements[section]
-            # spec: REQ-019
-            if engagement.disclosure.startswith(PRIVATE_DISCLOSURE_PREFIX):
-                violations.append(
-                    Violation(
-                        constraint=SOURCE_AND_EVIDENCE_DISCLOSURE,
-                        file=self.settings.files["resume_ledger"],
-                        location=location,
-                        expected=(
-                            f"出典の節「{labelled(section, labels)}」の公開可否は"
-                            f"「{engagement.disclosure}」なので、そこから写した中身は外に出せない。"
-                            "公開可の節の ID に差し替えるか、この案件を台帳から外す。"
-                            + candidate_text(public, labels)
-                        ),
-                        candidates=public,
-                    )
-                )
         return violations
+
+    def _check_copy_freshness(
+        self, snapshot: SourceSnapshot, target: InspectionScope
+    ) -> tuple[list[Violation], list[str]]:
+        """写しの鮮度を見る。写しが控えた出典の指紋と、出典の節のいまの本文の指紋を比べる。
+
+        写しは、職務経歴書の台帳のブロックと、出典の節を宣言した提示物である。控えた指紋が
+        いまの指紋と違う出典と、指紋の控えが無い出典（未確認の写し）があれば、その写しを名指しした
+        違反を 1 件挙げる。見るのは「写した後に正本の節が変わったか」だけで、写しの文言が正本と
+        合っているかは見ない。出典の節に書いていない ID の組は見ず、実在しない出典や読めていない
+        出典は、実在の違反が別に挙がるのでここでは判定しない。
+        出典の節を宣言していない提示物は判定の外にあるので、その件数を断りに書く。
+        """
+        engagement_ids = {item.id for item in snapshot.engagements}
+        frame_ids = {item.id for item in snapshot.career_frames}
+        violations: list[Violation] = []
+
+        for entry in target.ledger_entries:
+            if entry.kind == LEDGER_KIND_FRAME:
+                sources, readable = split_ids(entry.source_section), frame_ids
+            else:
+                sources, readable = [entry.source_section], engagement_ids
+            violation = self._freshness_violation(
+                snapshot,
+                sources=sources,
+                readable=readable,
+                recorded=entry.source_fingerprints,
+                file=self.settings.files[LEDGER_KEY],
+                # spec: REQ-384
+                location=f"{_ledger_place(entry)}の「{FINGERPRINT_FIELD_LABEL}」の行",
+            )
+            if violation is not None:
+                violations.append(violation)
+
+        undeclared: list[str] = []
+        for presentation in target.presentations:
+            if not presentation.source_sections:
+                undeclared.append(presentation.path)
+                continue
+            # spec: REQ-391
+            violation = self._freshness_violation(
+                snapshot,
+                sources=presentation.source_sections,
+                readable=engagement_ids | frame_ids,
+                recorded=presentation.source_fingerprints,
+                file=presentation.path,
+                location=f"「{FINGERPRINT_FIELD_LABEL}」の行",
+            )
+            if violation is not None:
+                violations.append(violation)
+
+        notes: list[str] = []
+        if undeclared:
+            # spec: REQ-392
+            notes.append(
+                f"出典の節を宣言していない提示物が {len(undeclared)} 件ある"
+                f"（{fold_names(undeclared, keep=NAME_SAMPLE_COUNT)}）。"
+                "この提示物は、写した後に正本の節が変わったかを見ていない。"
+                f"見させるには、先頭の欄に「- {PRESENTATION_SOURCE_LABEL}: 写し元の節の ID」の行を足す。"
+                f"足した後の検査が、書くべき「{FINGERPRINT_FIELD_LABEL}」の行を返す。"
+            )
+        return violations, notes
+
+    def _freshness_violation(
+        self,
+        snapshot: SourceSnapshot,
+        *,
+        sources: list[str],
+        readable: set[str],
+        recorded: list[dict[str, str]],
+        file: str,
+        location: str,
+    ) -> Violation | None:
+        """写し 1 つの出典を、控えた指紋といまの指紋で比べる。食い違いか控えの無い出典があれば違反 1 件。"""
+        labels = snapshot.labels()
+        kept = {
+            pair.get(FINGERPRINT_ID_KEY, ""): pair.get(FINGERPRINT_VALUE_KEY, "")
+            for pair in recorded
+        }
+        current: list[tuple[str, str]] = []
+        changed: list[str] = []
+        unconfirmed: list[str] = []
+        for identifier in dict.fromkeys(sources):
+            fingerprint = snapshot.section_fingerprints.get(identifier)
+            # spec: REQ-390
+            if identifier not in readable or fingerprint is None:
+                continue
+            current.append((identifier, fingerprint))
+            written = kept.get(identifier, "")
+            # spec: REQ-387
+            if not written:
+                unconfirmed.append(identifier)
+            # spec: REQ-388
+            elif written != fingerprint:
+                changed.append(identifier)
+
+        if not changed and not unconfirmed:
+            return None
+
+        reasons: list[str] = []
+        for identifier in changed:
+            # spec: REQ-385
+            reasons.append(
+                f"出典の節「{labelled(identifier, labels)}」の本文が、写しに控えた指紋"
+                f"「{kept[identifier]}」の後に変わった（いまの本文の指紋は"
+                f"「{snapshot.section_fingerprints[identifier]}」）。"
+            )
+        if unconfirmed:
+            names = "、".join(f"「{labelled(item, labels)}」" for item in unconfirmed)
+            reasons.append(
+                f"出典の節{names}は指紋の控えが無いので、写した後に本文が変わったかを"
+                "確かめられない（未確認の写し）。"
+            )
+        # spec: REQ-386
+        # 示す行は、正本にそのまま書き足せば読まれる箇条書きの形「- 出典の指紋: …」にする。
+        line = f"- {FINGERPRINT_FIELD_LABEL}: {format_fingerprints(current)}"
+        return Violation(
+            constraint=COPY_FRESHNESS,
+            file=file,
+            location=location,
+            expected=(
+                "".join(reasons)
+                + "この写しを、いまの出典の節の本文と読み比べて、食い違う記述を直す。"
+                f"読み比べ終えたら、「{FINGERPRINT_FIELD_LABEL}」の行を次の 1 行に書き換える"
+                f"（行が無ければ足す）: {line}"
+            ),
+            candidates=[],
+        )
+
+
+def _ledger_place(entry: ResumeLedger) -> str:
+    """台帳のブロック 1 つを、違反の文で名指しする言い方にする。番号の無い在籍職歴の枠は見出しだけで指す。"""
+    if entry.kind == LEDGER_KIND_FRAME:
+        if entry.entry_number:
+            return f"在籍職歴の枠 {entry.entry_number}（{entry.heading}）"
+        return f"在籍職歴の枠（{entry.heading}）"
+    return f"案件番号 {entry.entry_number}（{entry.heading}）"
+
+
+def unread_ledger_note(settings: Settings, snapshot: SourceSnapshot) -> str | None:
+    """台帳の読まなかった節を、件数と見出しを持つ 1 件の断りにする。すべて読んだなら None。"""
+    unread = snapshot.unread_ledger_sections
+    # spec: REQ-395
+    if not unread:
+        return None
+    headings = "、".join(f"「{item.heading}」" for item in unread)
+    reasons = " / ".join(dict.fromkeys(item.reason for item in unread))
+    # spec: REQ-394
+    return (
+        f"職務経歴書の台帳 {settings.files.get(LEDGER_KEY, LEDGER_KEY)} の節のうち "
+        f"{len(unread)} 件は、読み方の絞りで外れたので読んでいない（{headings}。外れた理由: {reasons}）。"
+        "この節は、出典の節の実在も写しの鮮度も見ていない。案件か在籍職歴の枠として見させるなら、"
+        f"見出しを設定の [{READING_KEY}.{LEDGER_KEY}] の heading_prefix か frame_heading_prefix で始める。"
+    )
 
 
 # ---------------------------------------------------------------- 制約と実装の対応表
@@ -1123,6 +1366,7 @@ ENFORCEMENT: dict[str, dict[str, tuple[Callable[..., Any], ...]]] = {
         "check_consistency": (
             ConsistencyService._check_pending_notes,
             ConsistencyService._check_ledger_source_sections,
+            ConsistencyService._check_presentation_sources,
         ),
     },
     SOURCE_AND_EVIDENCE_DISCLOSURE: {
@@ -1151,6 +1395,9 @@ ENFORCEMENT: dict[str, dict[str, tuple[Callable[..., Any], ...]]] = {
     },
     PRESENTATION_URL_MATCHES: {
         "check_consistency": (ConsistencyService._check_presentation_urls,),
+    },
+    COPY_FRESHNESS: {
+        "check_consistency": (ConsistencyService._check_copy_freshness,),
     },
 }
 

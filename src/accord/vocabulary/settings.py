@@ -80,6 +80,10 @@ class BlockRule:
     heading_levels: tuple[int, ...] = (2,)
     under_headings: tuple[str, ...] = ()
     heading_prefix: str = ""
+    # 職務経歴書の台帳だけに書ける鍵。見出しがこの文字列で始まる節を、在籍職歴の枠のブロックとして読む。
+    # heading_prefix の絞りを通さない見出しでも、この文字列で始まれば読む（heading_prefix の意味は変えない）。
+    # spec: REQ-375
+    frame_heading_prefix: str = ""
     skip_headings: tuple[str, ...] = ()
     skip_sections_without_fields: bool = False
     # 欄を読む
@@ -98,7 +102,14 @@ DEFAULT_BLOCK_RULE = BlockRule()
 # ラベルの読み替え（labels）と括弧書きの除去（strip_label_note）は正本を問わず共通なので、
 # 正本ごとの節ではなく [reading] の直下に 1 度だけ書く。
 COMMON_LABEL_KEYS = frozenset({"strip_label_note", "labels"})
-BLOCK_RULE_KEYS = frozenset(item.name for item in fields(BlockRule)) - COMMON_LABEL_KEYS
+# 職務経歴書の台帳の節にだけ書ける鍵。ほかの正本の節に書くと、知らない鍵として止める。
+LEDGER_ONLY_KEYS = frozenset({"frame_heading_prefix"})
+BLOCK_RULE_KEYS = (
+    frozenset(item.name for item in fields(BlockRule)) - COMMON_LABEL_KEYS - LEDGER_ONLY_KEYS
+)
+
+# 職務経歴書の台帳の正本の役割の名前。
+RESUME_LEDGER_KEY = "resume_ledger"
 
 
 @dataclass(frozen=True)
@@ -242,7 +253,7 @@ def _one_of(value: object, choices: tuple[str, ...], where: str, config_path: Pa
 def _block_rule(table: dict, common: dict, where: str, config_path: Path) -> BlockRule:
     """正本 1 種の書き方の節を、読み方にする。書いていない鍵は既定値のまま残る。"""
     values = dict(common)
-    for name in BLOCK_RULE_KEYS:
+    for name in BLOCK_RULE_KEYS | LEDGER_ONLY_KEYS:
         if name not in table:
             continue
         value = table[name]
@@ -250,7 +261,7 @@ def _block_rule(table: dict, common: dict, where: str, config_path: Path) -> Blo
             values[name] = tuple(int(item) for item in value)
         elif name in ("under_headings", "skip_headings", "bare_labels"):
             values[name] = tuple(str(item) for item in value)
-        elif name == "heading_prefix":
+        elif name in ("heading_prefix", "frame_heading_prefix"):
             values[name] = str(value)
         else:
             values[name] = bool(value)
@@ -296,6 +307,7 @@ def load_reading_rules(document: dict, config_path: Path) -> ReadingRules:
         extra = {
             "presentations": set(PRESENTATION_KEYS),
             PRESENTATION_RULES_KEY: set(PRESENTATION_RULES_KEYS),
+            RESUME_LEDGER_KEY: set(LEDGER_ONLY_KEYS),
         }.get(key, set())
         _reject_unknown_keys(
             section, BLOCK_RULE_KEYS | extra, f"{READING_KEY}.{key}", config_path

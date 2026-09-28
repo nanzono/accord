@@ -17,6 +17,9 @@ from accord.models.constraints import CONSTRAINTS, Constraint
 # 正本の置き場。このファイルから見て 1 つ上（src/accord/）に置く。
 ONTOLOGY_PATH = Path(__file__).resolve().parent.parent / "ontology.yaml"
 
+# 種類ごとに必須の欄が変わる型が持つ、種類の欄の名前。必須欄の判定はこの欄の値を見る。
+KIND_FIELD = "kind"
+
 # 欄の書き方の例を組み立てるときの、型ごとの見本。ontology.yaml が欄に書ける型の 5 つに対応する。
 # 値そのものの例（媒体の名前、分類の名前）は語彙なので、ここには置かず設定から取る。
 FIELD_EXAMPLES = {
@@ -35,6 +38,8 @@ class OntologyField(BaseModel):
     label: str
     type: str
     required: bool = False
+    # 種類の欄（kind）がこの一覧の語のブロックでだけ必須になる欄。空なら種類によらない。
+    required_for_kinds: list[str] = Field(default_factory=list)
     description: str = ""
 
 
@@ -109,6 +114,9 @@ def load_ontology(path: Path | None = None) -> Ontology:
 def missing_required_fields(type_name: str, draft: object) -> list[OntologyField]:
     """型の正本が必須と定める欄のうち、入力が持っていない（または空の）ものを返す。
 
+    種類によって必須かどうかが変わる欄（required_for_kinds）は、入力の種類の欄（kind）が
+    その一覧の語のときだけ必須として見る。
+
     書きの操作が「欠けた欄」を数えるための 1 か所である。欄の名前を操作の側に書き写すと、
     正本の欄を直したときに、片方だけが古いまま残る。
     入力がその欄を持たないとき（操作の側が値を決める最終更新日など）は、見に行かない。
@@ -117,9 +125,14 @@ def missing_required_fields(type_name: str, draft: object) -> list[OntologyField
     if entry is None:
         return []
 
+    kind = getattr(draft, KIND_FIELD, None)
     missing: list[OntologyField] = []
     for field in entry.fields:
-        if not field.required or not hasattr(draft, field.name):
+        # spec: REQ-376
+        required = field.required or (
+            bool(field.required_for_kinds) and kind in field.required_for_kinds
+        )
+        if not required or not hasattr(draft, field.name):
             continue
         value = getattr(draft, field.name)
         if value is None:

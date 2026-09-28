@@ -1013,3 +1013,312 @@ def test_REQ_045_same_unknown_url_written_twice_is_one_violation(settings) -> No
     urls = _url_violations(report)
     assert len(urls) == 1, [violation.model_dump() for violation in urls]
     assert UNKNOWN_URL in urls[0].location
+
+
+# ---------------------------------------------------------------- 写しの鮮度と、読まなかった節
+
+COPY_FRESHNESS = "写しの鮮度"
+
+# 第 2 のサンプルの台帳の在籍職歴の枠と、その出典の職歴の枠。
+FRAME_ID = "freelance-solo"
+FRAME_HEADING = "枠1｜2021-04〜現在 フリーランス"
+FRAME_PLACE = "在籍職歴の枠 1"
+# 職歴の枠の本文の 1 行を直す置き換え。受託案件の節（入れ子の下位の見出し）には触れない。
+FRAME_BODY_EDIT = (
+    "- やったこと: 3 社の案件を、相談の受けから運用の引き渡しまで 1 人で担当した。",
+    "- やったこと: 3 社の案件を、相談の受けから運用の引き渡しまで 1 人で受け持った。",
+)
+# 第 1 のサンプルの台帳の案件 2 の、出典の指紋の行。
+ENTRY_2_FINGERPRINT_LINE = "- 出典の指紋: yukinoha-quality=a0c2d25e\n"
+# 第 2 のサンプルの台帳のうち、案件でも在籍職歴の枠でもない 2 つの節。
+UNREAD_LEDGER_HEADINGS = ("台帳の使い方", "出典の節の決め方")
+UNREAD_NOTE_MARK = "読み方の絞りで外れたので読んでいない"
+UNDECLARED_NOTE_MARK = "出典の節を宣言していない提示物"
+# 提示物に写し元を宣言する行を足す置き場。
+DECLARE_AFTER = "- 未反映の注記: なし\n"
+
+
+def _freshness(report) -> list:
+    """検査の結果から、写しの鮮度の違反だけを取り出す。"""
+    return [item for item in report.violations if item.constraint == COPY_FRESHNESS]
+
+
+def _current_fingerprints(settings) -> dict[str, str]:
+    """写しの正本の、職歴の枠と受託案件のいまの指紋を読む。"""
+    from accord.repository.markdown_repository import MarkdownRepository
+
+    return MarkdownRepository(settings).load().section_fingerprints
+
+
+def _frame_body_edited(alt_settings):
+    """第 2 のサンプルの職歴の枠の本文を 1 行直し、台帳は直さずに検査した結果を返す。"""
+    _rewrite(alt_settings.path_for("career"), *FRAME_BODY_EDIT)
+    return _report(alt_settings)
+
+
+def test_REQ_384_editing_the_source_names_the_ledger_block_as_stale(alt_settings) -> None:
+    """職歴の枠の本文を 1 行直して台帳を直さないと、その在籍職歴の枠を名指しした違反が挙がる。"""
+    stale = _freshness(_frame_body_edited(alt_settings))
+
+    assert len(stale) >= 1, stale
+    named = [item for item in stale if FRAME_PLACE in item.location]
+    assert len(named) == 1, [item.model_dump() for item in stale]
+    assert FRAME_HEADING in named[0].location, named[0].location
+    assert named[0].file == alt_settings.files["resume_ledger"]
+
+
+def test_REQ_385_stale_copy_names_the_changed_source_id(alt_settings) -> None:
+    """写しの鮮度の違反は、本文が変わった出典の節の ID を直し先に書く。"""
+    stale = _freshness(_frame_body_edited(alt_settings))
+
+    assert [item for item in stale if FRAME_ID in item.expected], stale
+    # 本文を直していない受託案件の写しは挙がらない。
+    assert [item.location for item in stale] == [
+        f"{FRAME_PLACE}（{FRAME_HEADING}）の「出典の指紋」の行"
+    ]
+
+
+def test_REQ_386_stale_copy_gives_the_fingerprint_line_to_write(alt_settings) -> None:
+    """写しの鮮度の違反は、読み比べた後に書く「出典の指紋」の行を、いまの本文の値で直し先に書く。"""
+    stale = _freshness(_frame_body_edited(alt_settings))
+    current = _current_fingerprints(alt_settings)[FRAME_ID]
+
+    line = f"出典の指紋: {FRAME_ID}={current}"
+    assert line in stale[0].expected, stale[0].expected
+    assert stale[0].candidates == []
+
+
+def test_REQ_387_a_copy_without_a_fingerprint_is_an_unconfirmed_copy(settings) -> None:
+    """出典の ID に対応する指紋の組が無い台帳のブロックは、未確認の写しとして挙がる。"""
+    _rewrite(settings.path_for("resume_ledger"), ENTRY_2_FINGERPRINT_LINE, "")
+
+    stale = _freshness(_report(settings))
+
+    assert len(stale) == 1, [item.model_dump() for item in stale]
+    assert "案件番号 2" in stale[0].location, stale[0].location
+    assert "未確認" in stale[0].expected, stale[0].expected
+    assert "出典の指紋: yukinoha-quality=a0c2d25e" in stale[0].expected, stale[0].expected
+
+
+def test_REQ_388_matching_fingerprints_raise_nothing(settings, alt_settings) -> None:
+    """控えた指紋がいまの本文の指紋と一致していれば、写しの鮮度の違反は挙がらない。"""
+    assert _freshness(_report(settings)) == []
+    assert _freshness(_report(alt_settings)) == []
+
+
+def test_REQ_388_writing_the_returned_line_clears_the_violation(alt_settings) -> None:
+    """違反が返した「出典の指紋」の行をそのまま写しに書くと、次の検査では挙がらない。"""
+    stale = _freshness(_frame_body_edited(alt_settings))
+    line = stale[0].expected.rsplit("（行が無ければ足す）: ", 1)[1]
+    ledger = alt_settings.path_for("resume_ledger")
+    text = ledger.read_text(encoding="utf-8")
+    old = next(item for item in text.splitlines() if item.startswith(f"- 出典の指紋: {FRAME_ID}="))
+    ledger.write_text(text.replace(old, line), encoding="utf-8")
+
+    assert _freshness(_report(alt_settings)) == []
+
+
+def test_REQ_389_fingerprint_ignores_the_heading_trailing_spaces_and_blank_lines() -> None:
+    """指紋は、見出しの行を除き、行末の空白と前後の空行を落とし、改行を LF にそろえた本文から作る。"""
+    import hashlib
+
+    from accord.repository.sections import section_fingerprint, split_sections
+
+    body = "- ID: sample-one\n- 期間: 2021-04〜現在"
+    expected = hashlib.sha256(body.encode("utf-8")).hexdigest()[:8]
+
+    assert section_fingerprint(body) == expected
+    assert section_fingerprint("\n\n- ID: sample-one  \n- 期間: 2021-04〜現在\t\n\n") == expected
+    assert section_fingerprint("- ID: sample-one\r\n- 期間: 2021-04〜現在\r\n") == expected
+    # 見出しの行は本文に入らないので、見出しを書き換えても指紋は変わらない。
+    for heading in ("## 2021-04〜現在 フリーランス", "## 2021-04〜 個人で受ける"):
+        section = split_sections(f"{heading}\n\n{body}\n")[1]
+        assert section_fingerprint(section.body) == expected
+    assert section_fingerprint(body + "。") != expected
+
+
+def test_REQ_389_trailing_spaces_in_the_source_do_not_make_a_copy_stale(alt_settings) -> None:
+    """正本の節に行末の空白や空行を足しても、写しの鮮度の違反は挙がらない。"""
+    old, _ = FRAME_BODY_EDIT
+    _rewrite(alt_settings.path_for("career"), old, old + "   \t")
+    # 節の本文の最後の行の後ろ（次の見出しの前）に空行を足す。
+    last = "- 出所: 契約書の写し（2021-04 以降のもの）\n"
+    _rewrite(alt_settings.path_for("career"), last, last + "\n\n")
+
+    assert _freshness(_report(alt_settings)) == []
+
+
+def test_REQ_390_an_unreadable_source_is_not_judged_for_freshness(settings) -> None:
+    """出典の節の ID が実在しないときは、その ID の写しの鮮度を判定しない（実在の違反だけが挙がる）。"""
+    _rewrite(
+        settings.path_for("resume_ledger"),
+        "- 出典の節: yukinoha-quality\n",
+        "- 出典の節: yukinoha-qualty\n",
+    )
+
+    report = _report(settings)
+
+    assert _freshness(report) == []
+    assert [item.constraint for item in report.violations] == [NOTE_AND_SOURCE_SECTION_EXISTS]
+
+
+def test_REQ_390_a_source_in_an_unreadable_file_is_not_judged_for_freshness(settings) -> None:
+    """出典の節の正本そのものが読めていないときも、写しの鮮度は判定しない。"""
+    config = settings.config_path
+    text = config.read_text(encoding="utf-8")
+    config.write_text(
+        text.replace('engagements = "engagements.md"', 'engagements = "no_such.md"', 1),
+        encoding="utf-8",
+    )
+    from accord.vocabulary.settings import load_settings
+
+    assert _freshness(_report(load_settings(config))) == []
+
+
+def _declare_sources(path: Path, sources: str, fingerprints: str | None) -> None:
+    """提示物の先頭の欄に、写し元の宣言の行を足す。"""
+    lines = f"- 出典の節: {sources}\n"
+    if fingerprints is not None:
+        lines += f"- 出典の指紋: {fingerprints}\n"
+    _rewrite(path, DECLARE_AFTER, DECLARE_AFTER + lines)
+
+
+def test_REQ_391_a_declared_presentation_is_judged_like_a_ledger_block(settings) -> None:
+    """出典の節を宣言した提示物にも、台帳と同じ判定で写しの鮮度を当てる。"""
+    skill_sheet = settings.path_for("presentations") / "nagiho" / "skill_sheet.md"
+    current = _current_fingerprints(settings)["nagisa-publishing"]
+    _declare_sources(skill_sheet, "nagisa-publishing", "nagisa-publishing=00000000")
+
+    stale = _freshness(_report(settings))
+
+    assert [item.file for item in stale] == ["presentations/nagiho/skill_sheet.md"]
+    assert "nagisa-publishing" in stale[0].expected, stale[0].expected
+    assert f"出典の指紋: nagisa-publishing={current}" in stale[0].expected, stale[0].expected
+
+
+def test_REQ_391_a_declared_presentation_with_the_current_fingerprint_is_fresh(settings) -> None:
+    """宣言した提示物の指紋がいまの本文と一致していれば、挙がらない。控えが無ければ未確認で挙がる。"""
+    presentations = settings.path_for("presentations")
+    current = _current_fingerprints(settings)["nagisa-publishing"]
+    _declare_sources(
+        presentations / "nagiho" / "skill_sheet.md",
+        "nagisa-publishing",
+        f"nagisa-publishing={current}",
+    )
+    _declare_sources(presentations / "tsukikusa" / "profile.md", "teramina-delivery", None)
+
+    stale = _freshness(_report(settings))
+
+    assert [item.file for item in stale] == ["presentations/tsukikusa/profile.md"]
+    assert "未確認" in stale[0].expected, stale[0].expected
+
+
+def test_REQ_392_undeclared_presentations_are_counted_in_a_note(settings) -> None:
+    """出典の節を宣言していない提示物の件数を、断りに書く。"""
+    before = [note for note in _report(settings).notes if UNDECLARED_NOTE_MARK in note]
+    assert len(before) == 1 and "2 件" in before[0], before
+
+    skill_sheet = settings.path_for("presentations") / "nagiho" / "skill_sheet.md"
+    _declare_sources(skill_sheet, "nagisa-publishing", None)
+
+    after = [note for note in _report(settings).notes if UNDECLARED_NOTE_MARK in note]
+    assert len(after) == 1 and "1 件" in after[0], after
+    assert "profile.md" in after[0], after[0]
+
+
+def test_REQ_393_a_presentation_source_that_does_not_exist_is_a_violation(settings) -> None:
+    """提示物の出典の節が職歴の枠にも受託案件にも無い ID なら、実在する ID を候補にした違反を挙げる。"""
+    skill_sheet = settings.path_for("presentations") / "nagiho" / "skill_sheet.md"
+    _declare_sources(skill_sheet, "nagisa-publishng", None)
+
+    report = _report(settings)
+
+    dangling = [
+        item
+        for item in report.violations
+        if item.constraint == NOTE_AND_SOURCE_SECTION_EXISTS
+        and item.file == "presentations/nagiho/skill_sheet.md"
+    ]
+    assert len(dangling) == 1, [item.model_dump() for item in report.violations]
+    assert "nagisa-publishing" in dangling[0].candidates, dangling[0].candidates
+    assert "職歴の枠にも受託案件にも無い" in dangling[0].expected, dangling[0].expected
+    assert _freshness(report) == []
+
+
+def test_REQ_394_unread_ledger_sections_are_listed_in_one_note(alt_settings) -> None:
+    """台帳の、読み方の深さにあって絞りで外れた節の件数と見出しを、1 件の断りに書く。"""
+    report = _report(alt_settings)
+
+    unread = [note for note in report.notes if UNREAD_NOTE_MARK in note]
+    assert len(unread) == 1, report.notes
+    assert f"{len(UNREAD_LEDGER_HEADINGS)} 件" in unread[0], unread[0]
+    for heading in UNREAD_LEDGER_HEADINGS:
+        assert f"「{heading}」" in unread[0], unread[0]
+    # 題名（深さ 1）は、読み方の深さの外なので数えない。
+    assert "「職務経歴書の台帳」" not in unread[0], unread[0]
+
+
+def test_REQ_395_no_unread_note_when_every_ledger_section_is_read(settings) -> None:
+    """台帳の読み方の深さの節をすべて読んだときは、読まなかった節の断りを書かない。"""
+    report = _report(settings)
+
+    assert [note for note in report.notes if UNREAD_NOTE_MARK in note] == []
+
+
+def test_REQ_396_the_unread_note_survives_the_note_limit(alt_settings, monkeypatch) -> None:
+    """ほかの断りが上限を超えても、台帳の読まなかった節の断りは打ち切られない。"""
+    import accord.services.consistency as consistency
+
+    flood = [f"型にできなかったブロックの断り {index}" for index in range(NOTE_LIMIT + 10)]
+    monkeypatch.setattr(consistency, "defect_notes", lambda settings, snapshot: list(flood))
+
+    notes = _report(alt_settings).notes
+
+    assert len(notes) == NOTE_LIMIT, len(notes)
+    assert "ほかに" in notes[-1], notes[-1]
+    assert [note for note in notes if UNREAD_NOTE_MARK in note], notes
+
+
+def _append_to_block(path: Path, heading: str, line: str) -> None:
+    """正本の、見出しがその文字列の節の末尾（次の見出しの直前）に 1 行書き足す。"""
+    lines = path.read_text(encoding="utf-8").splitlines()
+    start = lines.index(f"## {heading}")
+    end = next(
+        (index for index in range(start + 1, len(lines)) if lines[index].startswith("#")),
+        len(lines),
+    )
+    while end > start + 1 and not lines[end - 1].strip():
+        end -= 1
+    lines.insert(end, line)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("which", "heading", "fingerprint_prefix"),
+    [
+        ("settings", "案件 2 品質記録の集約と見える化", "- 出典の指紋: yukinoha-quality="),
+        ("alt_settings", "案件2｜品質記録の集約と見える化", "- 出典の指紋: yukinoha-quality="),
+        ("alt_settings", FRAME_HEADING, f"- 出典の指紋: {FRAME_ID}="),
+    ],
+)
+def test_REQ_386_the_returned_line_can_be_appended_as_is(
+    request, which: str, heading: str, fingerprint_prefix: str
+) -> None:
+    """直し先に示した「出典の指紋」の行を、そのままブロックの末尾に書き足すと違反が消える。
+
+    2 つ目の見本は欄を表から読む設定だが、箇条書きの行として足しても読まれることを見る。
+    """
+    settings = request.getfixturevalue(which)
+    ledger = settings.path_for("resume_ledger")
+    text = ledger.read_text(encoding="utf-8")
+    old = next(item for item in text.splitlines() if item.startswith(fingerprint_prefix))
+    ledger.write_text(text.replace(old + "\n", "", 1), encoding="utf-8")
+
+    stale = _freshness(_report(settings))
+    assert len(stale) == 1, [item.model_dump() for item in stale]
+    line = stale[0].expected.rsplit("（行が無ければ足す）: ", 1)[1]
+    assert line.startswith("- 出典の指紋: "), line
+
+    _append_to_block(ledger, heading, line)
+
+    assert _freshness(_report(settings)) == []

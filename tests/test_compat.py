@@ -108,7 +108,10 @@ def test_REQ_083_alt_sample_loads_every_type(alt_settings) -> None:
         "nagiho/skill_sheet.md",
     ]
     # 台帳は 2 列の表を欄として読み、案件番号は見出しの数字から取る。
-    assert [item.entry_number for item in snapshot.ledger_entries] == ["1", "2", "3"]
+    # 在籍職歴の枠（見出しが「枠」で始まるブロック）は、案件とは別に番号を持つ。
+    assert [
+        (item.kind, item.entry_number) for item in snapshot.ledger_entries
+    ] == [("案件", "1"), ("案件", "2"), ("案件", "3"), ("在籍職歴の枠", "1")]
     assert snapshot.ledger_entries[0].fold_line
     # 公開記録は、束ねるための見出しの下の深さ 3 の節で 1 件ぶんになる。
     assert len(snapshot.public_records) == 2

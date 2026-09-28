@@ -236,6 +236,30 @@
 - 関係するファイル: `src/accord/repository/markdown_repository.py`
 - 検証手順: `uv run pytest tests/test_compat.py -k REQ_083`
 
+## REQ-375
+読み方の節で `frame_heading_prefix` が有効な場合、accord は見出しがその文字列で始まる台帳の節を、在籍職歴の枠のブロックとして読む。
+
+- 関係するファイル: `src/accord/vocabulary/settings.py`、`src/accord/repository/markdown_repository.py`
+- 検証手順: `uv run pytest tests/test_reading_settings.py -k REQ_375`
+
+## REQ-376
+常に、accord は台帳の在籍職歴の枠のブロックに、案件のブロックだけが持つ欄（規模・担当工程・役割と任され方・自分が決めたこと・終わりの状態）を求めない。
+
+- 関係するファイル: `src/accord/ontology.yaml`、`src/accord/repository/markdown_repository.py`
+- 検証手順: `uv run pytest tests/test_reading_settings.py -k REQ_376`
+
+## REQ-377
+もし台帳の在籍職歴の枠のブロックに見出し・期間・出典の節のどれかが無いなら、accord はそのブロックを読んでいないことを、欠けた欄の名前を添えた断りで返す。
+
+- 関係するファイル: `src/accord/repository/markdown_repository.py`
+- 検証手順: `uv run pytest tests/test_reading_settings.py -k REQ_377`
+
+## REQ-378
+読み方の節で `frame_heading_prefix` と `entry_number_from_heading` が有効な場合、accord は在籍職歴の枠の番号を、見出しのその前置きに続く数字から読む。
+
+- 関係するファイル: `src/accord/repository/markdown_repository.py`
+- 検証手順: `uv run pytest tests/test_reading_settings.py -k REQ_378`
+
 ## 未決の質問
 
 - 「読み方を広げた設定で正本にブロックを書き足したとき」（REQ-073）の「読み方を広げた設定」が、どこまでを指すかを決めていません。いまのテストは同梱の 2 つ目の見本の設定 1 つで確かめているので、別の広げ方（たとえば欄を表だけから読む設定）でも同じことを言うのかは、この文からは決まりません。別の広げ方で往復が壊れたときに決めます。

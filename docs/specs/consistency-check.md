@@ -305,7 +305,86 @@ URL を持たない公開記録だけが正本にあるとき、accord は提示
 - 関係するファイル: `src/accord/services/consistency.py`
 - 検証手順: `uv run pytest tests/test_consistency.py -k REQ_369`
 
+## REQ-384
+もし台帳のブロックが控えた出典の指紋が、出典の節のいまの本文から作った指紋と違うなら、accord はそのブロックを名指しした写しの鮮度の違反を挙げる。
+
+- 関係するファイル: `src/accord/services/consistency.py`
+- 検証手順: `uv run pytest tests/test_consistency.py -k REQ_384`
+
+## REQ-385
+写しの鮮度の違反を挙げるとき、accord は本文が変わった出典の節の ID を違反の直し先に書く。
+
+- 関係するファイル: `src/accord/services/consistency.py`
+- 検証手順: `uv run pytest tests/test_consistency.py -k REQ_385`
+
+## REQ-386
+写しの鮮度の違反を挙げるとき、accord は読み比べた後に写しへ書く「出典の指紋」の行を、いまの本文から作った値で違反の直し先に書く。
+
+- 関係するファイル: `src/accord/services/consistency.py`
+- 検証手順: `uv run pytest tests/test_consistency.py -k REQ_386`
+
+## REQ-387
+もし台帳のブロックの出典の節の ID に対応する出典の指紋が無いなら、accord はそのブロックを未確認の写しとして写しの鮮度の違反に挙げる。
+
+- 関係するファイル: `src/accord/services/consistency.py`
+- 検証手順: `uv run pytest tests/test_consistency.py -k REQ_387`
+
+## REQ-388
+台帳のブロックが控えた出典の指紋が出典の節のいまの本文の指紋と一致するとき、accord は写しの鮮度の違反を挙げない。
+
+- 関係するファイル: `src/accord/services/consistency.py`
+- 検証手順: `uv run pytest tests/test_consistency.py -k REQ_388`
+
+## REQ-389
+常に、accord は節の指紋を、見出しの行を除き、各行の末尾の空白と前後の空行を落とした本文から作る。
+
+- 関係するファイル: `src/accord/services/consistency.py`
+- 検証手順: `uv run pytest tests/test_consistency.py -k REQ_389`
+
+## REQ-390
+もし出典の節の ID が実在しないか読めていないなら、accord はその ID について写しの鮮度を判定しない。
+
+- 関係するファイル: `src/accord/services/consistency.py`
+- 検証手順: `uv run pytest tests/test_consistency.py -k REQ_390`
+
+## REQ-391
+提示物が出典の節を宣言しているとき、accord はその提示物にも、台帳のブロックと同じ判定で写しの鮮度を当てる。
+
+- 関係するファイル: `src/accord/services/consistency.py`、`src/accord/repository/markdown_repository.py`
+- 検証手順: `uv run pytest tests/test_consistency.py -k REQ_391`
+
+## REQ-392
+出典の節を宣言していない提示物があるとき、accord はその件数を断りに書く。
+
+- 関係するファイル: `src/accord/services/consistency.py`
+- 検証手順: `uv run pytest tests/test_consistency.py -k REQ_392`
+
+## REQ-393
+もし提示物の出典の節に書いた ID が職歴の枠にも受託案件にも無いなら、accord は実在する ID を候補にした違反を挙げる。
+
+- 関係するファイル: `src/accord/services/consistency.py`
+- 検証手順: `uv run pytest tests/test_consistency.py -k REQ_393`
+
+## REQ-394
+台帳に、読み方の深さにあって読み方の絞りで外れた節があるとき、accord はその件数と見出しを 1 件の断りに書く。
+
+- 関係するファイル: `src/accord/repository/markdown_repository.py`、`src/accord/services/consistency.py`
+- 検証手順: `uv run pytest tests/test_consistency.py -k REQ_394`
+
+## REQ-395
+台帳の読み方の深さの節がすべて読まれたとき、accord は読まなかった節の断りを書かない。
+
+- 関係するファイル: `src/accord/services/consistency.py`
+- 検証手順: `uv run pytest tests/test_consistency.py -k REQ_395`
+
+## REQ-396
+常に、accord は台帳の読まなかった節の断りを、断りの 30 件の上限で打ち切らない。
+
+- 関係するファイル: `src/accord/services/consistency.py`
+- 検証手順: `uv run pytest tests/test_consistency.py -k REQ_396`
+
 ## 未決の質問
 
 - 手を入れていない同梱の見本に違反が出ないことは、検査の振る舞いとも、見本そのものの出来とも読めます。見本に違反が出たときに、検査を直すのか見本を直すのかは、この文だけでは決まりません。実際に落ちたときに、落ちた理由から決めます。
 - 範囲を絞ったときに「見ていないものがある」と断る文は、何をどこまで並べるかを決めていません。いまの文は、媒体で絞ったときと提示物で絞ったときで違い、テストは「見ていない」の語があることだけを見ています。並べる中身まで要件にするかは、文言を変える必要が出たときに決めます。
+- 写しの鮮度は、出典の節の本文が 1 文字でも変われば違反に挙げます。正本の節に、写しに関係しない追記（たとえば別の案件の話）をしたときも挙がります。変わった箇所が写しに関係するかは文の意味の判断なので、accord は見ません。挙がりすぎて読み比べが形だけになるなら、節の切り方（正本の側）で減らすか、判定を変えるかをそのときに決めます。

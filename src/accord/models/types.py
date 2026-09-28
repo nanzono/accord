@@ -98,18 +98,22 @@ class Presentation(BaseModel):
     declared_package: str = Field(description="宣言する束。この文面が名乗っているパッケージの ID。")
     pending_notes: list[str] = Field(default_factory=list, description="未反映の注記。まだ正本に反映していない事実の覚え書き。「受託案件の ID — 覚え書き」の形で書き、区切りより前がその事実の入る先の節の ID になる。指す ID が実在することを検査する。")
     created_on: date | None = Field(default=None, description="作成日")
+    source_sections: list[str] = Field(default_factory=list, description="出典の節。この文面が写した正本の節（職歴の枠か受託案件）の ID。宣言は任意で、宣言した提示物だけ、写した後に正本の節が変わったかを検査する。複数あるときは半角のスラッシュ「/」で区切る。")
+    source_fingerprints: list[dict[str, str]] = Field(default_factory=list, description="出典の指紋。写したときの出典の節の本文の指紋。「ID=指紋」の組を半角のスラッシュ「/」で区切って並べる。指紋は、節の本文から見出しの行を除き、各行の末尾の空白と前後の空行を落とし、改行を LF にそろえた文字列の SHA-256 の先頭 8 桁（16 進の小文字）。")
 
 
 class ResumeLedger(BaseModel):
-    """職務経歴書の台帳。職務経歴書の元になる正本の、案件 1 件ぶんのブロック。台帳全体はこのブロックの並びで持つ。"""
+    """職務経歴書の台帳。職務経歴書の元になる正本の、ブロック 1 つ。ブロックの種類は、案件 1 件ぶんの「案件」と、在籍 1 社ぶんをまとめた「在籍職歴の枠」の 2 つ。台帳全体はこのブロックの並びで持つ。"""
 
-    entry_number: str = Field(description="案件番号。台帳の中での通し番号。違反の一覧はこの番号で場所を指す。")
+    kind: str = Field(description="種類。ブロックの種類。「案件」か「在籍職歴の枠」。見出しの前置きで決まる（在籍職歴の枠は設定の frame_heading_prefix で始まる見出し）。")
+    entry_number: str | None = Field(default=None, description="案件番号。台帳の中での通し番号。違反の一覧はこの番号で場所を指す。（種類が「案件」のブロックでだけ必須）")
     heading: str = Field(description="見出し")
     period: str = Field(description="期間")
-    scale: str = Field(description="規模")
-    process: str = Field(description="担当工程")
-    role: str = Field(description="役割と任され方")
-    decisions: str = Field(description="自分が決めたこと")
-    closing: str = Field(description="終わりの状態")
-    source_section: str = Field(description="出典の節。写し元の節の ID（受託案件）。実在と公開可否を検査する。")
+    scale: str | None = Field(default=None, description="規模（種類が「案件」のブロックでだけ必須）")
+    process: str | None = Field(default=None, description="担当工程（種類が「案件」のブロックでだけ必須）")
+    role: str | None = Field(default=None, description="役割と任され方（種類が「案件」のブロックでだけ必須）")
+    decisions: str | None = Field(default=None, description="自分が決めたこと（種類が「案件」のブロックでだけ必須）")
+    closing: str | None = Field(default=None, description="終わりの状態（種類が「案件」のブロックでだけ必須）")
+    source_section: str = Field(description="出典の節。写し元の節の ID。案件は受託案件の ID を 1 つ、在籍職歴の枠は職歴の枠の ID を 1 つ以上（複数は半角のスラッシュ「/」で区切る）。実在と公開可否を検査する。")
+    source_fingerprints: list[dict[str, str]] = Field(default_factory=list, description="出典の指紋。写したときの出典の節の本文の指紋。「ID=指紋」の組を半角のスラッシュ「/」で区切って並べる。指紋の作り方は提示物の出典の指紋と同じ。控えた指紋といまの指紋が違うか、出典の ID に組が無いと、写しの鮮度の違反になる。")
     fold_line: str | None = Field(default=None, description="畳み行")

@@ -1,7 +1,7 @@
 # 生成物。直すなら src/accord/ontology.yaml を直す
 """accord が執行する制約の宣言。
 
-制約は 16 つで、正本 src/accord/ontology.yaml が
+制約は 17 つで、正本 src/accord/ontology.yaml が
 挙げる制約に 1 対 1 で対応する。サービスの実装も資源の定義も、この 1 か所を名前で参照する。
 同じ制約が、書きの操作では拒否、読みの操作では警告、検査の操作では一覧として現れる。
 """
@@ -75,14 +75,14 @@ CONSTRAINTS: tuple[Constraint, ...] = (
     ),
     Constraint(
         name="注記と出典の節の実在",
-        watches="提示物の未反映の注記が指す ID と、職務経歴書の台帳の出典の節の ID が、受託案件の ID として実在するか。",
+        watches="提示物の未反映の注記が指す ID と、職務経歴書の台帳の案件の出典の節の ID が、受託案件の ID として実在するか。台帳の在籍職歴の枠の出典の節の ID が職歴の枠の ID として、提示物の出典の節の ID が職歴の枠か受託案件の ID として実在するか。",
         enforced_by=("check_consistency",),
         appears_as="検出",
-        next_action="実在する受託案件の ID の候補を返す。",
+        next_action="指す先の型の、実在する ID の候補を返す。",
     ),
     Constraint(
         name="出典と裏づけの節の公開可否",
-        watches="職務経歴書の台帳の出典の節と、機能の裏づけの節が、公開可の節か。未反映の注記が指す節は見ない。",
+        watches="職務経歴書の台帳の出典の節（案件は受託案件、在籍職歴の枠は職歴の枠）と、機能の裏づけの節が、公開可の節か。未反映の注記が指す節は見ない。",
         enforced_by=("check_consistency", "assemble_material", "register_capability"),
         appears_as="検出",
         next_action="公開可の節の ID の候補を返す。材料からは公開不可の節を落とし、落とした節の名前を警告に書く。",
@@ -128,6 +128,13 @@ CONSTRAINTS: tuple[Constraint, ...] = (
         enforced_by=("check_consistency",),
         appears_as="検出",
         next_action="提示物のファイル名と、正本にある近い URL を返す。経路の書き方だけが違うものは、相手の URL を 1 件返す。",
+    ),
+    Constraint(
+        name="写しの鮮度",
+        watches="職務経歴書の台帳のブロックと、出典の節を宣言した提示物が控えた出典の指紋が、出典の節のいまの本文から作った指紋と一致するか。出典の ID に指紋の組が無い写しも、未確認の写しとして見る。写しの文言が正本と合っているかは見ない。",
+        enforced_by=("check_consistency",),
+        appears_as="検出",
+        next_action="本文が変わった出典の節の ID と、読み比べた後に写しへ書く「出典の指紋」の行を、いまの本文から作った値で返す。",
     ),
     Constraint(
         name="逆参照を書かない",

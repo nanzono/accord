@@ -1158,3 +1158,126 @@ def test_the_id_rejection_table_covers_every_write_operation() -> None:
         enforced = set(constraint.enforced_by) - {INSPECT_OPERATION}
 
         assert set(ID_WRITE_OPERATIONS) == enforced, (name, sorted(enforced))
+
+
+# ---------------- 職務経歴書の台帳の在籍職歴の枠の出典の節（第 2 のサンプル）
+
+NOTE_AND_SOURCE_SECTION_EXISTS = "注記と出典の節の実在"
+SOURCE_AND_EVIDENCE_DISCLOSURE = "出典と裏づけの節の公開可否"
+
+# 第 2 のサンプルの台帳の在籍職歴の枠が書く出典の節と、その書き換え先。
+FRAME_SOURCE_LINE = f"- 出典の節: {CAREER_ID}\n"
+FRAME_LOCATION = "在籍職歴の枠 1"
+PRIVATE_CAREER_ID = "agency-employee"
+# 第 2 のサンプルの台帳の案件 1 の出典の節。職歴の枠の ID に向け直す。
+ENTRY_SOURCE_LINE = f"- 出典の節: {ENGAGEMENT_ID}\n"
+
+
+def _frame_violations(settings: Settings) -> list:
+    """写しの正本に検査を当て、台帳の在籍職歴の枠の出典の節の違反だけを取り出す。"""
+    return _violations(
+        settings,
+        lambda item: item.file == settings.files["resume_ledger"]
+        and FRAME_LOCATION in item.location
+        and item.constraint in (NOTE_AND_SOURCE_SECTION_EXISTS, SOURCE_AND_EVIDENCE_DISCLOSURE),
+    )
+
+
+def _career_ids(settings: Settings) -> list[str]:
+    """写しの正本から、職歴の枠の ID を読む。"""
+    return [item.id for item in MarkdownRepository(settings).load().career_frames]
+
+
+def test_REQ_379_frame_source_pointing_at_a_career_frame_is_not_a_violation(
+    alt_settings,
+) -> None:
+    """在籍職歴の枠の出典の節が職歴の枠の ID を指していれば、違反にならない。"""
+    assert FRAME_SOURCE_LINE in alt_settings.path_for("resume_ledger").read_text(encoding="utf-8")
+
+    assert [item.model_dump() for item in _frame_violations(alt_settings)] == []
+
+
+def test_REQ_380_frame_source_not_in_career_frames_lists_career_frame_ids(alt_settings) -> None:
+    """在籍職歴の枠の出典の節が職歴の枠に無い ID なら、実在する職歴の枠の ID を候補に挙げる。"""
+    _rewrite(alt_settings.path_for("resume_ledger"), FRAME_SOURCE_LINE, "- 出典の節: freelance-sol\n")
+
+    violation = _one(_frame_violations(alt_settings))
+
+    assert violation.constraint == NOTE_AND_SOURCE_SECTION_EXISTS
+    assert "職歴の枠の ID に無い" in violation.expected, violation.expected
+    assert CAREER_ID in violation.candidates, violation.candidates
+    assert set(violation.candidates) <= set(_career_ids(alt_settings)), violation.candidates
+
+
+def test_REQ_381_frame_source_ids_separated_by_slashes_are_checked_one_by_one(
+    alt_settings,
+) -> None:
+    """在籍職歴の枠の出典の節に ID をスラッシュで並べると、1 つずつ照らし、無い ID だけを挙げる。"""
+    _rewrite(
+        alt_settings.path_for("resume_ledger"),
+        FRAME_SOURCE_LINE,
+        f"- 出典の節: {CAREER_ID} / no-such-frame\n",
+    )
+
+    violation = _one(_frame_violations(alt_settings))
+
+    assert "「no-such-frame」" in violation.expected, violation.expected
+    assert f"「{CAREER_ID}」" not in violation.expected, violation.expected
+
+
+def test_REQ_382_frame_source_that_is_private_lists_only_public_frames(alt_settings) -> None:
+    """在籍職歴の枠が公開不可の職歴の枠を出典にしていれば、公開可の職歴の枠だけを候補に挙げる。"""
+    _rewrite(
+        alt_settings.path_for("resume_ledger"),
+        FRAME_SOURCE_LINE,
+        f"- 出典の節: {PRIVATE_CAREER_ID}\n",
+    )
+
+    violation = _one(_frame_violations(alt_settings))
+
+    assert violation.constraint == SOURCE_AND_EVIDENCE_DISCLOSURE
+    assert "公開不可" in violation.expected, violation.expected
+    assert violation.candidates == [CAREER_ID]
+
+
+def test_REQ_383_entry_source_pointing_at_a_career_frame_says_not_an_engagement_id(
+    alt_settings,
+) -> None:
+    """台帳の案件が職歴の枠の ID を指したら、読み取り範囲の外とは言わず、受託案件の ID に無いと言う。"""
+    _rewrite(
+        alt_settings.path_for("resume_ledger"), ENTRY_SOURCE_LINE, f"- 出典の節: {CAREER_ID}\n"
+    )
+
+    violation = _one(
+        _violations(
+            alt_settings,
+            lambda item: item.constraint == NOTE_AND_SOURCE_SECTION_EXISTS
+            and "案件番号 1" in item.location,
+        )
+    )
+
+    assert "受託案件の ID に無い" in violation.expected, violation.expected
+    assert "読み取り範囲の外" not in violation.expected, violation.expected
+    assert "heading_levels" not in violation.expected, violation.expected
+
+
+def test_REQ_397_note_pointing_at_a_career_frame_says_not_an_engagement_id(alt_settings) -> None:
+    """提示物の未反映の注記が職歴の枠の ID を指したら、受託案件の ID に無いと言い、範囲の外とは言わない。"""
+    skill_sheet = alt_settings.source_dir / "nagiho" / "skill_sheet.md"
+    _rewrite(
+        skill_sheet,
+        "- 未反映の注記: なし",
+        f"- 未反映の注記: {CAREER_ID} — 週 1 回の確認の場を隔週に変えた",
+    )
+
+    violation = _one(
+        _violations(
+            alt_settings,
+            lambda item: item.constraint == NOTE_AND_SOURCE_SECTION_EXISTS
+            and item.file == "nagiho/skill_sheet.md",
+        )
+    )
+
+    assert "受託案件の ID に無い" in violation.expected, violation.expected
+    assert "読み取り範囲の外" not in violation.expected, violation.expected
+    assert "heading_levels" not in violation.expected, violation.expected
