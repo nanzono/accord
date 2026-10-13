@@ -212,6 +212,18 @@ ID か見出しの道筋を渡されて節を読むとき、accord はその節�
 - 関係するファイル: `src/accord/services/sections.py`
 - 検証手順: `uv run pytest tests/test_sections.py -k REQ_455`
 
+## REQ-468
+もし節の書き換えの新しい本文で節の公開可否の欄が消えるか値が変わるなら、accord は書かずに、公開可否の欄を元の値のまま残すことを断りに返す。
+
+- 関係するファイル: `src/accord/services/sections.py`
+- 検証手順: `uv run pytest tests/test_sections.py -k REQ_468`
+
+## REQ-469
+もし事実の登記で足す行によって節の ID か公開可否の欄の値が変わるなら、accord は書かずに、事実の文を欄の書き方で書かないことを断りに返す。
+
+- 関係するファイル: `src/accord/services/sections.py`
+- 検証手順: `uv run pytest tests/test_sections.py -k REQ_469`
+
 ## 未決の質問
 
 - 「経歴の正本に無いなら」（REQ-438）の「経歴の正本」が、設定の `career` が指すファイルだけを指すのか、受託案件（`engagements`）が別のファイルのときにそのファイルも含むのかを決めていません。いまの実装は `career` が指すファイルだけに書きます。受託案件を別のファイルに置く正本（同梱の 1 つ目の見本）では、受託案件の節に事実を登記できず、節の書き換えも断ります（REQ-451 の候補の操作は空になります）。

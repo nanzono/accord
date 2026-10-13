@@ -397,15 +397,18 @@ def test_REQ_451_a_section_of_a_typed_source_is_refused_with_its_operation(alt_s
 def test_REQ_467_a_write_that_brings_a_new_violation_is_refused(alt_settings) -> None:
     """書いた後の正本に、書く前に無かった写しの鮮度以外の違反が出るなら、書かずにその違反を返す。"""
     before = source_digest(alt_settings.source_dir)
-    body = _service(alt_settings).read_section(TERAMINA_ID).body.replace(
-        "- 公開可否: 公開可", "- 公開可否: 公開不可（先方の求めで出さない）"
+    # 機能の裏づけに使われている受託案件から、必須の欄「出所」を消す。ID と公開可否には触れない。
+    body = "\n".join(
+        line
+        for line in _service(alt_settings).read_section(TERAMINA_ID).body.splitlines()
+        if not line.startswith("- 出所:")
     )
 
     result = _revise(alt_settings, TERAMINA_ID, body)
 
     assert result.accepted is False
-    assert result.rejection.constraint == "出典と裏づけの節の公開可否"
-    assert "出典と裏づけの節の公開可否" in result.rejection.reason
+    assert result.rejection.constraint == "裏づけ節名の実在"
+    assert "書く前に無かった整合の検査の違反" in result.rejection.reason
     assert source_digest(alt_settings.source_dir) == before
 
 
@@ -462,3 +465,30 @@ def test_REQ_455_export_returns_the_name_and_size_without_the_path(alt_settings)
     dumped = json.dumps(result.model_dump(mode="json"), ensure_ascii=False)
     assert str(settings.export_path.parent) not in dumped
     assert str(Path(settings.export_path).parent.parent) not in dumped
+
+
+def test_REQ_468_removing_or_changing_the_disclosure_field_is_refused(alt_settings) -> None:
+    """新しい本文で公開可否の欄が消えるか値が変わるなら、書かずに、元の値のまま残すことを返す。"""
+    before = source_digest(alt_settings.source_dir)
+    body = _service(alt_settings).read_section(TERAMINA_ID).body
+
+    removed = _revise(alt_settings, TERAMINA_ID, body.replace("- 公開可否: 公開可\n", ""))
+    changed = _revise(alt_settings, TERAMINA_ID, body.replace("- 公開可否: 公開可", "- 公開可否: 公開不可"))
+
+    for result in (removed, changed):
+        assert result.accepted is False
+        assert result.rejection.constraint == "公開可否の欄を元の値のまま残す"
+    assert source_digest(alt_settings.source_dir) == before
+
+
+def test_REQ_469_a_fact_written_as_a_field_is_refused(alt_settings) -> None:
+    """足す行が ID か公開可否の欄として読まれて値が変わるなら、書かずに、欄の書き方で書かないことを返す。"""
+    before = source_digest(alt_settings.source_dir)
+
+    disclosure = _record(alt_settings, fact="公開可否: 公開不可")
+    identifier = _record(alt_settings, fact="識別子: teramina-routes")
+
+    for result in (disclosure, identifier):
+        assert result.accepted is False
+        assert result.rejection.constraint == "事実の文を欄の書き方で書かない"
+    assert source_digest(alt_settings.source_dir) == before

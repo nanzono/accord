@@ -79,6 +79,8 @@ FACT_ONE_LINE = "事実は 1 件 1 行"
 FINGERPRINT_MATCHES = "読んだときの指紋の一致"
 NO_HEADING_IN_BODY = "本文に見出しの行を書かない"
 ID_FIELD_KEPT = "ID の欄を元の値のまま残す"
+DISCLOSURE_FIELD_KEPT = "公開可否の欄を元の値のまま残す"
+FACT_NOT_A_FIELD = "事実の文を欄の書き方で書かない"
 REVISION_REASON_REQUIRED = "節の書き換えの理由"
 WRITABLE_SOURCE = "節を書き換えられる正本"
 EXPORT_PATH_REQUIRED = "書き出し先の設定"
@@ -341,6 +343,21 @@ class SectionService:
         # spec: REQ-437
         line = f"- {fact.strip()}（{recorded_on.isoformat()}、{SOURCE_FIELD}: {source_text}）"
         new_text = self.repository.appended_text(target, line)
+        after = self._section_after(target, new_text)
+        # spec: REQ-469
+        if after is None or (after.id, after.disclosure, after.private) != (
+            target.id,
+            target.disclosure,
+            target.private,
+        ):
+            return self._refuse(
+                FACT_NOT_A_FIELD,
+                f"足す行で、節「{target.heading_path}」の ID か公開可否の欄の値が変わるので、"
+                "書かなかった。事実の文を「欄の名前: 値」の書き方で書くと、節の欄として読まれる。"
+                "ID と公開可否は、この操作では変えない。",
+                RECORD_FACT_OPERATION,
+                example="事実は「〜した」「〜を担当した」のような文で書く。",
+            )
         return self._write(
             target,
             new_text,
@@ -432,6 +449,16 @@ class SectionService:
                 "ID の欄は元の値のまま残す（ほかの項目がこの ID で節を指している）。",
                 REVISE_OPERATION,
                 example=f"新しい本文に「- ID: {target.id}」の行をそのまま残す。",
+            )
+        # spec: REQ-468
+        if after is None or (after.disclosure, after.private) != (target.disclosure, target.private):
+            return self._refuse(
+                DISCLOSURE_FIELD_KEPT,
+                f"新しい本文で、節「{target.heading_path}」の公開可否の欄が消えるか値が変わるので、"
+                "書かなかった。公開可否は、外に出してよいかを人が決める欄なので、この操作では変えない。"
+                "公開可否を変えるときは、人の手で直す。",
+                REVISE_OPERATION,
+                example="新しい本文に、公開可否の行を元の値のまま残す。",
             )
         return self._write(
             target,
