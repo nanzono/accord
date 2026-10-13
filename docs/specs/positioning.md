@@ -237,36 +237,42 @@
 
 - 関係するファイル: `src/accord/services/positioning.py`、`src/accord/vocabulary/settings.py`
 - 検証手順: `uv run pytest tests/test_positioning.py -k REQ_194`
+- status: superseded by REQ-409
 
 ## REQ-195
 もし決めの適用範囲が媒体の名前でも「全体」でもないなら、accord は当たった制約の名前を断りに返す。
 
 - 関係するファイル: `src/accord/services/positioning.py`、`src/accord/vocabulary/settings.py`
 - 検証手順: `uv run pytest tests/test_positioning.py -k REQ_195`
+- status: superseded by REQ-410
 
 ## REQ-196
 もし決めの適用範囲が媒体の名前でも「全体」でもないなら、accord は渡された適用範囲と、媒体の名前が設定ファイルの一覧に限ることを断りの理由に書く。
 
 - 関係するファイル: `src/accord/services/positioning.py`、`src/accord/vocabulary/settings.py`
 - 検証手順: `uv run pytest tests/test_positioning.py -k REQ_196`
+- status: superseded by REQ-411
 
 ## REQ-197
 もし決めの適用範囲が媒体の名前でも「全体」でもないなら、accord は次に呼ぶ操作の名前を断りに返す。
 
 - 関係するファイル: `src/accord/services/positioning.py`、`src/accord/vocabulary/settings.py`
 - 検証手順: `uv run pytest tests/test_positioning.py -k REQ_197`
+- status: superseded by REQ-412
 
 ## REQ-198
 もし決めの適用範囲が媒体の名前でも「全体」でもないなら、accord は「全体」と設定ファイルの媒体の名前を断りの候補に返す。
 
 - 関係するファイル: `src/accord/services/positioning.py`、`src/accord/vocabulary/settings.py`
 - 検証手順: `uv run pytest tests/test_positioning.py -k REQ_198`
+- status: superseded by REQ-413
 
 ## REQ-199
 もし決めの適用範囲が媒体の名前でも「全体」でもないなら、accord は適用範囲の書き方の例を断りに返す。
 
 - 関係するファイル: `src/accord/services/positioning.py`、`src/accord/vocabulary/settings.py`
 - 検証手順: `uv run pytest tests/test_positioning.py -k REQ_199`
+- status: superseded by REQ-414
 
 ## REQ-200
 もし登記する決めが前面に出す束がパッケージ定義に無い ID なら、accord はその決めを登記しない。
@@ -316,6 +322,55 @@
 - 関係するファイル: `src/accord/services/positioning.py`
 - 検証手順: `uv run pytest tests/test_positioning.py -k REQ_245`
 
+## REQ-407
+設定に決めの適用先の語が書かれているとき、accord はその語を決めの適用範囲として登記する。
+
+- 関係するファイル: `src/accord/services/positioning.py`、`src/accord/vocabulary/settings.py`
+- 検証手順: `uv run pytest tests/test_positioning.py -k REQ_407`
+
+## REQ-408
+適用先の語を渡されて決めを読むとき、accord はその適用先を適用範囲に名指しした決めのうちいちばん新しい 1 件を返す。
+
+- 関係するファイル: `src/accord/services/positioning.py`、`src/accord/vocabulary/settings.py`
+- 検証手順: `uv run pytest tests/test_positioning.py -k REQ_408`
+
+## REQ-409
+もし決めの適用範囲が媒体の名前でも「全体」でも適用先の語でもないなら、accord はその決めを登記しない。
+
+- 関係するファイル: `src/accord/services/positioning.py`、`src/accord/vocabulary/settings.py`
+- 検証手順: `uv run pytest tests/test_positioning.py -k REQ_409`
+
+## REQ-410
+もし決めの適用範囲が媒体の名前でも「全体」でも適用先の語でもないなら、accord は当たった制約の名前を断りに返す。
+
+- 関係するファイル: `src/accord/services/positioning.py`、`src/accord/vocabulary/settings.py`
+- 検証手順: `uv run pytest tests/test_positioning.py -k REQ_410`
+
+## REQ-411
+もし決めの適用範囲が媒体の名前でも「全体」でも適用先の語でもないなら、accord は渡された適用範囲と、媒体の名前と適用先の語が設定ファイルの一覧に限ることを断りの理由に書く。
+
+- 関係するファイル: `src/accord/services/positioning.py`、`src/accord/vocabulary/settings.py`
+- 検証手順: `uv run pytest tests/test_positioning.py -k REQ_411`
+
+## REQ-412
+もし決めの適用範囲が媒体の名前でも「全体」でも適用先の語でもないなら、accord は次に呼ぶ操作の名前を断りに返す。
+
+- 関係するファイル: `src/accord/services/positioning.py`、`src/accord/vocabulary/settings.py`
+- 検証手順: `uv run pytest tests/test_positioning.py -k REQ_412`
+
+## REQ-413
+もし決めの適用範囲が媒体の名前でも「全体」でも適用先の語でもないなら、accord は「全体」と設定ファイルの媒体の名前と適用先の語を断りの候補に返す。
+
+- 関係するファイル: `src/accord/services/positioning.py`、`src/accord/vocabulary/settings.py`
+- 検証手順: `uv run pytest tests/test_positioning.py -k REQ_413`
+
+## REQ-414
+もし決めの適用範囲が媒体の名前でも「全体」でも適用先の語でもないなら、accord は適用範囲の書き方の例を断りに返す。
+
+- 関係するファイル: `src/accord/services/positioning.py`、`src/accord/vocabulary/settings.py`
+- 検証手順: `uv run pytest tests/test_positioning.py -k REQ_414`
+
 ## 未決の質問
 
 - 同じ日付・同じ適用範囲の決めが 3 件以上並んだときの順序を決めていません（REQ-160）。いまの実装は、正本の並びのいちばん後ろにあるブロックを新しいものとして返します。要件の文は「後ろにあるブロックを新しいほう」としか書いていないので、2 件のときだけを見る実装も書けます。
+- 適用先の語を渡して決めを読むとき（REQ-408）、その語を名指しした決めが 1 件も無ければ何を返すかを決めていません。いまの実装は媒体のとき（REQ-162・REQ-163）と同じく、適用範囲「全体」の最新を返し、落としたことを警告に返します。

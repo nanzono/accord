@@ -260,6 +260,54 @@
 - 関係するファイル: `src/accord/repository/markdown_repository.py`
 - 検証手順: `uv run pytest tests/test_reading_settings.py -k REQ_378`
 
+## REQ-398
+設定に提示物の置き場が書かれているとき、accord は提示物のディレクトリと媒体ごとの規約のファイルを、その置き場から読む。
+
+- 関係するファイル: `src/accord/vocabulary/settings.py`、`src/accord/repository/markdown_repository.py`
+- 検証手順: `uv run pytest tests/test_reading_settings.py -k REQ_398`
+
+## REQ-399
+設定に提示物の置き場が書かれていないとき、accord は提示物のディレクトリと媒体ごとの規約のファイルを、正本の置き場から読む。
+
+- 関係するファイル: `src/accord/vocabulary/settings.py`、`src/accord/repository/markdown_repository.py`
+- 検証手順: `uv run pytest tests/test_reading_settings.py -k REQ_399`
+
+## REQ-400
+提示物の置き場が相対の場所で書かれているとき、accord はそれを設定ファイルの置き場から見た場所として読む。
+
+- 関係するファイル: `src/accord/vocabulary/settings.py`、`src/accord/repository/markdown_repository.py`
+- 検証手順: `uv run pytest tests/test_reading_settings.py -k REQ_400`
+
+## REQ-401
+もし設定の提示物の置き場が実在するディレクトリでないなら、accord は書かれていた値を添えて起動をやめる。
+
+- 関係するファイル: `src/accord/vocabulary/settings.py`、`src/accord/repository/markdown_repository.py`
+- 検証手順: `uv run pytest tests/test_reading_settings.py -k REQ_401`
+
+## REQ-403
+書き込みの記録が有効な場合、accord は書き込みの操作が正本のファイルを変えるたびに、変えたファイルだけを git にコミットする。
+
+- 関係するファイル: `src/accord/services/recording.py`、`src/accord/repository/git_commits.py`
+- 検証手順: `uv run pytest tests/test_write_commits.py -k REQ_403`
+
+## REQ-404
+書き込みの記録が有効でない場合、accord は書き込みの操作で git を呼ばない。
+
+- 関係するファイル: `src/accord/services/recording.py`、`src/accord/repository/git_commits.py`
+- 検証手順: `uv run pytest tests/test_write_commits.py -k REQ_404`
+
+## REQ-405
+もし書き込みの記録が有効で、書く前のファイルに未コミットの変更があるなら、accord は書かずに、そのファイルの名前と、先にその変更をコミットすることを断りに返す。
+
+- 関係するファイル: `src/accord/services/recording.py`、`src/accord/repository/git_commits.py`
+- 検証手順: `uv run pytest tests/test_write_commits.py -k REQ_405`
+
+## REQ-406
+もし書き込みの記録が有効で、正本の置き場が git のリポジトリの中に無いなら、accord は設定の鍵の名前を添えて起動をやめる。
+
+- 関係するファイル: `src/accord/vocabulary/settings.py`
+- 検証手順: `uv run pytest tests/test_write_commits.py -k REQ_406`
+
 ## 未決の質問
 
 - 「読み方を広げた設定で正本にブロックを書き足したとき」（REQ-073）の「読み方を広げた設定」が、どこまでを指すかを決めていません。いまのテストは同梱の 2 つ目の見本の設定 1 つで確かめているので、別の広げ方（たとえば欄を表だけから読む設定）でも同じことを言うのかは、この文からは決まりません。別の広げ方で往復が壊れたときに決めます。

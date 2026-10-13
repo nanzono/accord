@@ -24,6 +24,7 @@ from accord.models.results import (
     is_id,
 )
 from accord.models.types import Capability, Package
+from accord.services.recording import WriteRecorder
 from accord.repository.markdown_repository import MarkdownRepository
 from accord.vocabulary.settings import Settings
 
@@ -60,9 +61,15 @@ PUBLIC_RECORD_DISCLOSURE = "公開記録（外から確かめられる）"
 class OfferingService:
     """機能を登記する、パッケージを改訂する。"""
 
-    def __init__(self, settings: Settings, repository: MarkdownRepository | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        repository: MarkdownRepository | None = None,
+        recorder: WriteRecorder | None = None,
+    ) -> None:
         self.settings = settings
         self.repository = repository or MarkdownRepository(settings)
+        self.recorder = recorder or WriteRecorder(settings)
 
     def register_capability(self, draft: CapabilityDraft) -> WriteResult:
         """機能の台帳に 1 行足す。必須欄・分類・ID・裏づけを確かめ、通らなければ書かずに拒否する。"""
@@ -170,7 +177,14 @@ class OfferingService:
             category=draft.category,
             evidence_sections=list(draft.evidence_sections),
         )
+        file_name = self.settings.files["capabilities"]
+        # spec: REQ-405
+        refusal = self.recorder.refusal(file_name, "register_capability")
+        if refusal is not None:
+            return WriteResult(accepted=False, rejection=refusal)
         self.repository.append_capability(capability)
+        # spec: REQ-403
+        notes = self.recorder.record(file_name, "register_capability", capability.id)
 
         # 公開記録は定義により公開されているものなので、公開可否の欄を持たない。
         # 「不明」と並べると外に出せないものと読めるので、公開記録であることをそのまま書く。
@@ -201,7 +215,7 @@ class OfferingService:
                 "機能": capability.model_dump(mode="json"),
                 "裏づけの節の公開可否": disclosure,
             },
-            warnings=warnings,
+            warnings=warnings + notes,
         )
 
     def revise_package(self, draft: PackageDraft) -> WriteResult:
@@ -234,8 +248,15 @@ class OfferingService:
             source=carried["source"],
             breaks_when=carried["breaks_when"],
         )
+        file_name = self.settings.files["packages"]
+        # spec: REQ-405
+        refusal = self.recorder.refusal(file_name, "revise_package")
+        if refusal is not None:
+            return WriteResult(accepted=False, rejection=refusal)
         # spec: REQ-135
         self.repository.write_package(package)
+        # spec: REQ-403
+        warnings = warnings + self.recorder.record(file_name, "revise_package", package.id)
 
         return WriteResult(
             accepted=True,

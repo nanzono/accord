@@ -32,6 +32,7 @@
 
 - 関係するファイル: `src/accord/services/consistency.py`
 - 検証手順: `uv run pytest tests/test_consistency.py -k REQ_004`
+- status: superseded by REQ-460
 
 ## REQ-005
 読み方の節を持たない設定で呼ばれたとき、accord は適用した読み方として「既定」の 1 件を返す。
@@ -382,6 +383,42 @@ URL を持たない公開記録だけが正本にあるとき、accord は提示
 
 - 関係するファイル: `src/accord/services/consistency.py`
 - 検証手順: `uv run pytest tests/test_consistency.py -k REQ_396`
+
+## REQ-456
+起動されたとき、accord は正本全体の整合の検査の違反と断りの件数を標準エラーに書く。
+
+- 関係するファイル: `src/accord/__main__.py`、`src/accord/services/watch.py`
+- 検証手順: `uv run pytest tests/test_source_watch.py -k REQ_456`
+
+## REQ-457
+もし起動時の整合の検査で違反が見つかっても、accord は起動を続ける。
+
+- 関係するファイル: `src/accord/__main__.py`、`src/accord/services/watch.py`
+- 検証手順: `uv run pytest tests/test_source_watch.py -k REQ_457`
+
+## REQ-458
+もし読みの操作を呼ばれた時点の正本に整合の検査の違反があるなら、accord は違反の件数と直し先を返り値の知らせに載せる。
+
+- 関係するファイル: `src/accord/services/watch.py`
+- 検証手順: `uv run pytest tests/test_source_watch.py -k REQ_458`
+
+## REQ-459
+読みの操作を呼ばれたとき、前回の整合の検査の後に正本のファイルが変わっていなければ、accord は整合の検査を走らせ直さずに前回の結果を使う。
+
+- 関係するファイル: `src/accord/services/watch.py`
+- 検証手順: `uv run pytest tests/test_source_watch.py -k REQ_459`
+
+## REQ-460
+常に、accord は整合の検査の返り値に、読んだ設定ファイルの名前と動いているソースの置き場と accord の版を入れる。
+
+- 関係するファイル: `src/accord/services/consistency.py`
+- 検証手順: `uv run pytest tests/test_consistency.py -k REQ_460`
+
+## REQ-461
+常に、accord はどの操作の返り値にも、正本の置き場の絶対パスを入れない。
+
+- 関係するファイル: `src/accord/services/consistency.py`、`src/accord/services/sections.py`
+- 検証手順: `uv run pytest tests/test_source_watch.py -k REQ_461`
 
 ## 未決の質問
 

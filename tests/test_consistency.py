@@ -396,24 +396,26 @@ def test_REQ_018_previous_positioning_is_the_headline_when_the_latest_block_lost
 # ---------------------------------------------------------------- 足跡
 
 
-def test_REQ_004_report_carries_the_config_path_and_version_and_source_location(settings) -> None:
-    """検査の戻り値が、読んだ設定ファイルと、動いているソースの置き場と版を持ち帰る。
+def test_REQ_460_report_carries_the_config_name_and_version_and_source_location(settings) -> None:
+    """検査の戻り値が、読んだ設定ファイルの名前と、動いているソースの置き場と版を持ち帰る。
 
-    版番号だけでは、入れ直していない古い環境と直したばかりのソースを見分けられない。
-    どちらのコードが動いたかは、ソースの置き場で見分ける。
+    設定ファイルは、親のディレクトリの名前と設定ファイルの名前で返し、絶対パスは返さない。
+    版番号だけでは、入れ直していない古い環境と直したばかりのソースを見分けられないので、
+    どちらのコードが動いたかはソースの置き場で見分ける。
     """
     report = _report(settings)
 
     provenance = report.provenance
     assert provenance is not None, report.model_dump()
-    assert provenance.config_path == str(settings.config_path.resolve())
+    config = settings.config_path.resolve()
+    assert provenance.config_name == f"{config.parent.name}/{config.name}"
     assert provenance.module_path == str(Path(accord.__file__).resolve().parent)
     assert provenance.version != ""
 
-    # JSON にしたときも、設定の場所とソースの置き場が文字として読める。
     as_json = report.model_dump_json()
-    assert as_json.count(provenance.config_path) >= 1
+    assert as_json.count(provenance.config_name) >= 1
     assert as_json.count(provenance.module_path) >= 1
+    assert str(config.parent) not in as_json
 
 
 def test_REQ_005_reading_keys_say_default_when_the_config_has_no_reading_section(

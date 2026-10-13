@@ -33,6 +33,7 @@ from accord.models.results import (
     labelled,
 )
 from accord.models.types import Positioning
+from accord.services.recording import WriteRecorder
 from accord.repository.markdown_repository import (
     EXCEPTION_PRESENTATION_KEY,
     EXCEPTION_REASON_KEY,
@@ -165,32 +166,78 @@ def unrecorded_positioning_next_step() -> str:
 
 
 def unknown_channel_notes(settings: Settings, channel: str, operation: str) -> list[str]:
-    """媒体の名前が実在しないときの案内。拒否ではなく、実在する名前の一覧を返す。"""
-    return [
+    """媒体の名前が実在しないときの案内。拒否ではなく、実在する名前の一覧を返す。
+
+    設定に適用先の語があるときは、その語も渡せる名前として並べる。
+    """
+    notes = [
         # spec: REQ-169
         f"媒体「{channel}」は、設定ファイル {settings.config_path.name} の媒体の一覧に無い。",
         # spec: REQ-170
         "実在する媒体: " + " / ".join(settings.channels),
-        # spec: REQ-171
-        f"上の名前のどれかをそのまま渡して、もう一度 {operation} を呼ぶ。",
     ]
+    if settings.positioning_targets:
+        # spec: REQ-416
+        notes[0] = (
+            f"「{channel}」は、設定ファイル {settings.config_path.name} の"
+            "媒体の一覧にも適用先の語にも無い。"
+        )
+        notes.append("実在する適用先の語: " + " / ".join(settings.positioning_targets))
+    # spec: REQ-171
+    notes.append(f"上の名前のどれかをそのまま渡して、もう一度 {operation} を呼ぶ。")
+    return notes
+
+
+def accepted_scopes(settings: Settings) -> list[str]:
+    """決めの適用範囲に書ける語。「全体」、設定の媒体の名前、設定の適用先の語の順に並べる。"""
+    return [WHOLE_SCOPE, *settings.channels, *settings.positioning_targets]
 
 
 class PositioningService:
     """いまの決めを読む、決めを登記する。"""
 
-    def __init__(self, settings: Settings, repository: MarkdownRepository | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        repository: MarkdownRepository | None = None,
+        recorder: WriteRecorder | None = None,
+        watch=None,
+    ) -> None:
         self.settings = settings
         self.repository = repository or MarkdownRepository(settings)
+        self.recorder = recorder or WriteRecorder(settings)
+        self.watch = watch
 
-    def current(self, channel: str | None = None) -> PositioningView:
-        """その媒体に適用される最新の決めと、前面に出す束のパッケージを返す。
+    def current(self, channel: str | None = None, notice: bool = True) -> PositioningView:
+        """その媒体（か適用先の語）に適用される最新の決めと、前面に出す束のパッケージを返す。
 
         媒体を省くと「全体」の決めを返す。決めが 1 件も無いときと、媒体の名前が実在しないときは、
         拒否ではなく断りと次の一手を warnings に載せて返す。正本は 1 バイトも読み替えない。
+        notice を立てると、正本全体に違反があるときの整合の知らせを添える（材料の取り出しの中から
+        呼ぶときは、材料の側で 1 度だけ添えるので立てない）。
         """
+        view = self._current(channel)
+        if notice:
+            # spec: REQ-458
+            view.consistency_notice = self._watch().notice()
+        return view
+
+    def _watch(self):
+        """読みの前の整合の検査。サーバーが 1 つを配って共有させる。"""
+        if self.watch is None:
+            from accord.services.watch import SourceWatch
+
+            self.watch = SourceWatch(self.settings, self.repository)
+        return self.watch
+
+    def _current(self, channel: str | None) -> PositioningView:
+        """current の本体。整合の知らせは添えない。"""
         # spec: REQ-168
-        if channel is not None and channel not in self.settings.channels:
+        if (
+            channel is not None
+            and channel not in self.settings.channels
+            and channel not in self.settings.positioning_targets
+        ):
             return PositioningView(
                 warnings=unknown_channel_notes(self.settings, channel, READ_OPERATION)
                 # spec: REQ-172
@@ -217,6 +264,7 @@ class PositioningService:
             positioning = latest_positioning(snapshot.positionings, WHOLE_SCOPE)
         else:
             # spec: REQ-158
+            # spec: REQ-408
             positioning = latest_positioning(snapshot.positionings, channel)
             if positioning is None:
                 # spec: REQ-162
@@ -288,8 +336,17 @@ class PositioningService:
                 for entry in draft.exceptions
             ],
         )
+        file_name = self.settings.files["positioning"]
+        # spec: REQ-405
+        refusal = self.recorder.refusal(file_name, RECORD_OPERATION)
+        if refusal is not None:
+            return WriteResult(accepted=False, rejection=refusal)
         # spec: REQ-179
         self.repository.append_positioning(positioning)
+        # spec: REQ-403
+        notes = self.recorder.record(
+            file_name, RECORD_OPERATION, f"{positioning.decided_on} {positioning.scope}"
+        )
 
         stale, outdated = self._checks_after_record(positioning)
         return WriteResult(
@@ -312,7 +369,7 @@ class PositioningService:
                 },
             },
             # spec: REQ-185
-            warnings=[violation.as_note() for violation in stale + outdated],
+            warnings=[violation.as_note() for violation in stale + outdated] + notes,
         )
 
     # ------------------------------------------------------------ 登記の部品
@@ -341,26 +398,29 @@ class PositioningService:
                 ),
             )
 
-        scopes = [WHOLE_SCOPE, *self.settings.channels]
-        # spec: REQ-194
+        scopes = accepted_scopes(self.settings)
+        # spec: REQ-409
         if draft.scope not in scopes:
             return Rejection(
-                # spec: REQ-195
+                # spec: REQ-410
                 constraint=POSITIONING_SCOPE_ENUM,
                 reason=(
-                    # spec: REQ-196
-                    f"適用範囲「{draft.scope}」は、媒体の名前でも「{WHOLE_SCOPE}」でもない。"
-                    f"媒体の名前は設定ファイル {self.settings.config_path.name} の一覧に限る。"
+                    # spec: REQ-411
+                    f"適用範囲「{draft.scope}」は、媒体の名前でも「{WHOLE_SCOPE}」でも"
+                    "適用先の語でもない。"
+                    f"媒体の名前と適用先の語は設定ファイル {self.settings.config_path.name} の"
+                    "一覧に限る。"
                 ),
                 next_action=NextAction(
-                    # spec: REQ-197
+                    # spec: REQ-412
                     operation=RECORD_OPERATION,
-                    # spec: REQ-198
+                    # spec: REQ-413
                     candidates=scopes,
-                    # spec: REQ-199
+                    # spec: REQ-414
                     example=(
                         f"すべての媒体に効かせるなら「{WHOLE_SCOPE}」、"
-                        "媒体 1 つに限るなら上の候補の媒体名をそのまま渡す。"
+                        "媒体 1 つに限るなら上の候補の媒体名を、媒体ではない場所"
+                        "（設定の適用先の語）に限るならその語をそのまま渡す。"
                     ),
                 ),
             )
@@ -406,7 +466,9 @@ class PositioningService:
         from accord.services.consistency import ConsistencyService
 
         scope = None if positioning.scope == WHOLE_SCOPE else positioning.scope
-        report = ConsistencyService(self.settings, self.repository).inspect(scope)
+        report = ConsistencyService(self.settings, self.repository).inspect(
+            scope, allow_targets=True
+        )
         stale = [item for item in report.violations if item.constraint == PACKAGE_FRESHNESS]
         outdated = [item for item in report.violations if item.constraint == OFFERING_CLAIM_MATCHES]
         return stale, outdated

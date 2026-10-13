@@ -15,7 +15,7 @@ from pathlib import Path
 from accord.models.results import PositioningDraft
 from accord.repository.markdown_repository import MarkdownRepository
 from accord.services.positioning import PositioningService
-from conftest import source_digest
+from conftest import add_config_lines, source_digest
 
 # 同梱のサンプルが持つ決め。日付の新しいほうが、いまの看板になる。
 # 決めが指すのはパッケージの ID なので、見出し（表示名）とは別に持つ。
@@ -614,65 +614,115 @@ def test_REQ_193_missing_required_fields_rejection_carries_an_example(settings) 
     assert "2026-09-16" in next_action.example
 
 
-def test_REQ_194_a_scope_outside_the_channels_is_not_recorded(settings) -> None:
-    """適用範囲が媒体の名前でも「全体」でもない決めは受け付けない。"""
+# 写しの設定に足す、媒体ではない決めの適用先の語。
+TARGET = "会社のホームページ"
+
+
+def _with_target(settings):
+    """写しの設定に適用先の語を 1 つ足し、読み直した設定を返す。"""
+    return add_config_lines(
+        settings.config_path, "vocabulary", [f'positioning_targets = ["{TARGET}"]']
+    )
+
+
+def _record_for_target(settings, decided_on: date, headline: str = LATEST_HEADLINE):
+    """適用先の語を適用範囲にした決めを登記する。"""
+    return PositioningService(settings).record(
+        PositioningDraft(
+            decided_on=decided_on, scope=TARGET, headline_package=headline, rationale=RATIONALE
+        )
+    )
+
+
+def test_REQ_407_a_target_word_is_recorded_as_a_scope(settings) -> None:
+    """設定に適用先の語があれば、その語を適用範囲にした決めを登記する。"""
+    settings = _with_target(settings)
+
+    result = _record_for_target(settings, RECORD_DATE)
+
+    assert result.accepted is True, result.rejection
+    scopes = [item.scope for item in MarkdownRepository(settings).load().positionings]
+    assert TARGET in scopes
+
+
+def test_REQ_408_reading_a_target_returns_its_latest_decision(settings) -> None:
+    """適用先の語を渡して決めを読むと、その語を名指しした決めのうちいちばん新しい 1 件が返る。"""
+    settings = _with_target(settings)
+    assert _record_for_target(settings, date(2026, 9, 14), OLDER_HEADLINE).accepted
+    assert _record_for_target(settings, date(2026, 9, 15), LATEST_HEADLINE).accepted
+
+    view = PositioningService(settings).current(TARGET)
+
+    assert view.positioning is not None
+    assert view.positioning.scope == TARGET
+    assert view.positioning.decided_on == date(2026, 9, 15)
+
+
+def test_REQ_409_a_scope_outside_the_channels_and_targets_is_not_recorded(settings) -> None:
+    """適用範囲が媒体の名前でも「全体」でも適用先の語でもない決めは受け付けず、正本を変えない。"""
+    settings = _with_target(settings)
+    before = source_digest(settings.source_dir)
+
     result = _record_with_an_unknown_scope(settings)
 
     assert result.accepted is False
     assert result.rejection is not None
+    assert source_digest(settings.source_dir) == before
 
 
-def test_REQ_195_a_scope_outside_the_channels_rejection_names_the_constraint(settings) -> None:
+def test_REQ_410_a_scope_outside_the_channels_rejection_names_the_constraint(settings) -> None:
     """適用範囲が候補の外にある決めの断りは、当たった制約の名前を返す。"""
-    result = _record_with_an_unknown_scope(settings)
+    result = _record_with_an_unknown_scope(_with_target(settings))
 
     assert result.rejection is not None
     assert result.rejection.constraint == "適用範囲の列挙"
 
 
-def test_REQ_196_a_scope_outside_the_channels_rejection_names_it_in_the_reason(
+def test_REQ_411_a_scope_outside_the_channels_rejection_names_it_in_the_reason(
     settings,
 ) -> None:
-    """適用範囲が候補の外にある決めの断りは、渡された範囲と設定ファイルの名前を理由に書く。"""
+    """断りの理由は、渡された範囲と、媒体の名前と適用先の語が設定ファイルの一覧に限ることを書く。"""
+    settings = _with_target(settings)
     result = _record_with_an_unknown_scope(settings)
 
     assert result.rejection is not None
     reason = result.rejection.reason
     assert UNKNOWN_SCOPE in reason, reason
+    assert "適用先の語" in reason, reason
     assert settings.config_path.name in reason, reason
+    assert "一覧に限る" in reason, reason
 
 
-def test_REQ_197_a_scope_outside_the_channels_rejection_names_the_next_operation(
+def test_REQ_412_a_scope_outside_the_channels_rejection_names_the_next_operation(
     settings,
 ) -> None:
     """適用範囲が候補の外にある決めの断りは、次に呼ぶ操作の名前を返す。"""
-    result = _record_with_an_unknown_scope(settings)
+    result = _record_with_an_unknown_scope(_with_target(settings))
 
     assert result.rejection is not None
     assert result.rejection.next_action.operation == "record_positioning"
 
 
-def test_REQ_198_a_scope_outside_the_channels_rejection_lists_the_accepted_scopes(
+def test_REQ_413_a_scope_outside_the_channels_rejection_lists_the_accepted_scopes(
     settings,
 ) -> None:
-    """適用範囲が候補の外にある決めの断りは、「全体」と媒体の名前を候補に返す。"""
+    """断りの候補は、「全体」と設定ファイルの媒体の名前と適用先の語である。"""
+    settings = _with_target(settings)
     result = _record_with_an_unknown_scope(settings)
 
     assert result.rejection is not None
-    candidates = result.rejection.next_action.candidates
-    assert candidates[0] == "全体"
-    for name in settings.channels:
-        assert name in candidates, candidates
+    assert result.rejection.next_action.candidates == ["全体", *settings.channels, TARGET]
 
 
-def test_REQ_199_a_scope_outside_the_channels_rejection_carries_an_example(settings) -> None:
+def test_REQ_414_a_scope_outside_the_channels_rejection_carries_an_example(settings) -> None:
     """適用範囲が候補の外にある決めの断りは、適用範囲の書き方の例を返す。"""
-    result = _record_with_an_unknown_scope(settings)
+    result = _record_with_an_unknown_scope(_with_target(settings))
 
     assert result.rejection is not None
     example = result.rejection.next_action.example
     assert "全体" in example, example
     assert "媒体" in example, example
+    assert "適用先の語" in example, example
 
 
 def test_REQ_200_a_headline_bundle_outside_the_packages_is_not_recorded(settings) -> None:

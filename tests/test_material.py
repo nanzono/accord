@@ -13,7 +13,7 @@ from pathlib import Path
 from accord.models.results import MaterialRequest
 from accord.services.material import MaterialService
 from accord.vocabulary.settings import PRESENTATION_RULES_KEY
-from conftest import source_digest
+from conftest import add_config_lines, source_digest
 
 # 決めも提示物もパッケージを ID で指すので、ID と見出し（表示名）の両方を持つ。
 CHANNEL = "tsukikusa"
@@ -356,22 +356,181 @@ def test_REQ_100_unknown_package_name_lists_the_existing_packages(settings) -> N
     assert "assemble_material" in listed, listed
 
 
-def test_REQ_101_unknown_channel_yields_no_material(settings) -> None:
-    """媒体の名前が実在しないときは、決めも看板のパッケージも材料に載せない。"""
-    material = _material(settings, channel="shiokaze")
+# 写しの設定に足す、媒体ではない決めの適用先の語。
+TARGET = "会社のホームページ"
+
+
+def _with_target(settings):
+    """写しの設定に適用先の語を 1 つ足し、読み直した設定を返す。"""
+    return add_config_lines(
+        settings.config_path, "vocabulary", [f'positioning_targets = ["{TARGET}"]']
+    )
+
+
+def test_REQ_415_unknown_name_yields_no_material(settings) -> None:
+    """媒体の名前にも適用先の語にも無い名前では、決めも看板のパッケージも材料に載せない。"""
+    material = _material(_with_target(settings), channel="shiokaze")
 
     assert material.positioning is None
     assert material.package is None
 
 
-def test_REQ_102_unknown_channel_lists_the_existing_channels(settings) -> None:
-    """媒体の名前が実在しないときは、拒否ではなく実在する媒体の一覧と次の一手を返す。"""
+def test_REQ_416_unknown_name_lists_the_channels_and_targets(settings) -> None:
+    """名前が実在しないときは、実在する媒体の名前と適用先の語をすべてと、次の一手を返す。"""
+    settings = _with_target(settings)
     material = _material(settings, channel="shiokaze")
 
     listed = "\n".join(material.warnings)
-    for name in settings.channels:
+    for name in [*settings.channels, TARGET]:
         assert name in listed, listed
     assert "assemble_material" in listed, listed
+
+
+def test_REQ_417_a_target_returns_empty_channel_rules(settings) -> None:
+    """適用先の語を渡すと、媒体の規約は空の一覧で返り、決めと看板は返る。"""
+    material = _material(_with_target(settings), channel=TARGET)
+
+    assert material.channel_rules == []
+    assert material.positioning is not None
+    assert material.package is not None
+
+
+def test_REQ_466_a_target_says_it_has_no_channel_rules(settings) -> None:
+    """適用先の語を渡すと、媒体の規約を持たない適用先であることを警告に返す。"""
+    material = _material(_with_target(settings), channel=TARGET)
+
+    notes = [note for note in material.warnings if TARGET in note and "媒体の規約" in note]
+    assert notes, material.warnings
+
+
+# 経歴の正本（2 つ目の見本の career_master.md）の節の見出しの道筋。
+CAREER_TITLE = "経歴の正本"
+CAREER_ROOT = f"{CAREER_TITLE} > 職歴・案件（新しい順）"
+FREELANCE_PATH = f"{CAREER_ROOT} > 2021-04〜現在 フリーランス"
+TERAMINA_PATH = f"{FREELANCE_PATH} > テラミナ物流 配送データの置き場づくり"
+PRIVATE_FRAME_PATH = f"{CAREER_ROOT} > 2016-04〜2021-03 受託開発の会社"
+PRIVATE_CHILD_PATH = f"{PRIVATE_FRAME_PATH} > 在籍中の社内の取り組み"
+
+
+def _career_paths(settings) -> list[str]:
+    """経歴の正本の見出しの道筋を、ファイルの並びの順に、材料とは別の読み方で数える。"""
+    paths: list[str] = []
+    stack: list[tuple[int, str]] = []
+    for line in settings.path_for("career").read_text(encoding="utf-8").splitlines():
+        if not line.startswith("#"):
+            continue
+        marks, _, heading = line.partition(" ")
+        while stack and stack[-1][0] >= len(marks):
+            stack.pop()
+        stack.append((len(marks), heading.strip()))
+        paths.append(" > ".join(name for _, name in stack))
+    return paths
+
+
+def test_REQ_418_material_carries_every_career_section_in_order(alt_settings) -> None:
+    """経歴の正本の節を、公開不可の節とその下位の節を除いて、正本の並びの順にすべて載せる。"""
+    material = _material(alt_settings)
+
+    expected = [
+        path for path in _career_paths(alt_settings) if not path.startswith(PRIVATE_FRAME_PATH)
+    ]
+    assert [item.heading_path for item in material.career_sections] == expected
+    # ID を持たない節（基本情報・稼働条件）も載る。
+    assert f"{CAREER_TITLE} > 基本情報" in expected
+    assert f"{CAREER_TITLE} > 稼働条件" in expected
+
+
+def test_REQ_419_each_career_section_has_its_path_and_body(alt_settings) -> None:
+    """経歴の節の 1 件ごとに、見出しの道筋と本文が付く。"""
+    material = _material(alt_settings)
+
+    by_path = {item.heading_path: item for item in material.career_sections}
+    assert "週 3 日まで" in by_path[f"{CAREER_TITLE} > 稼働条件"].body
+    assert "6 拠点の実績を 1 つの置き場に集め" in by_path[TERAMINA_PATH].body
+
+
+def test_REQ_420_career_sections_with_an_id_carry_the_id_and_disclosure(alt_settings) -> None:
+    """ID の欄を持つ節には ID と公開可否が付き、持たない節には付かない。"""
+    material = _material(alt_settings)
+
+    by_path = {item.heading_path: item for item in material.career_sections}
+    assert by_path[TERAMINA_PATH].id == "teramina-delivery"
+    assert by_path[TERAMINA_PATH].disclosure == "公開可"
+    assert by_path[f"{CAREER_TITLE} > 基本情報"].id is None
+    assert by_path[f"{CAREER_TITLE} > 基本情報"].disclosure is None
+
+
+def test_REQ_421_a_career_section_body_excludes_its_subsections(alt_settings) -> None:
+    """経歴の節 1 件の本文に、下位の見出しの節の本文を含めない。"""
+    material = _material(alt_settings)
+
+    by_path = {item.heading_path: item for item in material.career_sections}
+    frame = by_path[FREELANCE_PATH].body
+    assert "3 社の案件を" in frame
+    assert "6 拠点の実績" not in frame
+    assert "テラミナ物流" not in frame
+
+
+def test_REQ_422_a_private_career_section_is_dropped_with_its_subsections(
+    alt_settings,
+) -> None:
+    """公開不可の経歴の節は、その下位の節ごと材料の経歴の節に載せない。"""
+    material = _material(alt_settings)
+
+    paths = [item.heading_path for item in material.career_sections]
+    assert PRIVATE_FRAME_PATH not in paths
+    assert PRIVATE_CHILD_PATH not in paths
+    joined = "\n".join(item.body for item in material.career_sections)
+    assert "集計の手順の書き方を 2 回話した" not in joined
+
+
+def test_REQ_423_dropping_a_private_career_section_is_warned(alt_settings) -> None:
+    """公開不可で落とした経歴の節の見出しと、当たった制約の名前を警告に返す。"""
+    material = _material(alt_settings)
+
+    notes = [note for note in material.warnings if PRIVATE_FRAME_PATH in note]
+    assert notes, material.warnings
+    assert notes[0].startswith(SOURCE_AND_EVIDENCE_DISCLOSURE), notes[0]
+
+
+def test_REQ_424_the_material_operation_declares_the_result_size_limit(settings) -> None:
+    """材料の取り出しの操作は、操作の一覧の応答の _meta に返り値の上限 50 万字を持つ。"""
+    import asyncio
+
+    from accord.server.app import create_server
+
+    tools = asyncio.run(create_server(settings).list_tools())
+    material = next(tool for tool in tools if tool.name == "assemble_material")
+    dumped = material.model_dump(by_alias=True, exclude_none=True)
+
+    assert dumped["_meta"] == {"anthropic/maxResultSizeChars": 5 * 10**5}
+    others = [tool for tool in tools if tool.name != "assemble_material"]
+    assert all(not (tool.model_dump(by_alias=True).get("_meta") or {}) for tool in others)
+
+
+def test_REQ_424_the_declaration_reaches_the_client_over_stdio(settings) -> None:
+    """stdio で起動したサーバーに MCP のクライアントでつなぐと、操作の一覧の _meta に上限が載って届く。"""
+    import sys
+
+    import anyio
+    from mcp.client.session import ClientSession
+    from mcp.client.stdio import StdioServerParameters, stdio_client
+
+    async def listed() -> dict:
+        params = StdioServerParameters(
+            command=sys.executable,
+            args=["-m", "accord", "--config", str(settings.config_path)],
+        )
+        async with stdio_client(params) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                result = await session.list_tools()
+                tool = next(item for item in result.tools if item.name == "assemble_material")
+                return tool.model_dump(by_alias=True, exclude_none=True)
+
+    dumped = anyio.run(listed)
+
+    assert dumped["_meta"]["anthropic/maxResultSizeChars"] == 5 * 10**5
 
 
 def test_REQ_103_unrecorded_positioning_yields_no_material(settings) -> None:

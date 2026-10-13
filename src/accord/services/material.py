@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from accord.models.constraints import CONSTRAINTS
 from accord.models.results import (
+    PRIVATE_DISCLOSURE_PREFIX,
+    CareerSection,
     Material,
     MaterialRequest,
     SourceSnapshot,
@@ -52,29 +54,58 @@ NAME_SAMPLE_COUNT = 5
 class MaterialService:
     """媒体向けの文面を書くための材料を、正本から射影して返す。"""
 
-    def __init__(self, settings: Settings, repository: MarkdownRepository | None = None) -> None:
+    def __init__(
+        self, settings: Settings, repository: MarkdownRepository | None = None, watch=None
+    ) -> None:
         self.settings = settings
         self.repository = repository or MarkdownRepository(settings)
+        self.watch = watch
+
+    def _watch(self):
+        """読みの前の整合の検査。サーバーが 1 つを配って共有させる。"""
+        if self.watch is None:
+            from accord.services.watch import SourceWatch
+
+            self.watch = SourceWatch(self.settings, self.repository)
+        return self.watch
 
     def assemble(self, request: MaterialRequest) -> Material:
-        """材料を組み立てる。正本は 1 バイトも書き換えない。"""
+        """材料を組み立てる。正本は 1 バイトも書き換えない。
+
+        渡された名前が媒体の名前にも適用先の語にも無いときは、経歴の節も載せない（呼び直す前提の
+        返り値に、経歴の正本の全文を載せないため）。それ以外は、決めが無いときも経歴の節は載せる。
+        """
+        material = self._assemble(request)
+        # spec: REQ-458
+        material.consistency_notice = self._watch().notice()
+        return material
+
+    def _assemble(self, request: MaterialRequest) -> Material:
+        """assemble の本体。整合の知らせは添えない。"""
         channel = request.channel
-        # spec: REQ-101
-        if channel not in self.settings.channels:
+        is_target = channel in self.settings.positioning_targets
+        # spec: REQ-415
+        if channel not in self.settings.channels and not is_target:
             return Material(
                 channel=channel,
+                # spec: REQ-416
                 warnings=unknown_channel_notes(self.settings, channel, ASSEMBLE_OPERATION),
             )
 
         snapshot = self.repository.load()
         # spec: REQ-084
-        view = PositioningService(self.settings, self.repository).current(channel)
+        view = PositioningService(self.settings, self.repository).current(channel, notice=False)
         warnings = list(view.warnings)
+        career_sections, career_warnings = self._career_sections()
 
         # spec: REQ-103
         if view.positioning is None:
             # 決めが未登記（または当たる決めが無い）。読む側の次の一手は view が持っている。
-            return Material(channel=channel, warnings=warnings)
+            return Material(
+                channel=channel,
+                career_sections=career_sections,
+                warnings=warnings + career_warnings,
+            )
 
         package, package_notes = self._package(snapshot, request, view.package)
         if package is None:
@@ -82,7 +113,8 @@ class MaterialService:
             return Material(
                 channel=channel,
                 positioning=view.positioning,
-                warnings=warnings + package_notes,
+                career_sections=career_sections,
+                warnings=warnings + package_notes + career_warnings,
             )
 
         capabilities, unknown_capabilities = self._capabilities(snapshot, package)
@@ -92,15 +124,27 @@ class MaterialService:
         warnings.extend(evidence_warnings)
         warnings.extend(self._unused_public_record_warnings(snapshot))
 
-        # spec: REQ-090
-        channel_rules = self.repository.channel_rules(channel)
+        if is_target:
+            # spec: REQ-417
+            channel_rules: list[str] = []
+            # spec: REQ-466
+            warnings.append(
+                f"「{channel}」は設定の適用先の語で、媒体ではないので、媒体の規約を持たない。"
+                "媒体の規約は空の一覧で返した。文字数の上限や書き出しの決まりは、書く先の求めに従う。"
+            )
+        else:
+            # spec: REQ-090
+            channel_rules = self.repository.channel_rules(channel)
         # spec: REQ-091
         forbidden_phrases = self.repository.forbidden_phrases()
         warnings.extend(
-            self._presentation_rule_warnings(channel, channel_rules, forbidden_phrases)
+            self._presentation_rule_warnings(
+                channel, channel_rules, forbidden_phrases, check_channel_rules=not is_target
+            )
         )
 
         warnings.extend(self._inspection_warnings(channel))
+        warnings.extend(career_warnings)
 
         if request.opportunity is not None:
             # spec: REQ-106
@@ -118,10 +162,65 @@ class MaterialService:
             public_records=public_records,
             channel_rules=channel_rules,
             forbidden_phrases=forbidden_phrases,
+            career_sections=career_sections,
             warnings=warnings,
         )
 
     # ------------------------------------------------------------ 組み立ての部品
+
+    def _career_sections(self) -> tuple[list[CareerSection], list[str]]:
+        """経歴の正本の節を、正本の並びの順にすべて集める。公開不可の節は下位の節ごと落とす。
+
+        本文は節自身のものだけで、下位の見出しの節は含めない（同じ文を 2 度載せないため）。
+        ID の欄を持つ節には、ID と公開可否を添える。公開不可の節を落としたときは、落とした見出しと
+        当たった制約の名前を警告に書く。落としたことを黙ると、受け取った側は「その節は無い」と読む。
+        """
+        name = self.settings.files.get("career")
+        if not name:
+            return [], []
+        kept: list[CareerSection] = []
+        warnings: list[str] = []
+        dropped_below: int | None = None
+        dropped_count = 0
+        dropped_head = None
+
+        def close() -> None:
+            if dropped_head is None:
+                return
+            below = f"とその下位の節 {dropped_count} 件" if dropped_count else ""
+            # spec: REQ-423
+            warnings.append(
+                f"{SOURCE_AND_EVIDENCE_DISCLOSURE}: 経歴の節「{dropped_head.heading_path}」{below}は、"
+                f"公開可否が「{dropped_head.disclosure or PRIVATE_DISCLOSURE_PREFIX}」なので、"
+                "材料から落とした。この節の中身は文面に書かない。"
+            )
+
+        # spec: REQ-418
+        for section in self.repository.source_sections(name):
+            if dropped_below is not None and section.level > dropped_below:
+                # spec: REQ-422
+                dropped_count += 1
+                continue
+            if dropped_below is not None:
+                close()
+                dropped_below, dropped_count, dropped_head = None, 0, None
+            # spec: REQ-422
+            if section.private:
+                dropped_below, dropped_count, dropped_head = section.level, 0, section
+                continue
+            kept.append(
+                CareerSection(
+                    # spec: REQ-419
+                    heading_path=section.heading_path,
+                    # spec: REQ-421
+                    body=section.body,
+                    # spec: REQ-420
+                    id=section.id,
+                    disclosure=section.disclosure,
+                )
+            )
+        close()
+        return kept, warnings
 
     def _package(
         self, snapshot: SourceSnapshot, request: MaterialRequest, headline: Package | None
@@ -270,13 +369,17 @@ class MaterialService:
         ]
 
     def _presentation_rule_warnings(
-        self, channel: str, channel_rules: list[str], forbidden_phrases: list[str]
+        self,
+        channel: str,
+        channel_rules: list[str],
+        forbidden_phrases: list[str],
+        check_channel_rules: bool = True,
     ) -> list[str]:
         """見せ方の正本に、その媒体の節と禁じた言い回しの節があるかを断る。"""
         file_name = self.settings.files[PRESENTATION_RULES_KEY]
         warnings: list[str] = []
         # spec: REQ-097
-        if not channel_rules:
+        if check_channel_rules and not channel_rules:
             warnings.append(
                 f"見せ方の正本 {file_name} に媒体「{channel}」の節が無いので、媒体の規約は空である。"
                 f"文字数の上限や書き出しの決まりがあるなら、この媒体の名前の節を作って箇条書きで書く。"
@@ -297,7 +400,9 @@ class MaterialService:
         """
         from accord.services.consistency import ConsistencyService
 
-        report = ConsistencyService(self.settings, self.repository).inspect(channel)
+        report = ConsistencyService(self.settings, self.repository).inspect(
+            channel, allow_targets=True
+        )
         # 違反を 1 行に均すときに候補を落とすと、「下の候補」の実体が材料に届かない。
         # 1 行にする書き方は違反の型が持っているので、ここでは組み立て直さない。
         # spec: REQ-107

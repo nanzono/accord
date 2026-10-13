@@ -381,3 +381,80 @@ def _bare_declaration(line: str, label: str) -> str | None:
     if not rest or rest[0] not in ":：":
         return None
     return rest[1:].strip()
+
+
+# 見出しの道筋のつなぎ。最上位の見出しからその節の見出しまでを、この文字列でつなぐ。
+PATH_SEPARATOR = " > "
+
+
+@dataclass
+class OutlinedSection:
+    """見出しを持つ節 1 つと、その節の見出しの道筋。本文は下位の見出しの節を含まない。"""
+
+    section: Section
+    path: str
+
+
+def outline_sections(text: str) -> list[OutlinedSection]:
+    """見出しを持つ節を、ファイルの並びの順に、見出しの道筋つきで返す。
+
+    最初の見出しより前の本文（見出しを持たない塊）は、道筋を付けようが無いので入れない。
+    道筋は、その節より浅い見出しのうち直近のものを、浅い順につないで作る。
+    """
+    found: list[OutlinedSection] = []
+    ancestors: list[tuple[int, str]] = []
+    for section in split_sections(text):
+        if not section.heading:
+            continue
+        while ancestors and ancestors[-1][0] >= section.level:
+            ancestors.pop()
+        ancestors.append((section.level, section.heading))
+        found.append(
+            OutlinedSection(
+                section=section,
+                path=PATH_SEPARATOR.join(heading for _, heading in ancestors),
+            )
+        )
+    return found
+
+
+def has_heading_line(body: str) -> bool:
+    """本文に、見出しとして読まれる行が 1 行でもあるか。"""
+    return any(HEADING_RE.match(line) for line in body.splitlines())
+
+
+def _join(lines: list[str]) -> str:
+    """行の並びを、末尾に改行 1 つを持つ文字列にする。"""
+    return "\n".join(lines).rstrip("\n") + "\n"
+
+
+def replace_section_body(text: str, section: Section, body: str) -> str:
+    """節の本文だけを置き換えた全文を返す。見出しの行と、下位の見出しの節は 1 文字も変えない。
+
+    section は、同じ text を split_sections で切った節である。本文の前に空行を 1 つ、後ろに
+    （次の見出しがあれば）空行を 1 つ置く。指紋は前後の空行を見ないので、置き方で値は変わらない。
+    """
+    lines = text.splitlines()
+    new_body = body.strip("\n").splitlines()
+    block = [lines[section.start], ""]
+    if new_body:
+        block.extend(new_body)
+        if section.end < len(lines):
+            block.append("")
+    lines[section.start : section.end] = block
+    return _join(lines)
+
+
+def append_section_line(text: str, section: Section, line: str) -> str:
+    """節の本文の末尾（下位の見出しの節の前）に 1 行足した全文を返す。ほかの行は変えない。"""
+    lines = text.splitlines()
+    last = section.start
+    for index in range(section.start + 1, section.end):
+        if lines[index].strip():
+            last = index
+    insert_at = last + 1
+    addition = [line] if last != section.start else ["", line]
+    lines[insert_at:insert_at] = addition
+    if insert_at + len(addition) < len(lines) and lines[insert_at + len(addition)].strip():
+        lines.insert(insert_at + len(addition), "")
+    return _join(lines)

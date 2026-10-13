@@ -203,9 +203,11 @@ def provenance_of(settings: Settings) -> Provenance:
         version = importlib.metadata.version("accord")
     except importlib.metadata.PackageNotFoundError:
         version = "不明（未導入）"
-    # spec: REQ-004
+    config = settings.config_path.resolve()
+    # spec: REQ-460
     return Provenance(
-        config_path=str(settings.config_path.resolve()),
+        # spec: REQ-461
+        config_name=f"{config.parent.name}/{config.name}",
         # spec: REQ-005
         # spec: REQ-006
         reading=list(settings.reading.applied_keys) or ["既定"],
@@ -363,10 +365,14 @@ class ConsistencyService:
 
     # ------------------------------------------------------------ 入口
 
-    def inspect(self, scope: str | None = None) -> ConsistencyReport:
-        """範囲を受けて違反の一覧を返す。正本は 1 バイトも書き換えない。"""
+    def inspect(self, scope: str | None = None, allow_targets: bool = False) -> ConsistencyReport:
+        """範囲を受けて違反の一覧を返す。正本は 1 バイトも書き換えない。
+
+        allow_targets は、決めの適用先の語（媒体ではない適用範囲）を範囲として受けるかどうか。
+        整合の検査の操作そのものは受けず、決めの登記と材料の取り出しの中から呼ぶときだけ立てる。
+        """
         snapshot = self.repository.load()
-        target = self._resolve_scope(snapshot, scope)
+        target = self._resolve_scope(snapshot, scope, allow_targets)
 
         if target is None:
             # spec: REQ-009
@@ -432,7 +438,9 @@ class ConsistencyService:
 
     # ------------------------------------------------------------ 範囲
 
-    def _resolve_scope(self, snapshot: SourceSnapshot, scope: str | None) -> InspectionScope | None:
+    def _resolve_scope(
+        self, snapshot: SourceSnapshot, scope: str | None, allow_targets: bool = False
+    ) -> InspectionScope | None:
         """範囲の名前を、今回見る型の集合に翻訳する。名前が実在しなければ None。"""
         if scope is None or scope == WHOLE_SCOPE:
             return InspectionScope(
@@ -447,6 +455,11 @@ class ConsistencyService:
             )
 
         if scope in self.settings.channels:
+            return self._channel_scope(snapshot, scope)
+
+        if allow_targets and scope in self.settings.positioning_targets:
+            # 適用先の語には提示物も媒体の規約も無いので、媒体と同じ絞り方で、その語の決めから
+            # 束と機能までを辿る（提示物は宛先が一致するものが無いので 0 件になる）。
             return self._channel_scope(snapshot, scope)
 
         # spec: REQ-042

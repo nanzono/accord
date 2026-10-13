@@ -1,0 +1,219 @@
+# 節の読み書きと書き出し
+
+正本のファイルを、節（見出し 1 つとその本文）の単位で読み書きする操作と、正本を 1 つのファイルに書き出す操作の要件です。文面を書くセッションが、正本のファイルを直接開かずに、accord の操作だけで事実を確かめ、書き足し、直せるようにするためのものです。
+
+読みの操作は 3 つです。節を一覧する操作、節を読む操作、事実を検索する操作で、どれも正本のファイルを 1 バイトも書き換えません。公開不可の節も返します。事実を確かめるための読みで、外に出す材料ではないからです。
+
+書く操作は 2 つです。事実を登記する操作は、経歴の正本の節 1 つの末尾に 1 行を足します。節を書き換える操作は、節 1 つの本文を置き換えます。どちらも書く瞬間に守りを当て、通らなければ書かずに、何が通らなかったかと次の一手を返します。節の書き換えは、読んだときの指紋を渡させ、読んだ後に誰かが直していれば上書きしません。書いた後の正本に、書く前に無かった整合の検査の違反が出るなら書きません。ただし「写しの鮮度」の違反は断る理由にせず、読み比べる写しとして返します。
+
+書き出す操作は、正本の各ファイルを 1 つの Markdown につないで、設定が決めた書き出し先に書きます。返すのはファイルの名前と字数だけで、書き出し先の場所は返しません。
+
+## 言葉
+
+- **読みの操作**: 決めを読む・材料を取り出す・節を一覧する・節を読む・事実を検索する・書き出すの 6 つ。
+- **書き出し先**: 設定の `[source] export_path` に書くファイル 1 つ。呼ぶ側は渡さない。
+- **書き込みの操作**: 決めを登記する・機能を登記する・公開記録を登記する・パッケージを改訂する・事実を登記する・節を書き換えるの 6 つ。
+- **正本のファイル**: 設定の `[source.files]` が指すファイルのうち、提示物（ディレクトリ）を除くもの。同じファイルを 2 つの役割が指すときは 1 つに数える。
+- **見出しの道筋**: 最上位の見出しからその節の見出しまでを、` > ` でつないだ文字列。
+- **指紋**: いまある関数 `section_fingerprint`（節の本文の SHA-256 の先頭 8 桁）で作った値。
+- **適用先の語**: 設定の `[vocabulary]` に書く、媒体ではない決めの適用範囲（例: 会社のホームページ）。
+
+要件の書き方と番号の決まりは [README.md](README.md) にあります。
+
+## REQ-425
+節の一覧を求められたとき、accord は正本の各ファイルの節を、ファイルの名前と見出しの道筋と指紋と字数を添えて、正本の並びの順に返す。
+
+- 関係するファイル: `src/accord/services/sections.py`、`src/accord/repository/markdown_repository.py`、`src/accord/repository/sections.py`
+- 検証手順: `uv run pytest tests/test_sections.py -k REQ_425`
+
+## REQ-426
+節の一覧の節が ID の欄を持つとき、accord はその節の ID と公開可否を添える。
+
+- 関係するファイル: `src/accord/services/sections.py`、`src/accord/repository/markdown_repository.py`、`src/accord/repository/sections.py`
+- 検証手順: `uv run pytest tests/test_sections.py -k REQ_426`
+
+## REQ-427
+ファイルの名前を渡されて節の一覧を求められたとき、accord はそのファイルの節だけを返す。
+
+- 関係するファイル: `src/accord/services/sections.py`、`src/accord/repository/markdown_repository.py`、`src/accord/repository/sections.py`
+- 検証手順: `uv run pytest tests/test_sections.py -k REQ_427`
+
+## REQ-428
+もし渡されたファイルの名前が正本のファイルに無いなら、accord は正本のファイルの名前をすべて候補に返す。
+
+- 関係するファイル: `src/accord/services/sections.py`、`src/accord/repository/markdown_repository.py`、`src/accord/repository/sections.py`
+- 検証手順: `uv run pytest tests/test_sections.py -k REQ_428`
+
+## REQ-429
+ID か見出しの道筋を渡されて節を読むとき、accord はその節の本文と指紋を返す。
+
+- 関係するファイル: `src/accord/services/sections.py`、`src/accord/repository/markdown_repository.py`、`src/accord/repository/sections.py`
+- 検証手順: `uv run pytest tests/test_sections.py -k REQ_429`
+
+## REQ-430
+常に、accord は節の読みで返す本文に、下位の見出しの節の本文を含めない。
+
+- 関係するファイル: `src/accord/services/sections.py`、`src/accord/repository/markdown_repository.py`、`src/accord/repository/sections.py`
+- 検証手順: `uv run pytest tests/test_sections.py -k REQ_430`
+
+## REQ-431
+もし渡された ID か見出しの道筋に当たる節が無いなら、accord は近い見出しの道筋を候補に返す。
+
+- 関係するファイル: `src/accord/services/sections.py`、`src/accord/repository/markdown_repository.py`、`src/accord/repository/sections.py`
+- 検証手順: `uv run pytest tests/test_sections.py -k REQ_431`
+
+## REQ-432
+もし渡された見出しの道筋に当たる節が 2 つ以上あるなら、accord は本文を返さずに、当たった節をファイルの名前つきの見出しの道筋で候補に返す。
+
+- 関係するファイル: `src/accord/services/sections.py`、`src/accord/repository/markdown_repository.py`、`src/accord/repository/sections.py`
+- 検証手順: `uv run pytest tests/test_sections.py -k REQ_432`
+
+## REQ-433
+語を渡されて事実を検索するとき、accord はその語を含む行を、ファイルの名前と見出しの道筋と行の文を添えて返す。
+
+- 関係するファイル: `src/accord/services/sections.py`、`src/accord/repository/markdown_repository.py`、`src/accord/repository/sections.py`
+- 検証手順: `uv run pytest tests/test_sections.py -k REQ_433`
+
+## REQ-434
+事実を検索するとき、accord は全角と半角の違いと大文字と小文字の違いを同じ文字として扱う。
+
+- 関係するファイル: `src/accord/services/sections.py`、`src/accord/repository/markdown_repository.py`、`src/accord/repository/sections.py`
+- 検証手順: `uv run pytest tests/test_sections.py -k REQ_434`
+
+## REQ-435
+もし事実の検索で当たった行が 50 件を超えるなら、accord は先頭の 50 件と当たった総数を返す。
+
+- 関係するファイル: `src/accord/services/sections.py`、`src/accord/repository/markdown_repository.py`、`src/accord/repository/sections.py`
+- 検証手順: `uv run pytest tests/test_sections.py -k REQ_435`
+
+## REQ-436
+常に、accord は節の一覧と節の読みと事実の検索で、正本のファイルを 1 バイトも書き換えない。
+
+- 関係するファイル: `src/accord/services/sections.py`、`src/accord/repository/markdown_repository.py`、`src/accord/repository/sections.py`
+- 検証手順: `uv run pytest tests/test_sections.py -k REQ_436`
+
+## REQ-437
+節と事実の文と出所と日付を渡されて事実を登記するとき、accord はその節の本文の末尾に、事実の文と日付と出所を書いた箇条の 1 行を足す。
+
+- 関係するファイル: `src/accord/services/sections.py`、`src/accord/repository/sections.py`
+- 検証手順: `uv run pytest tests/test_sections.py -k REQ_437`
+
+## REQ-438
+もし事実の登記で渡された節が経歴の正本に無いなら、accord は書かずに、近い見出しの道筋を候補にして断る。
+
+- 関係するファイル: `src/accord/services/sections.py`、`src/accord/repository/sections.py`
+- 検証手順: `uv run pytest tests/test_sections.py -k REQ_438`
+
+## REQ-439
+もし事実の登記で事実の文か出所が空なら、accord は書かずに、欠けた欄の名前を断りに返す。
+
+- 関係するファイル: `src/accord/services/sections.py`、`src/accord/repository/sections.py`
+- 検証手順: `uv run pytest tests/test_sections.py -k REQ_439`
+
+## REQ-440
+もし事実の登記で日付が読めないなら、accord は書かずに、日付の書き方の例を断りに返す。
+
+- 関係するファイル: `src/accord/services/sections.py`、`src/accord/repository/sections.py`
+- 検証手順: `uv run pytest tests/test_sections.py -k REQ_440`
+
+## REQ-441
+もし事実の文が改行を含むなら、accord は書かずに、事実を 1 件 1 行で登記することを断りに返す。
+
+- 関係するファイル: `src/accord/services/sections.py`、`src/accord/repository/sections.py`
+- 検証手順: `uv run pytest tests/test_sections.py -k REQ_441`
+
+## REQ-442
+事実の登記が通ったとき、accord は足した行とその節の新しい指紋を返す。
+
+- 関係するファイル: `src/accord/services/sections.py`、`src/accord/repository/sections.py`
+- 検証手順: `uv run pytest tests/test_sections.py -k REQ_442`
+
+## REQ-443
+節と新しい本文と読んだときの指紋と理由を渡されて節を書き換えるとき、accord はその節の本文を新しい本文に置き換える。
+
+- 関係するファイル: `src/accord/services/sections.py`、`src/accord/repository/sections.py`
+- 検証手順: `uv run pytest tests/test_sections.py -k REQ_443`
+
+## REQ-444
+常に、accord は節の書き換えで、その節の見出しの行と下位の見出しの節を変えない。
+
+- 関係するファイル: `src/accord/services/sections.py`、`src/accord/repository/sections.py`
+- 検証手順: `uv run pytest tests/test_sections.py -k REQ_444`
+
+## REQ-445
+もし渡された指紋がその節のいまの指紋と違うなら、accord は書かずに、いまの指紋と節を読み直すことを断りに返す。
+
+- 関係するファイル: `src/accord/services/sections.py`、`src/accord/repository/sections.py`
+- 検証手順: `uv run pytest tests/test_sections.py -k REQ_445`
+
+## REQ-446
+もし新しい本文が見出しの行を含むなら、accord は書かずに、節の新設と見出しの変更はこの操作でできないことを断りに返す。
+
+- 関係するファイル: `src/accord/services/sections.py`、`src/accord/repository/sections.py`
+- 検証手順: `uv run pytest tests/test_sections.py -k REQ_446`
+
+## REQ-447
+もし新しい本文で節の ID の欄が消えるか値が変わるなら、accord は書かずに、ID の欄を元の値のまま残すことを断りに返す。
+
+- 関係するファイル: `src/accord/services/sections.py`、`src/accord/repository/sections.py`
+- 検証手順: `uv run pytest tests/test_sections.py -k REQ_447`
+
+## REQ-448
+もし節の書き換えの理由が空なら、accord は書かずに、欠けた欄の名前を断りに返す。
+
+- 関係するファイル: `src/accord/services/sections.py`、`src/accord/repository/sections.py`
+- 検証手順: `uv run pytest tests/test_sections.py -k REQ_448`
+
+## REQ-449
+節の書き換えが通ったとき、accord はその節の新しい指紋を返す。
+
+- 関係するファイル: `src/accord/services/sections.py`、`src/accord/repository/sections.py`
+- 検証手順: `uv run pytest tests/test_sections.py -k REQ_449`
+
+## REQ-450
+節の書き換えか事実の登記が通ったとき、accord は書いたことで新しく出た「写しの鮮度」の違反を、読み比べる写しの名前を添えて返す。
+
+- 関係するファイル: `src/accord/services/sections.py`、`src/accord/repository/sections.py`
+- 検証手順: `uv run pytest tests/test_sections.py -k REQ_450`
+
+## REQ-467
+もし節の書き換えか事実の登記の後の正本に、書く前に無かった「写しの鮮度」以外の整合の検査の違反が出るなら、accord は書かずに、その違反を断りに返す。
+
+- 関係するファイル: `src/accord/services/sections.py`、`src/accord/repository/sections.py`
+- 検証手順: `uv run pytest tests/test_sections.py -k REQ_467`
+
+## REQ-451
+もし書き換える節が経歴の正本と職務経歴書の台帳と見せ方の正本のどれにも無いなら、accord は書かずに、その正本を書く操作の名前を候補に返す。
+
+- 関係するファイル: `src/accord/services/sections.py`、`src/accord/repository/sections.py`
+- 検証手順: `uv run pytest tests/test_sections.py -k REQ_451`
+
+## REQ-452
+書き出しを求められたとき、accord は正本の各ファイルの中身を、ファイルの名前の見出しを付けて、設定の書き出し先の 1 つの Markdown のファイルに書く。
+
+- 関係するファイル: `src/accord/services/sections.py`
+- 検証手順: `uv run pytest tests/test_sections.py -k REQ_452`
+
+## REQ-453
+もし設定の書き出し先が正本の置き場か提示物の置き場の中なら、accord は書き出し先の鍵の名前を添えて起動をやめる。
+
+- 関係するファイル: `src/accord/vocabulary/settings.py`
+- 検証手順: `uv run pytest tests/test_sections.py -k REQ_453`
+
+## REQ-454
+もし設定に書き出し先が書かれていないなら、accord は書き出しを求められても書かずに、設定に足す鍵の名前を断りに返す。
+
+- 関係するファイル: `src/accord/services/sections.py`
+- 検証手順: `uv run pytest tests/test_sections.py -k REQ_454`
+
+## REQ-455
+書き出しが通ったとき、accord は書いたファイルの名前と字数を返し、書き出し先の絶対パスを返さない。
+
+- 関係するファイル: `src/accord/services/sections.py`
+- 検証手順: `uv run pytest tests/test_sections.py -k REQ_455`
+
+## 未決の質問
+
+- 「経歴の正本に無いなら」（REQ-438）の「経歴の正本」が、設定の `career` が指すファイルだけを指すのか、受託案件（`engagements`）が別のファイルのときにそのファイルも含むのかを決めていません。いまの実装は `career` が指すファイルだけに書きます。受託案件を別のファイルに置く正本（同梱の 1 つ目の見本）では、受託案件の節に事実を登記できず、節の書き換えも断ります（REQ-451 の候補の操作は空になります）。
+- 「見出しの道筋」（REQ-429）に、最初の見出しより前の本文（見出しを持たない塊）をどう数えるかを決めていません。いまの実装は、その塊を節の一覧にも節の読みにも入れず、事実の検索だけが見出しの道筋を空にして行を返します。
+- 「書く前に無かった違反」（REQ-467）の「同じ違反」の見分け方を決めていません。いまの実装は、写しの鮮度は直し先の文まで、ほかの違反は制約とファイルと場所で比べます。同じ場所の同じ違反の言い回しが変わっただけでは、新しい違反と数えません。

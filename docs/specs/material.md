@@ -119,12 +119,14 @@
 
 - 関係するファイル: `src/accord/services/material.py`、`src/accord/services/positioning.py`
 - 検証手順: `uv run pytest tests/test_material.py -k REQ_101`
+- status: superseded by REQ-415
 
 ## REQ-102
 もし媒体の名前が設定の媒体の一覧に無いなら、accord は実在する媒体の名前をすべてと、次に呼ぶ操作の名前を警告に返す。
 
 - 関係するファイル: `src/accord/services/material.py`、`src/accord/services/positioning.py`
 - 検証手順: `uv run pytest tests/test_material.py -k REQ_102`
+- status: superseded by REQ-416
 
 ## REQ-103
 もし決めが 1 件も登記されていないなら、accord は決めも看板のパッケージも裏づけも材料に載せない。
@@ -180,8 +182,75 @@
 - 関係するファイル: `src/accord/services/material.py`、`src/accord/vocabulary/settings.py`
 - 検証手順: `uv run pytest tests/test_reading_settings.py -k REQ_374`
 
+## REQ-415
+もし渡された名前が設定の媒体の一覧にも適用先の語にも無いなら、accord は決めも看板のパッケージも材料に載せない。
+
+- 関係するファイル: `src/accord/services/material.py`、`src/accord/services/positioning.py`
+- 検証手順: `uv run pytest tests/test_material.py -k REQ_415`
+
+## REQ-416
+もし渡された名前が設定の媒体の一覧にも適用先の語にも無いなら、accord は実在する媒体の名前と適用先の語をすべてと、次に呼ぶ操作の名前を警告に返す。
+
+- 関係するファイル: `src/accord/services/material.py`、`src/accord/services/positioning.py`
+- 検証手順: `uv run pytest tests/test_material.py -k REQ_416`
+
+## REQ-417
+適用先の語を渡されて材料を取り出すとき、accord は媒体の規約を空の一覧で返す。
+
+- 関係するファイル: `src/accord/services/material.py`、`src/accord/services/positioning.py`
+- 検証手順: `uv run pytest tests/test_material.py -k REQ_417`
+
+## REQ-466
+適用先の語を渡されて材料を取り出すとき、accord は媒体の規約を持たない適用先であることを警告に返す。
+
+- 関係するファイル: `src/accord/services/material.py`、`src/accord/services/positioning.py`
+- 検証手順: `uv run pytest tests/test_material.py -k REQ_466`
+
+## REQ-418
+材料を取り出すとき、accord は経歴の正本の節を、正本の並びの順にすべて材料の経歴の節に載せる。
+
+- 関係するファイル: `src/accord/services/material.py`、`src/accord/repository/markdown_repository.py`
+- 検証手順: `uv run pytest tests/test_material.py -k REQ_418`
+
+## REQ-419
+材料の経歴の節を載せるとき、accord は各節に見出しの道筋と本文を添える。
+
+- 関係するファイル: `src/accord/services/material.py`、`src/accord/repository/markdown_repository.py`
+- 検証手順: `uv run pytest tests/test_material.py -k REQ_419`
+
+## REQ-420
+材料の経歴の節が ID の欄を持つとき、accord はその節の ID と公開可否を添える。
+
+- 関係するファイル: `src/accord/services/material.py`、`src/accord/repository/markdown_repository.py`
+- 検証手順: `uv run pytest tests/test_material.py -k REQ_420`
+
+## REQ-421
+常に、accord は材料の経歴の節 1 件の本文に、下位の見出しの節の本文を含めない。
+
+- 関係するファイル: `src/accord/services/material.py`、`src/accord/repository/markdown_repository.py`
+- 検証手順: `uv run pytest tests/test_material.py -k REQ_421`
+
+## REQ-422
+もし経歴の正本の節が公開不可なら、accord はその節とその下位の節を材料の経歴の節に載せない。
+
+- 関係するファイル: `src/accord/services/material.py`、`src/accord/repository/markdown_repository.py`
+- 検証手順: `uv run pytest tests/test_material.py -k REQ_422`
+
+## REQ-423
+もし経歴の正本の節を公開不可で材料から落としたなら、accord は落とした節の見出しと当たった制約の名前を警告に返す。
+
+- 関係するファイル: `src/accord/services/material.py`、`src/accord/repository/markdown_repository.py`
+- 検証手順: `uv run pytest tests/test_material.py -k REQ_423`
+
+## REQ-424
+材料の取り出しの操作を開くとき、accord はその操作の返り値の文字数の上限として 50 万字を宣言する。
+
+- 関係するファイル: `src/accord/server/app.py`
+- 検証手順: `uv run pytest tests/test_material.py -k REQ_424`
+
 ## 未決の質問
 
 - 「その媒体に適用される決めが前面に出す束」（REQ-084）が、その媒体を名指しした決めが 1 件も無いときに何を返すかを決めていません。いまの実装は適用範囲「全体」の決めに落として、落としたことを警告に 1 行足します。この文だけを読むと、名指しの決めが無ければ何も返さない実装も書けます。いまのテストは、媒体を名指しした決めがある見本で確かめているので、落ち方を見ていません。
   - この落ち方は、決めの読み書きの要件 REQ-162 と REQ-163 で決まりました（媒体を名指しした決めが 1 件も無いときは、適用範囲「全体」の最新を返し、落としたことを警告に返します）。
 - 「返った違反を材料の警告に載せる」（REQ-107）が、整合の検査が返すもう 1 つの一覧（断り）をどう扱うかを決めていません。いまの実装は違反と断りの両方を警告に足します。文のとおりに違反だけを載せる実装も書けます。いまのテストは違反 1 種類しか見ていないので、どちらでも通ります。
+- 「材料を取り出すとき」（REQ-418）が、渡された名前が媒体の名前にも適用先の語にも無いとき（REQ-415）も含むのかを決めていません。いまの実装は、名前が無いときだけ経歴の節を載せず、決めが未登記のときと看板の束が無いときは経歴の節を載せます。呼び直す前提の返り値に経歴の正本の全文を載せないためです。あわせて、適用先の語を渡したときに「同じ媒体の範囲で」呼ぶ整合の検査（REQ-107）は、その語の決めから束と機能までを辿る範囲で呼んでいます。

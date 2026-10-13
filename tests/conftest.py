@@ -54,3 +54,37 @@ def source_digest(source_dir: Path) -> dict[str, str]:
                 path.read_bytes()
             ).hexdigest()
     return digest
+
+
+def add_config_lines(config_path: Path, table: str, lines: list[str]) -> Settings:
+    """設定ファイルの表（`[source]` や `[vocabulary]`）の見出しの直後に行を足し、読み直した設定を返す。
+
+    写しの設定に、テストで使う鍵（提示物の置き場・書き込みの記録・書き出し先・適用先の語）を足すために使う。
+    表の見出しが無ければ、テストの前提が崩れたとして落とす。
+    """
+    text = config_path.read_text(encoding="utf-8")
+    heading = f"[{table}]\n"
+    assert heading in text, f"設定に {heading.strip()} が無い: {config_path}"
+    text = text.replace(heading, heading + "".join(f"{line}\n" for line in lines), 1)
+    config_path.write_text(text, encoding="utf-8")
+    return load_settings(config_path)
+
+
+def git(directory: Path, *args: str) -> str:
+    """一時の場所の git を呼び、標準出力を返す。失敗したらテストを落とす。"""
+    import subprocess
+
+    completed = subprocess.run(
+        ["git", "-C", str(directory), *args], capture_output=True, text=True, check=False
+    )
+    assert completed.returncode == 0, completed.stderr
+    return completed.stdout
+
+
+def init_git(directory: Path) -> None:
+    """一時の場所を git のリポジトリにし、いまの中身をすべて 1 つ目のコミットにする。"""
+    git(directory, "init", "-q")
+    git(directory, "config", "user.name", "tester")
+    git(directory, "config", "user.email", "tester@example.invalid")
+    git(directory, "add", "-A")
+    git(directory, "commit", "-q", "-m", "first")

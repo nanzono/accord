@@ -25,6 +25,7 @@ from accord.models.results import (
     is_id,
 )
 from accord.models.types import PublicRecord
+from accord.services.recording import WriteRecorder
 from accord.repository.markdown_repository import EMPTY_WORDS, MarkdownRepository
 from accord.vocabulary.settings import (
     PUBLIC_RECORD_KINDS_KEY,
@@ -56,9 +57,15 @@ REGISTER_OPERATION = "register_public_record"
 class PublicRecordService:
     """公開記録を登記する。制約を先に全部見て、通ると決まってから 1 度だけ書き戻す。"""
 
-    def __init__(self, settings: Settings, repository: MarkdownRepository | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        repository: MarkdownRepository | None = None,
+        recorder: WriteRecorder | None = None,
+    ) -> None:
         self.settings = settings
         self.repository = repository or MarkdownRepository(settings)
+        self.recorder = recorder or WriteRecorder(settings)
 
     def register(self, draft: PublicRecordDraft) -> WriteResult:
         """公開記録を 1 ブロック足す。置き場・必須欄・語彙・由来の節を確かめ、通らなければ書かずに拒否する。"""
@@ -77,11 +84,20 @@ class PublicRecordService:
             origin_section=_value(draft.origin_section),
             source=_value(draft.source),
         )
+        file_name = self.settings.files[PUBLIC_RECORDS_KEY]
+        # spec: REQ-405
+        refusal = self.recorder.refusal(file_name, REGISTER_OPERATION)
+        if refusal is not None:
+            return WriteResult(accepted=False, rejection=refusal)
         # spec: REQ-207
         self.repository.append_public_record(record)
+        # spec: REQ-403
+        notes = self.recorder.record(file_name, REGISTER_OPERATION, record.id)
 
         # spec: REQ-209
-        return WriteResult(accepted=True, recorded={"公開記録": record.model_dump(mode="json")})
+        return WriteResult(
+            accepted=True, recorded={"公開記録": record.model_dump(mode="json")}, warnings=notes
+        )
 
     # ------------------------------------------------------------ 登記の部品
 

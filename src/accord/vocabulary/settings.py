@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import tomllib
 from dataclasses import dataclass, field, fields
 from pathlib import Path
@@ -49,6 +50,18 @@ OPTIONAL_FILE_KEYS = (PUBLIC_RECORDS_KEY,)
 
 # 正本の書き方を書く節の名前。この節が無ければ、すべての鍵が既定値になる。
 READING_KEY = "reading"
+
+# [source] の直下に書ける、置き場と書き込みの鍵。どれも書かなくてよい。
+# 提示物の置き場。書けば、提示物のディレクトリと媒体ごとの規約のファイルを、正本の置き場ではなく
+# ここから読む。正本と提示物を別のリポジトリに置く人のための鍵である。
+PRESENTATIONS_ROOT_KEY = "presentations_root"
+# 書き込みの記録。true なら、書き込みの操作が正本のファイルを変えるたびに git にコミットする。
+COMMIT_WRITES_KEY = "commit_writes"
+# 書き出し先。正本の各ファイルを 1 つにつないだ Markdown を書くファイル 1 つ。
+EXPORT_PATH_KEY = "export_path"
+
+# 決めの適用先の語を書く、[vocabulary] の鍵。媒体ではない適用範囲（例: 会社のホームページ）。
+POSITIONING_TARGETS_KEY = "positioning_targets"
 
 # 設定ファイルの最上位に書ける節の名前。これ以外の名前は、設定を読んだ瞬間に止める。
 TOP_LEVEL_KEYS = ("source", "vocabulary", READING_KEY)
@@ -162,11 +175,47 @@ class Settings:
     source_dir: Path
     files: dict[str, str] = field(default_factory=dict)
     channels: list[str] = field(default_factory=list)
+    # 媒体ではない決めの適用範囲の語。書かなければ空で、適用範囲は媒体の名前と「全体」だけになる。
+    positioning_targets: list[str] = field(default_factory=list)
     capability_categories: list[str] = field(default_factory=list)
     package_hypothesis_states: list[str] = field(default_factory=list)
     public_record_kinds: list[str] = field(default_factory=list)
     public_record_roles: list[str] = field(default_factory=list)
     reading: ReadingRules = field(default_factory=ReadingRules)
+    # 提示物の置き場。設定に書かなければ None で、正本の置き場（source_dir）から読む。
+    presentations_root: Path | None = None
+    # 書き込みの操作のたびに git にコミットするか。
+    commit_writes: bool = False
+    # 書き出し先のファイル。設定に書かなければ None で、書き出しは断る。
+    export_path: Path | None = None
+
+    @property
+    def presentations_dir(self) -> Path:
+        """提示物のディレクトリと媒体ごとの規約のファイルを読む根。書かなければ正本の置き場。"""
+        # spec: REQ-398
+        if self.presentations_root is not None:
+            return self.presentations_root
+        # spec: REQ-399
+        return self.source_dir
+
+    def source_file_names(self) -> list[str]:
+        """正本のファイルの名前（設定に書いた名前）を、FILE_KEYS の並びで返す。
+
+        提示物（ディレクトリ）は入れない。同じファイルを 2 つの役割が指すときは 1 つに数える。
+        """
+        names: list[str] = []
+        for key in FILE_KEYS:
+            if key == "presentations" or key not in self.files:
+                continue
+            if self.files[key] not in names:
+                names.append(self.files[key])
+        return names
+
+    def keys_for_file(self, name: str) -> list[str]:
+        """設定に書いたファイルの名前から、そのファイルを指す正本の役割の名前を並びの順で返す。"""
+        return [
+            key for key in FILE_KEYS if key != "presentations" and self.files.get(key) == name
+        ]
 
     def has_file(self, key: str) -> bool:
         """その正本の置き場が、設定に書かれているか。
@@ -178,7 +227,9 @@ class Settings:
     def path_for(self, key: str) -> Path:
         """正本の役割の名前から、実ファイル（提示物だけはディレクトリ）の場所を返す。"""
         if key not in self.files:
-            raise KeyError(f"設定に正本 '{key}' のファイル名が無い: {self.config_path}")
+            raise KeyError(f"設定に正本 '{key}' のファイル名が無い: {self.config_path.name}")
+        if key == "presentations":
+            return self.presentations_dir / self.files[key]
         return self.source_dir / self.files[key]
 
 
@@ -284,6 +335,59 @@ def _applied_reading_keys(table: dict) -> tuple[str, ...]:
     return tuple(applied)
 
 
+def _inside(path: Path, root: Path) -> bool:
+    """path が root そのものか、root の下にあるか。"""
+    return path == root or root in path.parents
+
+
+def _inside_git_repository(directory: Path) -> bool:
+    """そのディレクトリが git のリポジトリの作業ツリーの中にあるか。git が無ければ False。"""
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(directory), "rev-parse", "--is-inside-work-tree"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return False
+    return completed.returncode == 0 and completed.stdout.strip() == "true"
+
+
+def _presentations_root(source_table: dict, config_path: Path) -> Path | None:
+    """提示物の置き場の鍵を読む。書かれていなければ None。実在しないディレクトリなら止める。"""
+    if PRESENTATIONS_ROOT_KEY not in source_table:
+        return None
+    value = str(source_table[PRESENTATIONS_ROOT_KEY])
+    # spec: REQ-400
+    root = (config_path.parent / value).resolve()
+    # spec: REQ-401
+    if not root.is_dir():
+        raise ValueError(
+            f"設定の [source] {PRESENTATIONS_ROOT_KEY} が実在するディレクトリを指していない"
+            f"（書かれていた値: {value}）: {config_path.name}"
+        )
+    return root
+
+
+def _export_path(
+    source_table: dict, config_path: Path, source_dir: Path, presentations_dir: Path
+) -> Path | None:
+    """書き出し先の鍵を読む。正本の置き場か提示物の置き場の中を指していれば止める。"""
+    if EXPORT_PATH_KEY not in source_table:
+        return None
+    value = str(source_table[EXPORT_PATH_KEY])
+    path = (config_path.parent / value).resolve()
+    # spec: REQ-453
+    if _inside(path, source_dir) or _inside(path, presentations_dir):
+        raise ValueError(
+            f"設定の [source] {EXPORT_PATH_KEY} が、正本の置き場か提示物の置き場の中を指している"
+            f"（書かれていた値: {value}）。書き出しの写しは、正本と提示物の置き場の外に置く: "
+            f"{config_path.name}"
+        )
+    return path
+
+
 def load_reading_rules(document: dict, config_path: Path) -> ReadingRules:
     """設定の「書き方」の節を読む。節が無ければ、すべて既定値（第 1 版と同じ読み方）を返す。"""
     table = document.get(READING_KEY, {})
@@ -356,6 +460,17 @@ def load_settings(path: Path | None = None) -> Settings:
     source_table = document.get("source", {})
     directory = str(source_table.get("directory", "source"))
     source_dir = (config_path.parent / directory).resolve()
+    presentations_root = _presentations_root(source_table, config_path)
+    presentations_dir = presentations_root if presentations_root is not None else source_dir
+    export_path = _export_path(source_table, config_path, source_dir, presentations_dir)
+
+    commit_writes = bool(source_table.get(COMMIT_WRITES_KEY, False))
+    # spec: REQ-406
+    if commit_writes and not _inside_git_repository(source_dir):
+        raise ValueError(
+            f"設定の [source] {COMMIT_WRITES_KEY} が true なのに、正本の置き場が git のリポジトリの中に無い。"
+            f"正本の置き場で git init するか、{COMMIT_WRITES_KEY} を外す: {config_path.name}"
+        )
 
     files_table = source_table.get("files", {})
     missing = [
@@ -380,11 +495,20 @@ def load_settings(path: Path | None = None) -> Settings:
         public_record_kinds = []
         public_record_roles = []
 
+    targets = vocabulary_table.get(POSITIONING_TARGETS_KEY, [])
+    if not isinstance(targets, list):
+        raise ValueError(f"設定 '{POSITIONING_TARGETS_KEY}' は語の一覧で書く: {config_path.name}")
+
     return Settings(
         config_path=config_path,
         source_dir=source_dir,
         files={key: str(files_table[key]) for key in FILE_KEYS if key in files_table},
         channels=_require_list(vocabulary_table, "channels", config_path),
+        # spec: REQ-407
+        positioning_targets=[str(item) for item in targets],
+        presentations_root=presentations_root,
+        commit_writes=commit_writes,
+        export_path=export_path,
         capability_categories=_require_list(
             vocabulary_table, "capability_categories", config_path
         ),

@@ -1,4 +1,4 @@
-"""MCP のツール 7 本と資源 1 本を開く、薄い皮。
+"""MCP のツール 13 本と資源 1 本を開く、薄い皮。
 
 この文書がするのは、引数の型を確かめてサービスに渡し、返ってきた型をそのまま返すことだけである。
 制約の判断はサービスにあり、正本の在処はリポジトリにある。ここに業務の判断を書かないのは、
@@ -15,6 +15,8 @@ from accord.models.ontology import Ontology, load_ontology
 from accord.models.results import (
     CapabilityDraft,
     ConsistencyReport,
+    ExportResult,
+    FactSearch,
     Material,
     MaterialRequest,
     PackageDraft,
@@ -22,6 +24,8 @@ from accord.models.results import (
     PositioningException,
     PositioningView,
     PublicRecordDraft,
+    SectionList,
+    SectionText,
     WriteResult,
 )
 from accord.services.consistency import ConsistencyService
@@ -29,10 +33,13 @@ from accord.services.material import MaterialService
 from accord.services.offering import OfferingService
 from accord.services.positioning import PositioningService
 from accord.services.public_records import PublicRecordService
+from accord.services.recording import WriteRecorder
+from accord.services.sections import SectionService
+from accord.services.watch import SourceWatch
 from accord.vocabulary.settings import Settings
 
 # ツールと資源の名前。README の「動かす」の表と同じ綴りで、変えない。
-# spec: REQ-336
+# spec: REQ-462
 TOOL_NAMES = (
     "get_positioning",
     "assemble_material",
@@ -41,8 +48,19 @@ TOOL_NAMES = (
     "register_public_record",
     "revise_package",
     "check_consistency",
+    "list_sections",
+    "read_section",
+    "search_facts",
+    "record_fact",
+    "revise_section",
+    "export_source",
 )
 ONTOLOGY_URI = "accord://ontology"
+
+# 材料の取り出しの返り値の文字数の上限として、MCP のクライアントに宣言する値と鍵。
+# 経歴の正本の全節を 1 回で返すので、宣言の無い既定の上限（5 万字）を超えうる。
+MAX_RESULT_SIZE_KEY = "anthropic/maxResultSizeChars"
+MATERIAL_MAX_RESULT_SIZE = 500_000
 
 
 def as_date(text: str) -> date | None:
@@ -57,20 +75,32 @@ def as_date(text: str) -> date | None:
         return None
 
 
+# spec: REQ-463
 INSTRUCTIONS = """accord は、案件獲得の正本（何ができるか、何をしてきたか、どう売るか）と、
 そこから派生する対外表現が食い違わないようにする道具である。
+正本のファイルを直接開かず、accord の操作で読み書きする。正本の置き場は教えない。
 セッションの初めに資源 accord://ontology を読み、いまの決めを get_positioning で読む。
-文面を書く前に assemble_material で材料を取り出し、外に出す前に check_consistency を呼ぶ。
+応募文・プロフィール・職務経歴書を書く前に assemble_material を 1 回呼ぶ。経歴の節がすべてそろう。
+事実を確かめるときは list_sections・read_section・search_facts で読む。
+実績や経歴の事実を書き足すときは record_fact、節を直すときは read_section で読んでから revise_section を呼ぶ。
+外に出す前に check_consistency を呼ぶ。
 """
 
 
-def create_server(settings: Settings) -> MCPServer:
-    """設定を 1 つ受け取り、ツール 7 本と資源 1 本を登録したサーバーを返す。"""
-    positioning_service = PositioningService(settings)
-    offering_service = OfferingService(settings)
-    material_service = MaterialService(settings)
+def create_server(settings: Settings, watch: SourceWatch | None = None) -> MCPServer:
+    """設定を 1 つ受け取り、ツール 13 本と資源 1 本を登録したサーバーを返す。
+
+    読みの前の整合の検査（watch）は、読みの操作のすべてで 1 つを共有する。起動時の検査の結果も
+    これに残るので、起動後の最初の読みは、正本が変わっていなければ検査を走らせ直さない。
+    """
+    watch = watch or SourceWatch(settings)
+    recorder = WriteRecorder(settings)
+    positioning_service = PositioningService(settings, recorder=recorder, watch=watch)
+    offering_service = OfferingService(settings, recorder=recorder)
+    material_service = MaterialService(settings, watch=watch)
     consistency_service = ConsistencyService(settings)
-    public_record_service = PublicRecordService(settings)
+    public_record_service = PublicRecordService(settings, recorder=recorder)
+    section_service = SectionService(settings, recorder=recorder, watch=watch)
 
     mcp = MCPServer("accord", instructions=INSTRUCTIONS)
 
@@ -79,16 +109,20 @@ def create_server(settings: Settings) -> MCPServer:
         """いまの決め（看板）を読む。媒体を省くと全体に適用される決めを返す。"""
         return positioning_service.current(channel)
 
-    @mcp.tool()
+    # spec: REQ-424
+    # spec: REQ-464
+    @mcp.tool(meta={MAX_RESULT_SIZE_KEY: MATERIAL_MAX_RESULT_SIZE})
     def assemble_material(
         channel: str,
         package: str | None = None,
         opportunity: str | None = None,
     ) -> Material:
-        """媒体向けの文面を書くための材料を取り出す。公開不可の節は落として警告に書く。
+        """応募文・プロフィール・職務経歴書を書く前に、これを 1 回呼ぶ。文面の材料を 1 回でそろえて返す。
 
+        channel には媒体の名前か、設定の適用先の語（媒体ではない書く先）を渡す。返るのは、いまの決め、
+        看板のパッケージ、束ねる機能、裏づけの節、公開記録、媒体の規約、禁じた言い回し、そして
+        経歴の正本の節のすべて（公開不可の節は下位の節ごと落とし、落としたことを警告に書く）である。
         package を渡すときは、パッケージ定義に実在する ID（パッケージ名ではない）を渡す。
-        返る裏づけには、人が読む見出しと ID の両方が入る。
         """
         return material_service.assemble(
             MaterialRequest(channel=channel, package=package, opportunity=opportunity)
@@ -211,6 +245,64 @@ def create_server(settings: Settings) -> MCPServer:
         実在しない名前を渡したときは、拒否ではなく実在する範囲の一覧が返る。
         """
         return consistency_service.inspect(scope)
+
+    @mcp.tool()
+    def list_sections(file: str | None = None) -> SectionList:
+        """正本の節を一覧にする（ファイルの名前・見出しの道筋・指紋・字数。ID の欄があれば ID と公開可否）。
+
+        file を省くと正本のすべてのファイル、渡すとそのファイルだけ。ファイルの名前は設定に書いた名前
+        （例 career_master.md）で、知らない名前を渡すと正本のファイルの名前が候補に返る。正本は変えない。
+        """
+        return section_service.list_sections(file)
+
+    @mcp.tool()
+    def read_section(section: str) -> SectionText:
+        """節を 1 つ読み、本文と指紋を返す。正本は変えない。
+
+        section には節の ID か見出しの道筋（最上位の見出しから「 > 」でつないだもの）を渡す。
+        同じ道筋の節が 2 つ以上あるときは、候補の「ファイルの名前 :: 見出しの道筋」をそのまま渡す。
+        本文に下位の見出しの節は含まない。節を書き換えるときは、ここで得た指紋を渡す。
+        """
+        return section_service.read_section(section)
+
+    @mcp.tool()
+    def search_facts(query: str) -> FactSearch:
+        """語を含む行を、ファイルの名前と見出しの道筋と行の文で返す。正本は変えない。
+
+        全角と半角、大文字と小文字の違いは同じ文字として扱う。当たりが 50 件を超えたら、
+        先頭の 50 件と当たった総数を返す。
+        """
+        return section_service.search_facts(query)
+
+    # spec: REQ-465
+    @mcp.tool()
+    def record_fact(section: str, fact: str, source: str, date: str) -> WriteResult:
+        """実績や経歴の事実を書き足すときに呼ぶ。経歴の正本の節 1 つの末尾に、事実を 1 行足す。
+
+        section は経歴の正本の節の ID か見出しの道筋、fact は事実の文（1 行）、source は出所
+        （確かめた先）、date は `2026-10-13` の形の日付。書く行は「- 事実の文（日付、出所: 出所）」。
+        通ると、足した行と節の新しい指紋と、読み比べるべき写し（職務経歴書の台帳など）が返る。
+        """
+        return section_service.record_fact(section, fact, source, date)
+
+    @mcp.tool()
+    def revise_section(section: str, body: str, fingerprint: str, reason: str) -> WriteResult:
+        """節 1 つの本文を書き換える。read_section で読んでから、そのとき得た指紋を添えて呼ぶ。
+
+        書けるのは、経歴の正本・職務経歴書の台帳・見せ方の正本の節。見出しの行と下位の節は変わらない。
+        本文に見出しの行を書くと断る（節の新設と見出しの変更はできない）。ID の欄は元の値のまま残す。
+        読んだ後に誰かが直していれば（指紋が違えば）書かない。reason は何をなぜ直すかの 1 文。
+        通ると、節の新しい指紋と、読み比べるべき写しが返る。
+        """
+        return section_service.revise_section(section, body, fingerprint, reason)
+
+    @mcp.tool()
+    def export_source() -> ExportResult:
+        """正本の各ファイルを 1 つの Markdown につないで、設定の書き出し先に書く。
+
+        書き出し先は設定が決め、返るのは書いたファイルの名前と字数だけ。正本は変えない。
+        """
+        return section_service.export_source()
 
     # spec: REQ-337
     @mcp.resource(ONTOLOGY_URI)

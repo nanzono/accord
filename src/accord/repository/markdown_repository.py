@@ -7,15 +7,18 @@ Markdown の在処と書き方を知るのはこの文書だけである。上�
 
 from __future__ import annotations
 
+import hashlib
 from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 
 from accord.models.ontology import missing_required_fields
 from accord.models.results import (
+    PRIVATE_DISCLOSURE_PREFIX,
     PresentationUrl,
     SkippedHeading,
     SourceDefect,
+    SourceSection,
     SourceSnapshot,
     normalize_url,
 )
@@ -31,14 +34,17 @@ from accord.models.types import (
 )
 from accord.repository.sections import (
     Section,
+    append_section_line,
     bullet_items,
     drop_field_lines,
     find_section,
     find_urls,
     is_frame_heading,
     leading_number,
+    outline_sections,
     prefix_matches,
     read_fields,
+    replace_section_body,
     section_fingerprint,
     select_blocks,
     split_sections,
@@ -167,6 +173,9 @@ CAPABILITY_TABLE_HEADER = ("| ID | 機能名 | 説明 | 裏づけの節 |", "|--
 # ID の欄のラベル。設定の [reading.labels] で別の語に読み替えられる。
 ID_LABEL = "ID"
 
+# 公開可否の欄のラベル。職歴の枠と受託案件が持つ。
+DISCLOSURE_LABEL = "公開可否"
+
 # 媒体ごとの規約のファイルの場所に書く、媒体の名前が入るところの印。
 CHANNEL_PLACEHOLDER = "{channel}"
 
@@ -260,6 +269,17 @@ def _optional(value: str | None) -> str | None:
     if value is None or value.strip() in EMPTY_WORDS:
         return None
     return value.strip()
+
+
+def _as_section(section: SourceSection) -> Section:
+    """読み書きの層の節の型を、行の範囲だけを持つ切り出しの節に戻す。"""
+    return Section(
+        level=section.level,
+        heading="",
+        body=section.body,
+        start=section.start,
+        end=section.end,
+    )
 
 
 def _text(value: object) -> str:
@@ -700,8 +720,9 @@ class MarkdownRepository:
         """
         # spec: REQ-065
         names = self.settings.reading.presentation_directories
+        # spec: REQ-398
         roots = (
-            [self.settings.source_dir / name for name in names]
+            [self.settings.presentations_dir / name for name in names]
             if names
             else [self.settings.path_for("presentations")]
         )
@@ -733,7 +754,7 @@ class MarkdownRepository:
             text = path.read_text(encoding="utf-8")
             document = Section(level=0, heading="", body=text)
             fields = read_fields(document, rule)
-            relative = path.relative_to(self.settings.source_dir).as_posix()
+            relative = path.relative_to(self.settings.presentations_dir).as_posix()
             values: dict[str, object] = {
                 name: fields.get(label) for label, name in PRESENTATION_LABELS.items()
             }
@@ -823,7 +844,8 @@ class MarkdownRepository:
         rules = self.settings.reading
         # spec: REQ-068
         if rules.channel_rules_from == CHANNEL_RULES_PER_CHANNEL_FILE:
-            path = self.settings.source_dir / rules.channel_rules_file.replace(
+            # spec: REQ-398
+            path = self.settings.presentations_dir / rules.channel_rules_file.replace(
                 CHANNEL_PLACEHOLDER, channel
             )
             # spec: REQ-069
@@ -872,6 +894,106 @@ class MarkdownRepository:
             return [cells[0] for cells in tables[0] if cells and cells[0]]
         # spec: REQ-074
         return bullet_items(section.body, first_block=True)
+
+    # ------------------------------------------------------------ 正本のファイルを節で読む
+
+    def source_file_names(self) -> list[str]:
+        """正本のファイルの名前を、設定の並びの順に返す（提示物は除き、重なりは 1 つに数える）。"""
+        return self.settings.source_file_names()
+
+    def source_path(self, name: str) -> Path:
+        """正本のファイルの名前から、実ファイルの場所を返す。上の層には渡さない。"""
+        return self.settings.source_dir / name
+
+    def read_source_file(self, name: str) -> str:
+        """正本のファイルを 1 つ読む。無ければ空文字。"""
+        path = self.source_path(name)
+        if not path.is_file():
+            return ""
+        return path.read_text(encoding="utf-8")
+
+    def _rule_for_file(self, name: str) -> BlockRule:
+        """そのファイルを指す最初の役割の読み方。欄の読み替えは役割を問わず共通である。"""
+        keys = self.settings.keys_for_file(name)
+        return self._rule(keys[0]) if keys else self._rule("career")
+
+    def source_sections(self, name: str, text: str | None = None) -> list[SourceSection]:
+        """正本のファイル 1 つの、見出しを持つ節を、ファイルの並びの順に返す。
+
+        text を渡すと、ファイルではなくその文字列を切る（書く前の判定に使う）。
+        ID と公開可否は、その節自身の本文の欄から読む（下位の見出しの節の欄は見ない）。
+        """
+        rule = self._rule_for_file(name)
+        content = self.read_source_file(name) if text is None else text
+        found: list[SourceSection] = []
+        for item in outline_sections(content):
+            section = item.section
+            fields = read_fields(section, rule)
+            identifier = fields.get(ID_LABEL, "").strip() or None
+            disclosure_value = fields.get(DISCLOSURE_LABEL, "").strip()
+            found.append(
+                SourceSection(
+                    file=name,
+                    heading_path=item.path,
+                    heading_line=content.splitlines()[section.start],
+                    body=section.body,
+                    fingerprint=section_fingerprint(section.body),
+                    id=identifier,
+                    disclosure=(disclosure_value or None) if identifier else None,
+                    private=disclosure_value.startswith(PRIVATE_DISCLOSURE_PREFIX),
+                    level=section.level,
+                    start=section.start,
+                    end=section.end,
+                )
+            )
+        return found
+
+    def source_lines(self, name: str) -> list[tuple[str, str]]:
+        """正本のファイル 1 つの行を、その行がある節の見出しの道筋と組にして返す。
+
+        見出しの行は、その見出しの節の行として数える。最初の見出しより前の行の道筋は空にする。
+        frontmatter の行は入れない。
+        """
+        content = self.read_source_file(name)
+        lines = content.splitlines()
+        paths: dict[int, str] = {}
+        outlined = outline_sections(content)
+        for item in outlined:
+            for index in range(item.section.start, item.section.end):
+                paths[index] = item.path
+        first = outlined[0].section.start if outlined else len(lines)
+        preamble = split_sections(content)[0] if content else None
+        found: list[tuple[str, str]] = []
+        if preamble is not None and not preamble.heading:
+            for index in range(preamble.start, min(preamble.end, first)):
+                found.append(("", lines[index]))
+        for index in range(first, len(lines)):
+            found.append((paths.get(index, ""), lines[index]))
+        return found
+
+    def replaced_text(self, section: SourceSection, body: str) -> str:
+        """節の本文を置き換えた後のファイルの全文を返す。ファイルには書かない。"""
+        text = self.read_source_file(section.file)
+        return replace_section_body(text, _as_section(section), body)
+
+    def appended_text(self, section: SourceSection, line: str) -> str:
+        """節の本文の末尾に 1 行足した後のファイルの全文を返す。ファイルには書かない。"""
+        text = self.read_source_file(section.file)
+        return append_section_line(text, _as_section(section), line)
+
+    def write_source_file(self, name: str, text: str) -> None:
+        """正本のファイル 1 つを、渡された全文で書き換える。"""
+        self.source_path(name).write_text(text, encoding="utf-8")
+
+    def source_digest(self) -> str:
+        """正本のファイルすべての中身から、1 つの指紋を作る。中身が 1 バイトでも変われば値が変わる。"""
+        digest = hashlib.sha256()
+        for name in self.source_file_names():
+            path = self.source_path(name)
+            digest.update(name.encode("utf-8") + b"\0")
+            digest.update(path.read_bytes() if path.is_file() else b"\1missing")
+            digest.update(b"\0")
+        return digest.hexdigest()
 
     # ------------------------------------------------------------ 書き戻す
 

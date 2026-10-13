@@ -736,3 +736,76 @@ def test_REQ_378_frame_number_is_read_from_the_heading(alt_settings) -> None:
     _rewrite_ledger(alt_settings, f"## {FRAME_HEADING}", "## 枠12｜2021-04〜現在 フリーランス")
 
     assert [item.entry_number for item in _ledger_frames(alt_settings)] == ["12"]
+
+
+# ---------------------------------------------------------------- 提示物の置き場
+
+
+def _move_presentations(alt_settings, root: Path) -> None:
+    """2 つ目の見本の媒体のディレクトリ（提示物と channel.md）を、正本の置き場の外へ移す。"""
+    import shutil
+
+    root.mkdir(parents=True, exist_ok=True)
+    for channel in alt_settings.channels:
+        shutil.move(str(alt_settings.source_dir / channel), str(root / channel))
+
+
+def _with_presentations_root(alt_settings, value: str):
+    config = alt_settings.config_path
+    text = config.read_text(encoding="utf-8").replace(
+        "[source]\n", f'[source]\npresentations_root = "{value}"\n', 1
+    )
+    config.write_text(text, encoding="utf-8")
+    return load_settings(config)
+
+
+def test_REQ_398_presentations_and_channel_rules_are_read_from_the_presentations_root(
+    alt_settings,
+) -> None:
+    """提示物の置き場を書くと、提示物のディレクトリと媒体ごとの規約のファイルをそこから読む。"""
+    outreach = alt_settings.config_path.parent / "outreach"
+    _move_presentations(alt_settings, outreach)
+
+    settings = _with_presentations_root(alt_settings, "outreach")
+    repository = MarkdownRepository(settings)
+    snapshot = repository.load()
+
+    assert [item.path for item in snapshot.presentations] == [
+        "tsukikusa/profile.md",
+        "nagiho/skill_sheet.md",
+    ]
+    assert repository.channel_rules("tsukikusa")
+    assert snapshot.defects == []
+
+
+def test_REQ_399_without_the_presentations_root_the_source_directory_is_used(
+    alt_settings,
+) -> None:
+    """提示物の置き場を書かなければ、提示物と媒体ごとの規約のファイルを正本の置き場から読む。"""
+    repository = MarkdownRepository(alt_settings)
+
+    assert alt_settings.presentations_root is None
+    assert alt_settings.presentations_dir == alt_settings.source_dir
+    assert len(repository.load().presentations) == 2
+    assert repository.channel_rules("tsukikusa")
+
+
+def test_REQ_400_a_relative_presentations_root_is_read_from_the_config_location(
+    alt_settings, tmp_path, monkeypatch
+) -> None:
+    """提示物の置き場を相対の場所で書くと、設定ファイルの置き場から見た場所として読む。"""
+    outreach = alt_settings.config_path.parent / "outreach"
+    _move_presentations(alt_settings, outreach)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+
+    settings = _with_presentations_root(alt_settings, "outreach")
+
+    assert settings.presentations_root == outreach.resolve()
+
+
+def test_REQ_401_a_missing_presentations_root_stops_the_start(alt_settings) -> None:
+    """提示物の置き場が実在するディレクトリでないなら、書かれていた値を添えて起動をやめる。"""
+    with pytest.raises(ValueError, match="no-such-outreach"):
+        _with_presentations_root(alt_settings, "no-such-outreach")

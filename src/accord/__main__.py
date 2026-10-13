@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 from accord.server.app import create_server
+from accord.services.watch import SourceWatch
 from accord.vocabulary.settings import load_settings
 
 
@@ -40,7 +41,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"設定が読めない: {error}", file=sys.stderr)
         return 2
 
-    server = create_server(settings)
+    watch = SourceWatch(settings)
+    server = create_server(settings, watch)
 
     if args.list:
         # spec: REQ-339
@@ -51,8 +53,25 @@ def main(argv: list[str] | None = None) -> int:
         # spec: REQ-338
         return 0
 
+    # spec: REQ-456
+    report_startup_check(watch)
     server.run("stdio")
     return 0
+
+
+def report_startup_check(watch: SourceWatch) -> None:
+    """起動時に正本全体の整合を検査し、違反と断りの件数を標準エラーに書く。違反があっても止めない。
+
+    人の手の編集の途中でも読めるように、起動は続ける。違反の中身は、読みの操作の整合の知らせと
+    check_consistency が返す。
+    """
+    try:
+        violations, notes = watch.counts()
+    except Exception as error:  # 検査が落ちても起動は続ける。落ちたことだけを書く。
+        print(f"accord: 起動時の整合の検査が走らなかった（{type(error).__name__}）", file=sys.stderr)
+        return
+    # spec: REQ-457
+    print(f"accord: 起動時の整合の検査 違反 {violations} 件・断り {notes} 件", file=sys.stderr)
 
 
 if __name__ == "__main__":

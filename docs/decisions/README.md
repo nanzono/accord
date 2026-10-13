@@ -18,6 +18,7 @@
 - [検査を黙らせる印には、決めの記録を 1 本ずつ結ぶ](0010-record-every-check-bypass.md) — 採用 / 2026-09-25
 - [要件の番号を持たないテストには、docstring の 1 行目に理由を書く](0011-give-a-reason-to-unnumbered-tests.md) — 採用 / 2026-09-25
 - [写しの古さは、出典の節の本文の指紋で見つける](0012-detect-stale-copies-by-section-fingerprint.md) — 採用 / 2026-09-28
+- [経歴の正本は accord の持ち物にし、AI のセッションは操作だけで読み書きする](0013-read-and-write-the-source-only-through-accord.md) — 採用 / 2026-10-13
 
 ## 記録の扱い
 

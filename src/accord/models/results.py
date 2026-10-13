@@ -378,6 +378,29 @@ class PositioningView(BaseModel):
     positioning: Positioning | None = Field(default=None, description="適用される最新の決め")
     package: Package | None = Field(default=None, description="前面に出す束のパッケージ")
     warnings: list[str] = Field(default_factory=list, description="決めが未登記などの断り")
+    consistency_notice: ConsistencyNotice | None = Field(
+        default=None, description="整合の知らせ（正本全体に違反があるときだけ）"
+    )
+
+
+class ConsistencyNotice(BaseModel):
+    """読みの操作の返り値に載せる、正本全体の整合の検査の知らせ。違反が無ければ載せない。"""
+
+    violation_count: int = Field(description="正本全体の整合の検査の違反の件数")
+    fixes: list[str] = Field(
+        default_factory=list, description="直し先（違反 1 件を 1 行にしたもの。多ければ件数に畳む）"
+    )
+
+
+class CareerSection(BaseModel):
+    """材料に載せる経歴の正本の節 1 つ。本文は下位の見出しの節を含まない。"""
+
+    heading_path: str = Field(description="見出しの道筋（最上位の見出しからこの節までを「 > 」でつないだもの）")
+    body: str = Field(description="この節の本文（見出しの行と下位の見出しの節は含まない）")
+    id: str | None = Field(default=None, description="ID の欄を持つ節の ID（持たない節では null）")
+    disclosure: str | None = Field(
+        default=None, description="ID の欄を持つ節の公開可否（持たない節では null）"
+    )
 
 
 class Material(BaseModel):
@@ -396,8 +419,15 @@ class Material(BaseModel):
     )
     channel_rules: list[str] = Field(default_factory=list, description="媒体の規約")
     forbidden_phrases: list[str] = Field(default_factory=list, description="禁じた言い回し")
+    career_sections: list[CareerSection] = Field(
+        default_factory=list,
+        description="経歴の正本の節（公開不可の節とその下位の節を除くすべてを、正本の並びの順に）",
+    )
     warnings: list[str] = Field(
         default_factory=list, description="旧い束の宣言、未反映の注記、落とした節の名前"
+    )
+    consistency_notice: ConsistencyNotice | None = Field(
+        default=None, description="整合の知らせ（正本全体に違反があるときだけ）"
     )
 
 
@@ -408,7 +438,9 @@ class Provenance(BaseModel):
     名乗ることがあるからである。見分けがつくのは、実際に動いているソースの置き場である。
     """
 
-    config_path: str = Field(description="読んだ設定ファイルの絶対パス")
+    config_name: str = Field(
+        description="読んだ設定ファイルの名前（親のディレクトリの名前と設定ファイルの名前。絶対パスは出さない）"
+    )
     reading: list[str] = Field(
         default_factory=list, description="適用した [reading] の鍵。1 つも無ければ「既定」"
     )
@@ -558,3 +590,93 @@ class SourceSnapshot(BaseModel):
         """
         disclosure = self.disclosure_of(section_id)
         return disclosure is not None and disclosure.startswith(PRIVATE_DISCLOSURE_PREFIX)
+
+
+class SourceSection(BaseModel):
+    """正本のファイルの節 1 つ。読み書きの層が返し、節の読み書きのサービスがこれだけを見て判断する。"""
+
+    file: str = Field(description="設定に書いたファイルの名前")
+    heading_path: str = Field(description="見出しの道筋")
+    heading_line: str = Field(description="見出しの行そのもの（# を含む）")
+    body: str = Field(description="本文（見出しの行と下位の見出しの節は含まない）")
+    fingerprint: str = Field(description="本文の指紋")
+    id: str | None = Field(default=None, description="ID の欄の値（欄が無ければ null）")
+    disclosure: str | None = Field(default=None, description="ID の欄を持つ節の公開可否")
+    private: bool = Field(default=False, description="公開可否の欄が「公開不可」で始まるか")
+    level: int = Field(description="見出しの深さ")
+    start: int = Field(description="見出しの行の位置（0 始まり）")
+    end: int = Field(description="次の見出しの行の位置（0 始まり）")
+
+
+class SectionEntry(BaseModel):
+    """節の一覧の 1 行。"""
+
+    file: str = Field(description="設定に書いたファイルの名前")
+    heading_path: str = Field(description="見出しの道筋")
+    fingerprint: str = Field(description="本文の指紋（節を書き換えるときに渡す）")
+    chars: int = Field(description="本文の字数")
+    id: str | None = Field(default=None, description="ID の欄を持つ節の ID")
+    disclosure: str | None = Field(default=None, description="ID の欄を持つ節の公開可否")
+
+
+class SectionList(BaseModel):
+    """節を一覧する操作の返り値。"""
+
+    sections: list[SectionEntry] = Field(default_factory=list, description="節の一覧（正本の並びの順）")
+    candidates: list[str] = Field(
+        default_factory=list, description="渡されたファイルの名前が無いときの、正本のファイルの名前"
+    )
+    warnings: list[str] = Field(default_factory=list, description="断り")
+    consistency_notice: ConsistencyNotice | None = Field(
+        default=None, description="整合の知らせ（正本全体に違反があるときだけ）"
+    )
+
+
+class SectionText(BaseModel):
+    """節を読む操作の返り値。当たらなかったときは本文を持たず、候補を持つ。"""
+
+    file: str | None = Field(default=None, description="節のあるファイルの名前")
+    heading_path: str | None = Field(default=None, description="見出しの道筋")
+    body: str | None = Field(default=None, description="本文（下位の見出しの節は含まない）")
+    fingerprint: str | None = Field(default=None, description="本文の指紋（節を書き換えるときに渡す）")
+    id: str | None = Field(default=None, description="ID の欄を持つ節の ID")
+    disclosure: str | None = Field(default=None, description="ID の欄を持つ節の公開可否")
+    candidates: list[str] = Field(
+        default_factory=list, description="当たらなかったときと、2 つ以上に当たったときの候補"
+    )
+    warnings: list[str] = Field(default_factory=list, description="断り")
+    consistency_notice: ConsistencyNotice | None = Field(
+        default=None, description="整合の知らせ（正本全体に違反があるときだけ）"
+    )
+
+
+class FactHit(BaseModel):
+    """事実の検索で当たった行 1 つ。"""
+
+    file: str = Field(description="設定に書いたファイルの名前")
+    heading_path: str = Field(description="その行がある節の見出しの道筋（最初の見出しより前なら空）")
+    line: str = Field(description="当たった行の文")
+
+
+class FactSearch(BaseModel):
+    """事実を検索する操作の返り値。"""
+
+    query: str = Field(description="渡された語")
+    total: int = Field(default=0, description="当たった行の総数")
+    hits: list[FactHit] = Field(default_factory=list, description="当たった行（先頭から 50 件まで）")
+    warnings: list[str] = Field(default_factory=list, description="断り")
+    consistency_notice: ConsistencyNotice | None = Field(
+        default=None, description="整合の知らせ（正本全体に違反があるときだけ）"
+    )
+
+
+class ExportResult(BaseModel):
+    """書き出しの操作の返り値。書き出し先の絶対パスは持たない。"""
+
+    written: bool = Field(description="書き出したかどうか")
+    file_name: str | None = Field(default=None, description="書いたファイルの名前")
+    chars: int | None = Field(default=None, description="書いた字数")
+    rejection: Rejection | None = Field(default=None, description="書かなかった理由と次の一手")
+    consistency_notice: ConsistencyNotice | None = Field(
+        default=None, description="整合の知らせ（正本全体に違反があるときだけ）"
+    )
