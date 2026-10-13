@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from accord.repository.markdown_repository import MarkdownRepository
 from accord.repository.sections import section_fingerprint
 from accord.services.sections import SectionService
 from accord.vocabulary.settings import load_settings
@@ -492,3 +493,50 @@ def test_REQ_469_a_fact_written_as_a_field_is_refused(alt_settings) -> None:
         assert result.accepted is False
         assert result.rejection.constraint == "事実の文を欄の書き方で書かない"
     assert source_digest(alt_settings.source_dir) == before
+
+
+@pytest.mark.parametrize(
+    "rewrite",
+    [
+        lambda body: body + "\n- 公開可否: 公開不可",
+        lambda body: "- 公開可否: 公開不可\n" + body,
+        lambda body: body.replace("- 公開可否: 公開可", "- 公開可否：公開不可"),
+    ],
+    ids=["二重書き（後ろ）", "二重書き（前）", "全角のコロン"],
+)
+def test_REQ_468_other_ways_of_writing_the_disclosure_field_are_refused(alt_settings, rewrite) -> None:
+    """公開可否の欄を二重に書く・全角のコロンで書き直す書き換えも、書かずに断る。"""
+    before = source_digest(alt_settings.source_dir)
+    body = _service(alt_settings).read_section(TERAMINA_ID).body
+
+    result = _revise(alt_settings, TERAMINA_ID, rewrite(body))
+
+    assert result.accepted is False
+    assert result.rejection.constraint == "公開可否の欄を元の値のまま残す"
+    assert source_digest(alt_settings.source_dir) == before
+
+
+@pytest.mark.parametrize(
+    "fact",
+    ["公開可否：公開不可", "公開可否:公開不可", "公開可否（再確認）: 公開不可", "公開可否 : 公開不可"],
+    ids=["全角のコロン", "空白なし", "括弧書き", "コロンの前に空白"],
+)
+def test_REQ_469_other_ways_of_writing_a_field_in_a_fact_are_refused(alt_settings, fact) -> None:
+    """欄の書き方の揺れ（全角のコロン・空白・括弧書き）で公開可否を書いた事実の行も、書かずに断る。"""
+    before = source_digest(alt_settings.source_dir)
+
+    result = _record(alt_settings, fact=fact)
+
+    assert result.accepted is False
+    assert result.rejection.constraint == "事実の文を欄の書き方で書かない"
+    assert source_digest(alt_settings.source_dir) == before
+
+
+def test_REQ_469_a_bold_label_line_does_not_change_the_disclosure(alt_settings) -> None:
+    """太字の欄の名前で書いた行は欄として読まれないので、書いても公開可否は元のまま。"""
+    result = _record(alt_settings, fact="**公開可否**: 公開不可")
+
+    assert result.accepted is True
+    snapshot = MarkdownRepository(alt_settings).load()
+    assert snapshot.disclosure_of(TERAMINA_ID) == "公開可"
+    assert snapshot.is_private(TERAMINA_ID) is False
