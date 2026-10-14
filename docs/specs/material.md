@@ -181,6 +181,7 @@
 
 - 関係するファイル: `src/accord/services/material.py`、`src/accord/vocabulary/settings.py`
 - 検証手順: `uv run pytest tests/test_reading_settings.py -k REQ_374`
+- status: superseded by REQ-505
 
 ## REQ-415
 もし渡された名前が設定の媒体の一覧にも適用先の語にも無いなら、accord は決めも看板のパッケージも材料に載せない。

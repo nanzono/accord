@@ -37,7 +37,7 @@ from accord.services.consistency import ConsistencyService
 from accord.services.material import MaterialService
 from accord.services.offering import OfferingService
 from accord.services.public_records import PublicRecordService
-from accord.vocabulary.settings import Settings, load_settings
+from accord.vocabulary.settings import Settings
 from conftest import source_digest
 
 EVIDENCE_SECTION_EXISTS = "裏づけ節名の実在"
@@ -160,25 +160,15 @@ def _unreadable_sources(
     指す側は読めたまま、照らす相手の母集団だけを空にする。書き間違いと「そもそも読めていない」を
     言い分けないと、正しい裏づけの側を書き換える誘導になるので、その言い分けをここで作る。
     """
-    path: Path = settings.config_path
-    lines = path.read_text(encoding="utf-8").splitlines()
+    # accord の形では職歴の枠と受託案件は同じファイルにあるので、どちらを読めなくするときも
+    # そのファイルを置き場から外す。
+    if career or engagements:
+        moved = settings.path_for("career")
+        moved.rename(moved.with_name("moved_away_career.md"))
     if public_records:
-        lines = [
-            line
-            for line in lines
-            if not line.startswith(
-                ("public_records = ", "public_record_kinds = ", "public_record_roles = ")
-            )
-        ]
-    text = "\n".join(lines) + "\n"
-    if career:
-        text = text.replace('career = "career.md"', 'career = "no_such_career.md"', 1)
-    if engagements:
-        text = text.replace(
-            'engagements = "engagements.md"', 'engagements = "no_such_engagements.md"', 1
-        )
-    path.write_text(text, encoding="utf-8")
-    return load_settings(path)
+        moved = settings.path_for("public_records")
+        moved.rename(moved.with_name("moved_away_records.md"))
+    return settings
 
 
 def _violations(settings: Settings, pick) -> list:
@@ -312,7 +302,7 @@ def _note_path(settings: Settings) -> Path:
 
 def _note_violations(settings: Settings) -> list:
     """写しの正本に検査を当て、提示物で挙がった違反だけを取り出す。"""
-    return _violations(settings, lambda item: item.file.startswith("presentations/"))
+    return _violations(settings, lambda item: item.file.startswith(tuple(f"{name}/" for name in settings.channels)))
 
 
 def _note_readable_violations(settings: Settings) -> list:
@@ -794,7 +784,7 @@ def test_REQ_364_the_id_format_check_covers_five_types(settings) -> None:
     その型の回で違反が 0 件になって落ちる。
     """
     for key, (before, after) in OUT_OF_FORMAT_BY_TYPE.items():
-        copy = load_settings(settings.config_path)
+        copy = settings
         path = copy.path_for(key)
         text = path.read_text(encoding="utf-8")
         assert before in text, key
@@ -813,7 +803,7 @@ def test_REQ_365_the_id_uniqueness_check_covers_five_types(settings) -> None:
     その型の回で違反が 0 件になって落ちる。
     """
     for key, (before, after) in DUPLICATE_BY_TYPE.items():
-        copy = load_settings(settings.config_path)
+        copy = settings
         path = copy.path_for(key)
         text = path.read_text(encoding="utf-8")
         assert before in text, key
@@ -822,7 +812,10 @@ def test_REQ_365_the_id_uniqueness_check_covers_five_types(settings) -> None:
         violations = [
             item for item in _id_uniqueness_violations(copy) if item.file == copy.files[key]
         ]
-        assert len(violations) == 1, (key, [item.model_dump() for item in violations])
+        # accord の形では職歴の枠と受託案件が同じファイルにあるので、その 2 つの型を重ねると、
+        # 重なった 2 つの項目がどちらもそのファイルの違反として挙がる。
+        expected = 2 if key in ("career", "engagements") else 1
+        assert len(violations) == expected, (key, [item.model_dump() for item in violations])
 
         path.write_text(text, encoding="utf-8")
 
@@ -830,7 +823,7 @@ def test_REQ_365_the_id_uniqueness_check_covers_five_types(settings) -> None:
 def test_REQ_292_an_id_out_of_format_raises_one_violation(settings) -> None:
     """大文字・40 字超・先頭のハイフンのどれでも、違反が 1 件挙がる。"""
     for label, written in OUT_OF_FORMAT_IDS.items():
-        copy = load_settings(settings.config_path)
+        copy = settings
         path = copy.path_for("public_records")
         text = path.read_text(encoding="utf-8")
         assert DUPLICATE_ID[0] in text, label
@@ -888,40 +881,6 @@ def test_REQ_297_a_duplicate_id_says_to_rename_one_side(settings) -> None:
         assert "指している側も同じ値に直す" in violation.expected, violation.expected
 
 
-def test_REQ_366_public_records_are_left_out_of_the_format_check_when_the_file_is_unset(
-    settings,
-) -> None:
-    """設定に公開記録の置き場が無ければ、公開記録の ID は形式の検査に入らない。
-
-    置き場があるときは同じ書き換えで形式の違反が出ることを先に確かめ、見ていないだけで
-    合格しているのではないことを押さえる。
-    """
-    _rewrite(settings.path_for("public_records"), DUPLICATE_ID[0], OUT_OF_FORMAT_ID_LINE)
-    assert _id_format_violations(settings), "置き場があるときに形式の違反が出ていない"
-    plain = _unreadable_sources(settings, public_records=True)
-
-    violations = _id_format_violations(plain)
-
-    assert [item.model_dump() for item in violations] == []
-
-
-def test_REQ_367_public_records_are_left_out_of_the_uniqueness_check_when_the_file_is_unset(
-    settings,
-) -> None:
-    """設定に公開記録の置き場が無ければ、公開記録の ID は一意性の検査に入らない。
-
-    置き場があるときは同じ書き換えで重なりの違反が出ることを先に確かめ、見ていないだけで
-    合格しているのではないことを押さえる。
-    """
-    _rewrite(settings.path_for("public_records"), *DUPLICATE_ID)
-    assert _id_uniqueness_violations(settings), "置き場があるときに重なりの違反が出ていない"
-    plain = _unreadable_sources(settings, public_records=True)
-
-    violations = _id_uniqueness_violations(plain)
-
-    assert [item.model_dump() for item in violations] == []
-
-
 # ---------------------------------------------------------------- 見出しの書き換え
 
 
@@ -959,11 +918,11 @@ def test_REQ_301_the_evidence_body_drops_the_id_line(settings, alt_settings) -> 
     """
     for target in (settings, alt_settings):
         material = MaterialService(target).assemble(MaterialRequest(channel="tsukikusa"))
-        assert material.evidence, target.config_path.name
+        assert material.evidence, target.source_dir.name
 
         for entry in material.evidence:
             body = entry["本文"]
-            name = target.config_path.name
+            name = target.source_dir.name
             assert entry["ID"] not in body, (name, body)
             assert "- ID:" not in body, (name, body)
 
@@ -972,11 +931,11 @@ def test_REQ_302_the_evidence_body_keeps_the_other_fields(settings, alt_settings
     """裏づけの本文から落ちるのは ID の行だけで、ほかの欄の行は残っている。"""
     for target in (settings, alt_settings):
         material = MaterialService(target).assemble(MaterialRequest(channel="tsukikusa"))
-        assert material.evidence, target.config_path.name
+        assert material.evidence, target.source_dir.name
 
         for entry in material.evidence:
             body = entry["本文"]
-            name = target.config_path.name
+            name = target.source_dir.name
             assert "公開可否" in body, (name, body)
             assert "やったこと" in body or "内容" in body, (name, body)
             assert body.strip(), name
@@ -986,12 +945,12 @@ def test_REQ_303_the_evidence_body_drops_a_relabelled_id_line(settings, alt_sett
     """ID のラベルを読み替える正本でも、読み替えた後のラベルの行が本文から落ちている。"""
     for target in (settings, alt_settings):
         material = MaterialService(target).assemble(MaterialRequest(channel="tsukikusa"))
-        assert material.evidence, target.config_path.name
+        assert material.evidence, target.source_dir.name
 
         for entry in material.evidence:
             body = entry["本文"]
-            name = target.config_path.name
-            assert "- 識別子:" not in body, (name, body)
+            name = target.source_dir.name
+            assert "- ID:" not in body, (name, body)
 
 
 def test_REQ_304_a_section_without_an_id_is_not_referable(settings) -> None:
@@ -1263,7 +1222,7 @@ def test_REQ_383_entry_source_pointing_at_a_career_frame_says_not_an_engagement_
 
 def test_REQ_397_note_pointing_at_a_career_frame_says_not_an_engagement_id(alt_settings) -> None:
     """提示物の未反映の注記が職歴の枠の ID を指したら、受託案件の ID に無いと言い、範囲の外とは言わない。"""
-    skill_sheet = alt_settings.source_dir / "nagiho" / "skill_sheet.md"
+    skill_sheet = alt_settings.presentations_dir / "nagiho" / "skill_sheet.md"
     _rewrite(
         skill_sheet,
         "- 未反映の注記: なし",

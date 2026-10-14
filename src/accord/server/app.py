@@ -129,7 +129,7 @@ def create_server(settings: Settings, watch: SourceWatch | None = None) -> MCPSe
     ) -> Material:
         """応募文・プロフィール・職務経歴書を書く前に、これを 1 回呼ぶ。文面の材料を 1 回でそろえて返す。
 
-        channel には媒体の名前か、設定の適用先の語（媒体ではない書く先）を渡す。返るのは、いまの決め、
+        channel には媒体の名前か、語彙の決めの適用先の語（媒体ではない書く先）を渡す。返るのは、いまの決め、
         看板のパッケージ、束ねる機能、裏づけの節、公開記録、媒体の規約、禁じた言い回し、そして
         経歴の正本の節のすべて（公開不可の節は下位の節ごと落とし、落としたことを警告に書く）である。
         package を渡すときは、パッケージ定義に実在する ID（パッケージ名ではない）を渡す。
@@ -260,7 +260,7 @@ def create_server(settings: Settings, watch: SourceWatch | None = None) -> MCPSe
     def list_sections(file: str | None = None) -> SectionList:
         """正本の節を一覧にする（ファイルの名前・見出しの道筋・指紋・字数。ID の欄があれば ID と公開可否）。
 
-        file を省くと正本のすべてのファイル、渡すとそのファイルだけ。ファイルの名前は設定に書いた名前
+        file を省くと正本のすべてのファイル、渡すとそのファイルだけ。ファイルの名前は accord の形の名前
         （例 career_master.md）で、知らない名前を渡すと正本のファイルの名前が候補に返る。正本は変えない。
         """
         return section_service.list_sections(file)
@@ -394,12 +394,14 @@ def create_server(settings: Settings, watch: SourceWatch | None = None) -> MCPSe
         return section_service.set_disclosure(section, disclosure, fingerprint, reason, line)
 
     @mcp.tool()
-    def export_source() -> ExportResult:
-        """正本の各ファイルを 1 つの Markdown につないで、設定の書き出し先に書く。
+    def export_source(path: str) -> ExportResult:
+        """正本の各ファイルを 1 つの Markdown につないで、path に書く。
 
-        書き出し先は設定が決め、返るのは書いたファイルの名前と字数だけ。正本は変えない。
+        path は経歴データの置き場の外のファイルを指す（中を指すと書かずに断る）。返るのは書いたファイルの
+        名前と字数だけ。正本は変えない。
         """
-        return section_service.export_source()
+        # spec: REQ-525
+        return section_service.export_source(path)
 
     # spec: REQ-337
     @mcp.resource(ONTOLOGY_URI)

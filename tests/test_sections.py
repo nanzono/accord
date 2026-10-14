@@ -16,8 +16,7 @@ import pytest
 from accord.repository.markdown_repository import MarkdownRepository
 from accord.repository.sections import section_fingerprint
 from accord.services.sections import SectionService
-from accord.vocabulary.settings import load_settings
-from conftest import add_config_lines, git, init_git, source_digest
+from conftest import git, source_digest
 
 CAREER = "career_master.md"
 LEDGER = "keirekisho/daicho.md"
@@ -127,16 +126,16 @@ def test_REQ_431_an_unknown_section_returns_close_paths(alt_settings) -> None:
 
 def test_REQ_432_a_path_found_in_two_files_returns_qualified_candidates(settings) -> None:
     """同じ見出しの道筋の節が 2 つ以上あるときは、本文を返さず、ファイルの名前つきの道筋を候補に返す。"""
-    engagements = settings.path_for("engagements")
-    with engagements.open("a", encoding="utf-8") as handle:
-        handle.write("\n# 稼働条件\n\n受託案件のファイルに置いた、同じ見出しの節。\n")
+    for key in ("presentation_rules", "packages"):
+        with settings.path_for(key).open("a", encoding="utf-8") as handle:
+            handle.write("\n# 稼働条件\n\n別のファイルに置いた、同じ見出しの節。\n")
 
     result = _service(settings).read_section("稼働条件")
 
     assert result.body is None
-    assert result.candidates == ["career.md :: 稼働条件", "engagements.md :: 稼働条件"]
+    assert result.candidates == ["product/packages.md :: 稼働条件", "misekata_master.md :: 稼働条件"]
     again = _service(settings).read_section(result.candidates[1])
-    assert again.body == "受託案件のファイルに置いた、同じ見出しの節。"
+    assert again.body == "別のファイルに置いた、同じ見出しの節。"
 
 
 # ---------------------------------------------------------------- 事実の検索
@@ -329,7 +328,7 @@ def test_REQ_447_removing_or_changing_the_id_field_is_refused(alt_settings) -> N
     before = source_digest(alt_settings.source_dir)
     body = _service(alt_settings).read_section(TERAMINA_ID).body
 
-    removed = _revise(alt_settings, TERAMINA_ID, body.replace(f"- 識別子: {TERAMINA_ID}\n", ""))
+    removed = _revise(alt_settings, TERAMINA_ID, body.replace(f"- ID: {TERAMINA_ID}\n", ""))
     changed = _revise(alt_settings, TERAMINA_ID, body.replace(TERAMINA_ID, "teramina-routes"))
 
     for result in (removed, changed):
@@ -401,56 +400,43 @@ def test_REQ_467_a_write_that_brings_a_new_violation_is_refused(alt_settings) ->
 # ---------------------------------------------------------------- 書き出し
 
 
-def _with_export(settings, value: str):
-    return add_config_lines(settings.config_path, "source", [f'export_path = "{value}"'])
+def test_REQ_525_export_writes_every_source_file_to_the_given_path(settings, tmp_path) -> None:
+    """渡された書き出し先に、正本の各ファイルの中身を、ファイルの名前の見出しを付けて 1 つの Markdown で書く。"""
+    destination = tmp_path / "exported" / "all.md"
 
-
-def test_REQ_452_export_writes_every_source_file_under_its_name(alt_settings, tmp_path) -> None:
-    """正本の各ファイルの中身を、ファイルの名前の見出しを付けて、書き出し先の 1 つのファイルに書く。"""
-    settings = _with_export(alt_settings, "../exported/all.md")
-
-    result = _service(settings).export_source()
+    result = _service(settings).export_source(str(destination))
 
     assert result.written is True
-    text = settings.export_path.read_text(encoding="utf-8")
+    text = destination.read_text(encoding="utf-8")
     for name in settings.source_file_names():
         assert f"# {name}\n" in text
         first = (settings.source_dir / name).read_text(encoding="utf-8").strip().splitlines()[-1]
         assert first in text
 
 
-def test_REQ_453_an_export_path_inside_the_source_stops_the_start(alt_settings) -> None:
-    """書き出し先が正本の置き場の中なら、書き出し先の鍵の名前を添えて起動をやめる。"""
-    config = alt_settings.config_path
-    text = config.read_text(encoding="utf-8").replace(
-        "[source]\n", '[source]\nexport_path = "source_alt/export.md"\n', 1
-    )
-    config.write_text(text, encoding="utf-8")
+def test_REQ_525_an_export_path_inside_the_data_is_refused(settings) -> None:
+    """書き出し先が経歴データの置き場の中なら、書かずに断る。置き場は 1 バイトも変わらない。"""
+    before = source_digest(settings.source_dir)
 
-    with pytest.raises(ValueError, match="export_path"):
-        load_settings(config)
-
-
-def test_REQ_454_without_an_export_path_the_export_is_refused(alt_settings) -> None:
-    """設定に書き出し先が無ければ、書かずに、設定に足す鍵の名前を断りに返す。"""
-    result = _service(alt_settings).export_source()
+    result = _service(settings).export_source(str(settings.source_dir / "export.md"))
 
     assert result.written is False
-    assert "export_path" in result.rejection.reason
-    assert result.rejection.next_action.missing_fields == ["export_path"]
+    assert result.rejection.constraint == "書き出し先は置き場の外"
+    assert result.rejection.next_action.operation == "export_source"
+    assert source_digest(settings.source_dir) == before
 
 
-def test_REQ_455_export_returns_the_name_and_size_without_the_path(alt_settings) -> None:
+def test_REQ_455_export_returns_the_name_and_size_without_the_path(settings, tmp_path) -> None:
     """書き出しが通ると、書いたファイルの名前と字数を返し、書き出し先の絶対パスを返さない。"""
-    settings = _with_export(alt_settings, "../exported/all.md")
+    destination = tmp_path / "exported" / "all.md"
 
-    result = _service(settings).export_source()
+    result = _service(settings).export_source(str(destination))
 
     assert result.file_name == "all.md"
-    assert result.chars == len(settings.export_path.read_text(encoding="utf-8"))
+    assert result.chars == len(destination.read_text(encoding="utf-8"))
     dumped = json.dumps(result.model_dump(mode="json"), ensure_ascii=False)
-    assert str(settings.export_path.parent) not in dumped
-    assert str(Path(settings.export_path).parent.parent) not in dumped
+    assert str(destination.parent) not in dumped
+    assert str(destination.parent.parent) not in dumped
 
 
 def test_REQ_469_a_fact_written_as_a_field_is_refused(alt_settings) -> None:
@@ -458,7 +444,7 @@ def test_REQ_469_a_fact_written_as_a_field_is_refused(alt_settings) -> None:
     before = source_digest(alt_settings.source_dir)
 
     disclosure = _record(alt_settings, fact="公開可否: 公開不可")
-    identifier = _record(alt_settings, fact="識別子: teramina-routes")
+    identifier = _record(alt_settings, fact="ID: teramina-routes")
 
     for result in (disclosure, identifier):
         assert result.accepted is False
@@ -513,11 +499,8 @@ STRUCTURE_REASON = "職歴の並びを整える"
 
 
 @pytest.fixture
-def recording(sample_copy):
-    """写しを git のリポジトリにし、書き込みの記録を有効にした 2 つ目の見本の設定を返す。"""
-    init_git(sample_copy)
-    settings = add_config_lines(sample_copy / "accord_alt.toml", "source", ["commit_writes = true"])
-    git(sample_copy, "commit", "-q", "-am", "書き込みの記録を有効にする")
+def recording(settings):
+    """写しの経歴データの置き場（git の作業ツリーの根）を指す見本の設定を返す。書き込みはいつも記録される。"""
     return settings
 
 
@@ -673,7 +656,7 @@ def test_REQ_476_remove_deletes_the_heading_and_the_body(recording) -> None:
     assert body not in after
     assert WRITING_PATH not in _paths(recording)
     assert after.rstrip("\n") == text[: text.index("### 技術記事の執筆")].rstrip("\n")
-    assert _last_commit_files(recording) == [f"source_alt/{CAREER}"]
+    assert _last_commit_files(recording) == [CAREER]
 
 
 def test_REQ_477_a_section_with_subsections_is_not_removed(recording) -> None:
@@ -711,7 +694,7 @@ def test_REQ_491_move_carries_the_subsections_and_shifts_their_depth(recording) 
         moved = path.replace(OUTSIDE, new_root, 1)
         assert _service(recording).read_section(moved).body == body
     assert _commits(recording) == commits + 1
-    assert _last_commit_files(recording) == [f"source_alt/{CAREER}"]
+    assert _last_commit_files(recording) == [CAREER]
 
 
 def test_REQ_492_move_before_a_child_reorders_within_the_parent(recording) -> None:
@@ -756,7 +739,7 @@ def test_REQ_495_a_move_across_files_is_refused(recording) -> None:
     """動かす節と新しい親が別のファイルにあるなら、書かずに、ファイルをまたいで動かせないことを返す。"""
     before = source_digest(recording.source_dir)
 
-    result = _move(recording, WRITING_PATH, "外に出したもの > 公開したもの（新しい順）")
+    result = _move(recording, WRITING_PATH, "外に出したもの > 刊行計画の進め方を話した勉強会の発表")
 
     assert result.accepted is False
     assert "ファイルをまたいで" in result.rejection.reason
@@ -789,7 +772,7 @@ def test_REQ_496_set_disclosure_adds_the_field_after_the_id_line(recording) -> N
 
     assert result.accepted is True, result.rejection
     assert _career_text(recording) == text.replace(
-        "- 識別子: study-group-host\n", "- 識別子: study-group-host\n- 公開可否: 公開可\n", 1
+        "- ID: study-group-host\n", "- ID: study-group-host\n- 公開可否: 公開可\n", 1
     )
 
 
@@ -978,7 +961,8 @@ def test_REQ_490_revise_section_that_drops_a_required_field_is_refused(alt_setti
     """節の書き換えで、決めと公開記録の必須の欄を消す直しは書かない（整合の検査の違反にはならない欄）。"""
     before = source_digest(alt_settings.source_dir)
     decision = "売り方の決め > 2026-06-01 全体"
-    record = "外に出したもの > 公開したもの（新しい順） > 刊行計画の進め方を話した勉強会の発表"
+    # 機能の裏づけに指されていない公開記録を使う（指されている記録では、指す先の実在の違反が先に出る）。
+    record = "外に出したもの > 分かれた数字を 1 か所に集める手順の寄稿"
 
     results = {}
     for path, label in ((decision, "- 根拠:"), (record, "- 種類:")):
@@ -1034,13 +1018,13 @@ def test_REQ_490_remove_and_disclosure_share_the_same_guard(recording, monkeypat
     公開可否は ID の欄を持つ節にしか書かない）。守りが同じ手順に通っていることを、書いた後の全文を
     決めの必須の欄が欠けた全文に差し替えて確かめる。
     """
-    decision_file = "positioning.md"
+    decision_file = "product/positioning.md"
     broken = (recording.source_dir / decision_file).read_text(encoding="utf-8").replace(
         "- 根拠: 2026 年前半", "- 備考: 2026 年前半", 1
     )
     target = WRITING_PATH
     if operation == "remove":
-        target = "売り方の決め > 2026-09-10 全体"
+        target = "売り方の決め > 2026-09-10 見本の決め"
         monkeypatch.setattr(MarkdownRepository, "removed_text", lambda self, section: broken)
         before = source_digest(recording.source_dir)
         result = _remove(recording, target)
@@ -1072,7 +1056,7 @@ def test_REQ_485_every_source_file_can_be_revised(alt_settings) -> None:
     """機能の台帳・公開記録・パッケージ定義・売り方の決めの既にある行も、節の書き換えで直せる。"""
     edits = {
         "機能の台帳 > データの置き場をつくる": ("止まったときに気づける形", "止まったときにすぐ気づける形"),
-        "外に出したもの > 公開したもの（新しい順） > 刊行計画の進め方を話した勉強会の発表": ("2025-11-08", "2025-11-09"),
+        "外に出したもの > 刊行計画の進め方を話した勉強会の発表": ("2025-11-08", "2025-11-09"),
         "パッケージ定義 > 要件定義と進行管理": ("従業員 100 名前後", "従業員 80〜120 名"),
         "売り方の決め > 2026-06-01 全体": ("4 件のうち 3 件", "5 件のうち 3 件"),
     }
@@ -1090,7 +1074,7 @@ def test_REQ_485_typed_rules_still_refuse_a_broken_row(alt_settings) -> None:
     """型の決まり（ID の形・語彙。仮説の状態と決めの適用範囲を含む）に反する直しは断られる。"""
     before = source_digest(alt_settings.source_dir)
     category = "機能の台帳 > 人と体制をつくる"
-    record = "外に出したもの > 公開したもの（新しい順） > 刊行計画の進め方を話した勉強会の発表"
+    record = "外に出したもの > 刊行計画の進め方を話した勉強会の発表"
 
     bad_id = _revise(
         alt_settings,
@@ -1153,15 +1137,6 @@ def _texts_of(result) -> list[str]:
     return [rejection.reason, rejection.next_action.example, *rejection.next_action.candidates]
 
 
-def _unrecorded(settings):
-    """同じ写しの、書き込みの記録を外した設定を返す（記録が無効な置き場の断りを集めるため）。"""
-    config = settings.config_path
-    text = config.read_text(encoding="utf-8").replace("commit_writes = true\n", "", 1)
-    other = config.with_name("accord_alt_unrecorded.toml")
-    other.write_text(text, encoding="utf-8")
-    return load_settings(other)
-
-
 def test_REQ_500_no_refusal_or_instruction_tells_to_edit_directly(recording) -> None:
     """断りの理由・次の一手・サーバーの説明に、直接直す案内も git を直接操作する案内も無い。"""
     import asyncio
@@ -1184,7 +1159,6 @@ def test_REQ_500_no_refusal_or_instruction_tells_to_edit_directly(recording) -> 
         _remove(recording, OUTSIDE),
         _move(recording, FREELANCE_PATH, TERAMINA_PATH),
         _disclose(recording, BASIC_PATH, "公開可"),
-        _service(_unrecorded(recording)).rename_heading(WRITING_PATH, "x", "0", "r"),
     ]
     # accord を通さない変更が残っているファイルへの書き込みの断り。
     career = recording.path_for("career")
@@ -1201,27 +1175,8 @@ def test_REQ_500_no_refusal_or_instruction_tells_to_edit_directly(recording) -> 
             assert word not in text, (word, text)
 
 
-def test_REQ_488_structure_operations_need_the_write_record(alt_settings) -> None:
-    """書き込みの記録が無効な置き場では、5 つの操作は書かずに、書き込みの記録が要ることを返す。"""
-    before = source_digest(alt_settings.source_dir)
-
-    results = [
-        _rename(alt_settings, WRITING_PATH, "技術記事の連載"),
-        _add(alt_settings, OUTSIDE, "登壇の記録", "中身"),
-        _remove(alt_settings, WRITING_PATH),
-        _move(alt_settings, WRITING_PATH, BASIC_PATH),
-        _disclose(alt_settings, TERAMINA_ID, "公開可（社名は出さない）"),
-    ]
-
-    for result in results:
-        assert result.accepted is False
-        assert "書き込みの記録" in result.rejection.reason
-        assert result.rejection.next_action.missing_fields == ["commit_writes"]
-    assert source_digest(alt_settings.source_dir) == before
-
-
-def test_REQ_488_each_structure_operation_makes_one_commit_of_the_file(recording) -> None:
-    """5 つの操作は、変えたファイルだけを 1 件の git のコミットにする。"""
+def test_REQ_513_each_structure_operation_makes_one_commit_of_the_file(recording) -> None:
+    """5 つの操作は、変えたファイルだけを 1 件の git のコミットにし、説明に操作の名前の行を書く。"""
     steps = [
         lambda: _rename(recording, WRITING_PATH, "技術記事の連載"),
         lambda: _add(recording, OUTSIDE, "登壇の記録", "中身"),
@@ -1236,7 +1191,9 @@ def test_REQ_488_each_structure_operation_makes_one_commit_of_the_file(recording
 
         assert result.accepted is True, result.rejection
         assert _commits(recording) == commits + 1
-        assert _last_commit_files(recording) == [f"source_alt/{CAREER}"]
+        assert _last_commit_files(recording) == [CAREER]
+        message = git(recording.source_dir, "log", "-1", "--format=%B")
+        assert "Accord-Operation: " in message
     assert git(recording.source_dir, "status", "--porcelain").strip() == ""
 
 

@@ -1,10 +1,10 @@
-"""Markdown を見出しの階層と本文に切り分け、設定の書き方どおりに節と欄を読む。
+"""Markdown を見出しの階層と本文に切り分け、accord の形どおりに節と欄を読む。
 
 正本は Markdown のままで持つ、という決めなので、「節」が事実の単位になる。裏づけの節も
 出典の節も、この文書が切り出した見出しの文字列で指す。
 
-正本の書き方は人によって違う。見出しの深さも、欄を箇条書きで書くか表で書くかも、欄の
-ラベルの言い方も違う。その違いは設定（`BlockRule`）が持ち、この文書はそれを当てる側に徹する。
+accord の形は 1 つで、見出しの深さも、欄の書き方も、欄のラベルの言い方も固定である（`BlockRule` の
+値は accord の形の定数が持つ）。違う書き方の人は移行の操作で変換する。この文書は形を当てる側に徹する。
 どの節をブロックとして読むかは `select_blocks`、その節の欄をどう読むかは `read_fields` が
 1 か所で決め、正本 8 種の読み込みはどちらも同じ関数を通る。
 """
@@ -254,16 +254,15 @@ def prefix_matches(heading: str, rule: BlockRule = DEFAULT_BLOCK_RULE) -> bool:
     """
     if not rule.heading_prefix:
         return True
-    # spec: REQ-375
     return heading.startswith(rule.heading_prefix) or is_frame_heading(heading, rule)
 
 
 def select_blocks(sections: list[Section], rule: BlockRule = DEFAULT_BLOCK_RULE) -> list[Section]:
     """節の一覧から、その正本のブロックとして読む節だけを取り出す。
 
-    絞り込みは 5 つで、どれも設定が決める。見出しの深さ、上位のどの節の下か、見出しの前置き、
-    読まない見出し、欄を 1 つも持たない節（束ねるための見出し）を飛ばすかである。
-    読まない見出しに挙げた節は、その下の節も読まない。
+    絞り込みは 5 つで、どれも accord の形が決める。見出しの深さ、上位のどの節の下か、見出しの前置き、
+    欄を 1 つも持たない節（束ねるための見出し）を飛ばすか、決まったラベルの欄を 1 つも持たない節
+    （パッケージ定義の覚え書きの節など）を飛ばすかである。
     """
     levels = set(rule.heading_levels)
     ancestors: list[tuple[int, str]] = []
@@ -276,21 +275,18 @@ def select_blocks(sections: list[Section], rule: BlockRule = DEFAULT_BLOCK_RULE)
         if section.heading:
             ancestors.append((section.level, section.heading))
 
-        # spec: REQ-053
         if not section.heading or section.level not in levels:
             continue
-        # spec: REQ-054
         if rule.under_headings and not any(name in rule.under_headings for name in above):
             continue
-        if section.heading in rule.skip_headings:
-            continue
-        if any(name in rule.skip_headings for name in above):
-            continue
-        # spec: REQ-055
         if not prefix_matches(section.heading, rule):
             continue
-        # spec: REQ-057
         if rule.skip_sections_without_fields and not read_fields(section, rule):
+            continue
+        # spec: REQ-506
+        if rule.skip_sections_without_labels and not (
+            set(rule.skip_sections_without_labels) & set(read_fields(section, rule))
+        ):
             continue
         selected.append(section)
     return selected
@@ -306,7 +302,6 @@ def read_fields(section: Section, rule: BlockRule = DEFAULT_BLOCK_RULE) -> dict[
     同じ欄が複数回出たときは、値を改行でつないで 1 つにまとめる。
     """
     entries = _definition_entries(section.body, rule.bare_labels)
-    # spec: REQ-059
     if rule.fields_from_table:
         entries += [
             (cells[0], cells[1])
@@ -316,9 +311,7 @@ def read_fields(section: Section, rule: BlockRule = DEFAULT_BLOCK_RULE) -> dict[
 
     fields: dict[str, str] = {}
     for label, value in entries:
-        # spec: REQ-063
         name = strip_note(label) if rule.strip_label_note else label
-        # spec: REQ-064
         for target in rule.labels.get(name, (name,)):
             if target in fields:
                 fields[target] = f"{fields[target]}\n{value}"
@@ -386,7 +379,6 @@ def _definition_entries(body: str, bare_labels: tuple[str, ...] = ()) -> list[tu
         if match is not None:
             entries.append((match.group(1).strip(), match.group(2).strip()))
             continue
-        # spec: REQ-061
         for label in bare_labels:
             value = _bare_declaration(line, label)
             if value is not None:

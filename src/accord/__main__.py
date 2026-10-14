@@ -1,7 +1,8 @@
 """コマンドとして accord を起動する入口。
 
-引数なしで呼ぶと、標準入出力（stdio）で MCP サーバーを開く。ネットワークの口は開かない。
-`--list` を付けると、開く口の名前だけを並べて終わる（人が目で確かめるための出口）。
+`--data`（経歴データの置き場）を渡して呼ぶと、標準入出力（stdio）で MCP サーバーを開く。
+ネットワークの口は開かない。設定ファイルは読まない（正本の書き方は accord の形の 1 通りに固定）。
+`--list` を付けると、開く口の名前だけを並べて終わる（人が目で確かめるための出口。`--data` なしで動く）。
 """
 
 from __future__ import annotations
@@ -13,7 +14,12 @@ from pathlib import Path
 
 from accord.server.app import create_server
 from accord.services.watch import SourceWatch
-from accord.vocabulary.settings import load_settings
+from accord.vocabulary.settings import (
+    DATA_USAGE,
+    SettingsError,
+    load_settings,
+    unbound_settings,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -23,23 +29,40 @@ def main(argv: list[str] | None = None) -> int:
         description="正本と対外表現の一致を守る MCP サーバー",
     )
     parser.add_argument(
-        "--config",
+        "--data",
         type=Path,
         default=None,
-        help="設定ファイルの場所（省くと同梱の samples/accord.toml を読む）",
+        help="経歴データの置き場（git の作業ツリーの根）。--list のほかは必須",
+    )
+    parser.add_argument(
+        "--presentations",
+        type=Path,
+        default=None,
+        help="提示物と媒体ごとの規約の置き場（省くと提示物を 0 件として読む）",
     )
     parser.add_argument(
         "--list",
         action="store_true",
-        help="開くツールと資源の名前を並べて終わる",
+        help="開くツールと資源の名前を並べて終わる（--data なしで動く）",
     )
     args = parser.parse_args(sys.argv[1:] if argv is None else argv)
 
-    try:
-        settings = load_settings(args.config)
-    except (OSError, ValueError) as error:
-        print(f"設定が読めない: {error}", file=sys.stderr)
-        return 2
+    if args.list and args.data is None:
+        settings = unbound_settings()
+    else:
+        # spec: REQ-503
+        if args.data is None:
+            print(f"accord: --data が無い。{DATA_USAGE}", file=sys.stderr)
+            return 2
+        try:
+            # spec: REQ-502
+            # spec: REQ-504
+            settings = load_settings(args.data, args.presentations)
+        except (OSError, SettingsError) as error:
+            # spec: REQ-545
+            # spec: REQ-546
+            print(f"accord: {error}", file=sys.stderr)
+            return 2
 
     watch = SourceWatch(settings)
     server = create_server(settings, watch)

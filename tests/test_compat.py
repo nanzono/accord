@@ -1,13 +1,9 @@
-"""書き方の違う第 2 の正本の上で、第 1 版と同じ結果が出ることのテスト。
+"""accord の形の見本の上で、整合の検査と書きの操作の要件が成り立つことのテスト。
 
-`samples/source_alt/` は、`samples/source/` と同じ人・同じ案件・同じ中身を、違う書き方で
-書いた正本である。見出しの深さも、欄を箇条書きで書くか表で書くかも、欄のラベルの言い方も違う。
-読み方の差は設定ファイル `samples/accord_alt.toml` の `[reading]` の節だけが吸収する。
-
-ここで見るのは 2 つ。8 種と見せ方の正本が断り無しで読めることと、制約 7 つの判定が
-第 1 版と同じ（受け付けない／検出する／飛ばす）になることである。
-読み方の設定が書き方の違いを吸収することを、整合の検査の要件の番号で確かめる。
-違反はすべて、写しに仕込む。同梱のサンプルそのものは整ったままにする。
+見本（`samples/data/` と `samples/presentations/`）は、職歴の枠と受託案件を 1 つのファイルに入れ子で持ち、
+台帳の欄を 2 列の表で書き、欄のラベルの読み替えを使う、accord の形の実例である。
+ここで見るのは、制約の判定（受け付けない／検出する／飛ばす）がこの形の上で成り立つことである。
+違反はすべて、写しに仕込む。同梱の見本そのものは整ったままにする。
 """
 
 from __future__ import annotations
@@ -79,45 +75,8 @@ def _rewrite(path: Path, old: str, new: str, *, last: bool = False) -> None:
 
 
 def _presentation(settings, name: str) -> Path:
-    """第 2 の正本の提示物の場所を返す。媒体ディレクトリの直下にある。"""
-    return settings.source_dir / name
-
-
-def test_REQ_082_alt_sample_loads_without_defects(alt_settings) -> None:
-    """書き方が違っても、読めなかったブロックの断りが 1 件も出ない。"""
-    snapshot = MarkdownRepository(alt_settings).load()
-
-    assert [defect.model_dump() for defect in snapshot.defects] == []
-
-
-def test_REQ_083_alt_sample_loads_every_type(alt_settings) -> None:
-    """書き方が違っても、8 種の正本と見せ方の正本のすべてから 1 件以上が読める。"""
-    repository = MarkdownRepository(alt_settings)
-    snapshot = repository.load()
-
-    assert len(snapshot.positionings) == 2
-    assert [item.id for item in snapshot.packages] == [HEADLINE_PACKAGE, OTHER_PACKAGE]
-    assert [item.name for item in snapshot.packages][0] == HEADLINE_PACKAGE_NAME
-    assert len(snapshot.capabilities) == 7
-    # 職歴の枠は深さ 3、受託案件は深さ 4 と 5。同じ 1 つのファイルから読み分ける。
-    assert len(snapshot.career_frames) == 2
-    assert len(snapshot.engagements) == 3
-    # 提示物は、媒体ディレクトリの下で宣言の行を持つものだけ（控えのファイルは読まない）。
-    assert [item.path for item in snapshot.presentations] == [
-        "tsukikusa/profile.md",
-        "nagiho/skill_sheet.md",
-    ]
-    # 台帳は 2 列の表を欄として読み、案件番号は見出しの数字から取る。
-    # 在籍職歴の枠（見出しが「枠」で始まるブロック）は、案件とは別に番号を持つ。
-    assert [
-        (item.kind, item.entry_number) for item in snapshot.ledger_entries
-    ] == [("案件", "1"), ("案件", "2"), ("案件", "3"), ("在籍職歴の枠", "1")]
-    assert snapshot.ledger_entries[0].fold_line
-    # 公開記録は、束ねるための見出しの下の深さ 3 の節で 1 件ぶんになる。
-    assert len(snapshot.public_records) == 2
-
-    assert repository.channel_rules(CHANNEL)
-    assert repository.forbidden_phrases()
+    """提示物の場所を返す。提示物の置き場の媒体ディレクトリの下にある。"""
+    return settings.presentations_dir / name
 
 
 def test_REQ_188_alt_record_positioning_rejects_missing_date(alt_settings) -> None:

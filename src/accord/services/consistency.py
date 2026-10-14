@@ -78,11 +78,16 @@ from accord.services.positioning import (
 )
 from accord.services.public_records import REGISTER_OPERATION, PublicRecordService
 from accord.vocabulary.settings import (
-    POSITIONING_TARGETS_KEY,
-    PUBLIC_RECORD_KINDS_KEY,
-    PUBLIC_RECORD_ROLES_KEY,
+    CAPABILITY_CATEGORIES_KIND,
+    CHANNELS_KIND,
+    LEDGER_ENTRY_PREFIX,
+    LEDGER_FRAME_PREFIX,
+    PACKAGE_HYPOTHESIS_STATES_KIND,
+    POSITIONING_TARGETS_KIND,
+    PUBLIC_RECORD_KINDS_KIND,
+    PUBLIC_RECORD_ROLES_KIND,
     PUBLIC_RECORDS_KEY,
-    READING_KEY,
+    VOCABULARY_FILE,
     Settings,
 )
 
@@ -104,9 +109,6 @@ CAPABILITY_CATEGORY_VOCABULARY = CONSTRAINT_BY_NAME["機能の分類の語彙"].
 PACKAGE_HYPOTHESIS_STATE_VOCABULARY = CONSTRAINT_BY_NAME["パッケージの仮説の状態の語彙"].name
 POSITIONING_SCOPE_VOCABULARY = CONSTRAINT_BY_NAME["決めの適用範囲の語彙"].name
 
-# 設定の [vocabulary] の鍵のうち、この 2 つの語彙を持つもの。違反の直し先に書く。
-PACKAGE_HYPOTHESIS_STATES_KEY = "package_hypothesis_states"
-CHANNELS_KEY = "channels"
 ORIGIN_SECTION_EXISTS = CONSTRAINT_BY_NAME["由来の節の実在"].name
 PRESENTATION_URL_MATCHES = CONSTRAINT_BY_NAME["提示物の URL と公開記録の一致"].name
 COPY_FRESHNESS = CONSTRAINT_BY_NAME["写しの鮮度"].name
@@ -138,13 +140,11 @@ ENGAGEMENT_KEYS = ("engagements",)
 # 写しの鮮度の違反の文で、出典の指紋の欄を指す語。台帳と提示物で同じ語を使う。
 FINGERPRINT_FIELD_LABEL = PRESENTATION_FINGERPRINT_LABEL
 
-# 設定の語の一覧に照らす 3 つの欄の、正本での欄の名前。違反の文はこの語のまま欄を指す。
+# 語彙に照らす 3 つの欄の、正本での欄の名前。違反の文はこの語のまま欄を指す。
 PUBLIC_RECORD_KIND_LABEL = "種類"
 PUBLIC_RECORD_ROLE_LABEL = "役割"
 CAPABILITY_CATEGORY_LABEL = "分類"
 
-# 機能の分類の語を書く、[vocabulary] の鍵。公開記録の 2 つと同じく、設定の側の名前を文に出す。
-CAPABILITY_CATEGORIES_KEY = "capability_categories"
 
 # 「どこにも無い」ときの文の後半。照らす相手も次の一手も呼ぶ場所ごとに違うので、語で引く。
 MISSING_HEADING_TEXT = {
@@ -181,16 +181,7 @@ def id_format_text(label: str, wanted: str) -> str:
 # 候補の母集団が空のときの文。書き間違いと、そもそも 1 件も読めていないことを言い分ける。
 NO_CANDIDATE_MATERIAL_TEXT = (
     "候補を出せる材料が無い（照らす相手が 1 件も読めていない）。"
-    "設定の読み方の絞りか、正本の節の位置を確かめる。"
-)
-
-
-# 公開記録の置き場が設定に無いときの断り。照合していないことと、照合させるための鍵 3 つを言う。
-# spec: REQ-036
-NO_PUBLIC_RECORDS_FILE_NOTE = (
-    "公開記録の置き場が設定に無いので、提示物の URL は照合していない。照合させるには、"
-    f"設定の [source.files] に {PUBLIC_RECORDS_KEY} を、"
-    f"[vocabulary] に {PUBLIC_RECORD_KINDS_KEY} と {PUBLIC_RECORD_ROLES_KEY} を足す。"
+    "accord の形の読み方の絞り（見出しの深さと束ねる見出し）に、正本の節の位置が合っているかを確かめる。"
 )
 
 
@@ -203,7 +194,7 @@ def records_behind(
 
 
 def provenance_of(settings: Settings) -> Provenance:
-    """この検査が、どの設定を、どの読み方で、どの版とどの置き場の accord で走ったかを作る。
+    """この検査が、どの置き場の語彙を、どの読み方で、どの版とどの置き場の accord で走ったかを作る。
 
     設定を読む層は型を知らない状態に保たれ、型の器の層は設定を知らない状態に保たれている。
     両方を見てよいのはサービス層だけなので、足跡の組み立てはここに置く。
@@ -212,14 +203,15 @@ def provenance_of(settings: Settings) -> Provenance:
         version = importlib.metadata.version("accord")
     except importlib.metadata.PackageNotFoundError:
         version = "不明（未導入）"
-    config = settings.config_path.resolve()
+    data = settings.source_dir.resolve()
     # spec: REQ-460
     return Provenance(
+        # 設定ファイルは無いので、置き場の中で正本のほかに読む唯一のファイル（語彙）の名前を書く。
         # spec: REQ-461
-        config_name=f"{config.parent.name}/{config.name}",
+        config_name=f"{data.name}/{VOCABULARY_FILE}",
+        # 読み方は accord の形の 1 通りで、変える鍵を持たない。
         # spec: REQ-005
-        # spec: REQ-006
-        reading=list(settings.reading.applied_keys) or ["既定"],
+        reading=["既定"],
         version=version,
         # 動いている accord のパッケージの置き場。ここでパッケージを import しないのは、
         # パッケージ単位の読み込みを禁じる構造の検査に当たるからである。
@@ -320,9 +312,8 @@ def explain_heading(
         return (
             False,
             f"{label}「{wanted}」は {where} の「{skipped.heading}」に実在する（{place}）が、"
-            f"いまの読み取り範囲の外にある——{skipped.reason}。直し方は 2 つで、"
-            f"設定の [{READING_KEY}.{skipped.source_key}] の絞りを広げてこの節を読めるようにするか、"
-            "正本のこの節を読み取り範囲の中へ移す。",
+            f"いまの読み取り範囲の外にある——{skipped.reason}。直し方は、"
+            "正本のこの節を accord の形の読み取り範囲の中へ動かす（move_section・rename_heading）。",
             [],
         )
 
@@ -772,17 +763,14 @@ class ConsistencyService:
     def _check_vocabulary(
         self, snapshot: SourceSnapshot, target: InspectionScope
     ) -> list[Violation]:
-        """公開記録の種類と役割、機能の分類、パッケージの仮説の状態、決めの適用範囲が、設定が持つ語の一覧にあるかを見る。
+        """公開記録の種類と役割、機能の分類、パッケージの仮説の状態、決めの適用範囲が、語彙にあるかを見る。
 
         登記の操作も書き込みの瞬間に同じことを見るが、正本には accord を通さずに入った行が残っていることがある。
-        設定の外の語でも型にはできるので読み込みは通り、必須の欄の欠けだけを見る検査は黙って通る。
+        語彙の外の語でも型にはできるので読み込みは通り、必須の欄の欠けだけを見る検査は黙って通る。
         だから、裏づけ節名の実在と同じく、読み込んだ正本に対しても当て直す。
         語の外れたブロックを読み飛ばさず違反 1 件として挙げるので、材料の取り出しからは消えない。
         """
         violations: list[Violation] = []
-        config_name = self.settings.config_path.name
-
-        # 公開記録の置き場を書いていない設定は、公開記録を 0 件として読む。照らす相手も語彙も無い。
         if self.settings.has_file(PUBLIC_RECORDS_KEY):
             records_file = self.settings.files[PUBLIC_RECORDS_KEY]
             # 種類と役割は別のルールなので、外れた側のルールの名前で違反を挙げる。
@@ -792,14 +780,14 @@ class ConsistencyService:
                     PUBLIC_RECORD_KIND_VOCABULARY,
                     PUBLIC_RECORD_KIND_LABEL,
                     self.settings.public_record_kinds,
-                    PUBLIC_RECORD_KINDS_KEY,
+                    PUBLIC_RECORD_KINDS_KIND,
                 ),
                 # spec: REQ-369
                 (
                     PUBLIC_RECORD_ROLE_VOCABULARY,
                     PUBLIC_RECORD_ROLE_LABEL,
                     self.settings.public_record_roles,
-                    PUBLIC_RECORD_ROLES_KEY,
+                    PUBLIC_RECORD_ROLES_KIND,
                 ),
             )
             for record in target.public_records:
@@ -817,9 +805,9 @@ class ConsistencyService:
                             file=records_file,
                             location=f"「{record.name}」のブロックの「{label}」の行",
                             expected=(
-                                f"{label}「{value}」は、設定が持つ語の一覧に無い。"
-                                f"この行を下の候補のどれかに書き換えるか、設定 {config_name} の"
-                                f" [vocabulary] の {key} に「{value}」を足す。"
+                                f"{label}「{value}」は、語彙の「{key}」に無い。"
+                                f"この行を下の候補のどれかに書き換えるか、語彙（{VOCABULARY_FILE}）の"
+                                f"「{key}」に「{value}」を足す。"
                             ),
                             candidates=list(allowed),
                         )
@@ -840,8 +828,8 @@ class ConsistencyService:
                     ),
                     expected=(
                         f"{CAPABILITY_CATEGORY_LABEL}「{capability.category}」は、"
-                        "設定が持つ機能の台帳の節の名前に無い。この行を下の候補のどれかの節へ移すか、"
-                        f"設定 {config_name} の [vocabulary] の {CAPABILITY_CATEGORIES_KEY} に"
+                        f"語彙の「{CAPABILITY_CATEGORIES_KIND}」に無い。この行を下の候補のどれかの節へ移すか、"
+                        f"語彙（{VOCABULARY_FILE}）の「{CAPABILITY_CATEGORIES_KIND}」に"
                         f"「{capability.category}」を足す。"
                     ),
                     candidates=list(categories),
@@ -860,9 +848,9 @@ class ConsistencyService:
                     file=self.settings.files["packages"],
                     location=f"「{package.name}」（{package.id}）の節の「仮説の状態」の行",
                     expected=(
-                        f"仮説の状態「{package.hypothesis_state}」は、設定が持つ語の一覧に無い。"
-                        f"この行を下の候補のどれかに書き換えるか、設定 {config_name} の"
-                        f" [vocabulary] の {PACKAGE_HYPOTHESIS_STATES_KEY} に「{package.hypothesis_state}」を足す。"
+                        f"仮説の状態「{package.hypothesis_state}」は、語彙の「{PACKAGE_HYPOTHESIS_STATES_KIND}」に無い。"
+                        f"この行を下の候補のどれかに書き換えるか、語彙（{VOCABULARY_FILE}）の"
+                        f"「{PACKAGE_HYPOTHESIS_STATES_KIND}」に「{package.hypothesis_state}」を足す。"
                     ),
                     candidates=list(states),
                 )
@@ -887,10 +875,10 @@ class ConsistencyService:
                     file=self.settings.files["positioning"],
                     location=f"{positioning.decided_on} の決めの「適用範囲」の行",
                     expected=(
-                        f"適用範囲「{positioning.scope}」は、「{WHOLE_SCOPE}」でも、設定が持つ媒体の名前"
+                        f"適用範囲「{positioning.scope}」は、「{WHOLE_SCOPE}」でも、語彙の媒体の名前"
                         "でも決めの適用先の語でもない。この行を下の候補のどれかに書き換えるか、"
-                        f"設定 {config_name} の [vocabulary] の {CHANNELS_KEY} か {POSITIONING_TARGETS_KEY}"
-                        f" に「{positioning.scope}」を足す。"
+                        f"語彙（{VOCABULARY_FILE}）の「{CHANNELS_KIND}」か「{POSITIONING_TARGETS_KIND}」"
+                        f"に「{positioning.scope}」を足す。"
                     ),
                     candidates=list(scopes),
                 )
@@ -906,9 +894,6 @@ class ConsistencyService:
         設定画面の場所の覚え書きのように公開記録ではありえないものなので、照合の相手にしない。
         URL を持たない公開記録（紙媒体）も、照らす相手には入れない。
         """
-        if not self.settings.has_file(PUBLIC_RECORDS_KEY):
-            # spec: REQ-035
-            return [], [NO_PUBLIC_RECORDS_FILE_NOTE]
 
         # spec: REQ-033
         known = [
@@ -1046,7 +1031,6 @@ class ConsistencyService:
             entries.append(
                 (engagement.id, self.settings.files["engagements"], f"「{engagement.heading}」の節")
             )
-        # spec: REQ-366
         if self.settings.has_file(PUBLIC_RECORDS_KEY):
             for record in snapshot.public_records:
                 entries.append(
@@ -1396,7 +1380,7 @@ def unread_ledger_note(settings: Settings, snapshot: SourceSnapshot) -> str | No
         f"職務経歴書の台帳 {settings.files.get(LEDGER_KEY, LEDGER_KEY)} の節のうち "
         f"{len(unread)} 件は、読み方の絞りで外れたので読んでいない（{headings}。外れた理由: {reasons}）。"
         "この節は、出典の節の実在も写しの鮮度も見ていない。案件か在籍職歴の枠として見させるなら、"
-        f"見出しを設定の [{READING_KEY}.{LEDGER_KEY}] の heading_prefix か frame_heading_prefix で始める。"
+        f"見出しを「{LEDGER_ENTRY_PREFIX}」か「{LEDGER_FRAME_PREFIX}」で始める（rename_heading）。"
     )
 
 

@@ -12,7 +12,7 @@ import pytest
 
 from accord.repository.markdown_repository import MarkdownRepository
 from accord.services.sections import SectionService
-from conftest import add_config_lines, git, init_git, source_digest
+from conftest import git, source_digest
 
 CAREER = "career_master.md"
 LEDGER = "keirekisho/daicho.md"
@@ -26,11 +26,8 @@ REASON = "書き方の表のマスを確かめる"
 
 
 @pytest.fixture
-def recording(sample_copy):
-    """写しを git のリポジトリにし、書き込みの記録を有効にした 2 つ目の見本の設定を返す。"""
-    init_git(sample_copy)
-    settings = add_config_lines(sample_copy / "accord_alt.toml", "source", ["commit_writes = true"])
-    git(sample_copy, "commit", "-q", "-am", "書き込みの記録を有効にする")
+def recording(settings):
+    """写しの経歴データの置き場（git の作業ツリーの根）を指す見本の設定を返す。書き込みはいつも記録される。"""
     return settings
 
 

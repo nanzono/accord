@@ -15,7 +15,7 @@ from pathlib import Path
 from accord.models.results import PositioningDraft
 from accord.repository.markdown_repository import MarkdownRepository
 from accord.services.positioning import PositioningService
-from conftest import add_config_lines, source_digest
+from conftest import add_vocabulary_terms, source_digest
 
 # 同梱のサンプルが持つ決め。日付の新しいほうが、いまの看板になる。
 # 決めが指すのはパッケージの ID なので、見出し（表示名）とは別に持つ。
@@ -57,7 +57,7 @@ SECOND_CHANNEL_DECISION = """
 
 # 写しに足す、いちばん新しい決めと日付も適用範囲も同じ決め。前面に出す束だけが違う。
 SAME_DATE_DECISION = """
-## 2026-09-10 全体
+## 2026-09-10 見本の決め
 
 - 日付: 2026-09-10
 - 適用範囲: 全体
@@ -301,7 +301,7 @@ def test_REQ_169_unknown_channel_names_the_settings_file(settings) -> None:
     view = _view(settings, "shiokaze")
 
     listed = "\n".join(view.warnings)
-    assert settings.config_path.name in listed, listed
+    assert "vocabulary.md" in listed, listed
 
 
 def test_REQ_170_unknown_channel_lists_every_existing_channel(settings) -> None:
@@ -496,8 +496,8 @@ def test_REQ_184_recording_a_positioning_names_the_files_of_the_outdated_claims(
 
     claims = result.recorded["提示物の宣言と看板の一致"]
     assert sorted(claims["ファイル"]) == [
-        "presentations/nagiho/skill_sheet.md",
-        "presentations/tsukikusa/profile.md",
+        "nagiho/skill_sheet.md",
+        "tsukikusa/profile.md",
     ], claims
 
 
@@ -511,7 +511,7 @@ def test_REQ_185_the_violations_found_after_recording_are_returned_as_warnings(
 
     listed = "\n".join(result.warnings)
     assert "2026-08-01" in listed, listed
-    assert "presentations/nagiho/skill_sheet.md" in listed, listed
+    assert "nagiho/skill_sheet.md" in listed, listed
 
 
 def test_REQ_186_a_rationale_with_newlines_reads_back_unchanged(settings) -> None:
@@ -620,9 +620,7 @@ TARGET = "会社のホームページ"
 
 def _with_target(settings):
     """写しの設定に適用先の語を 1 つ足し、読み直した設定を返す。"""
-    return add_config_lines(
-        settings.config_path, "vocabulary", [f'positioning_targets = ["{TARGET}"]']
-    )
+    return add_vocabulary_terms(settings, "決めの適用先", [TARGET])
 
 
 def _record_for_target(settings, decided_on: date, headline: str = LATEST_HEADLINE):
@@ -689,7 +687,7 @@ def test_REQ_411_a_scope_outside_the_channels_rejection_names_it_in_the_reason(
     reason = result.rejection.reason
     assert UNKNOWN_SCOPE in reason, reason
     assert "適用先の語" in reason, reason
-    assert settings.config_path.name in reason, reason
+    assert "vocabulary.md" in reason, reason
     assert "一覧に限る" in reason, reason
 
 

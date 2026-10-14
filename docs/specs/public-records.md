@@ -57,30 +57,35 @@ URL を空を表す語で渡されたとき、accord はその公開記録を UR
 
 - 関係するファイル: `src/accord/services/public_records.py`、`src/accord/vocabulary/settings.py`
 - 検証手順: `uv run pytest tests/test_public_records.py -k REQ_214`
+- status: superseded by REQ-505
 
 ## REQ-215
 もし設定ファイルに公開記録の置き場が無いなら、accord は当たった制約の名前を断りに返す。
 
 - 関係するファイル: `src/accord/services/public_records.py`、`src/accord/vocabulary/settings.py`
 - 検証手順: `uv run pytest tests/test_public_records.py -k REQ_215`
+- status: superseded by REQ-505
 
 ## REQ-216
 もし設定ファイルに公開記録の置き場が無いなら、accord は設定ファイルの名前と、書き足す先が決まらないことを断りの理由に書く。
 
 - 関係するファイル: `src/accord/services/public_records.py`、`src/accord/vocabulary/settings.py`
 - 検証手順: `uv run pytest tests/test_public_records.py -k REQ_216`
+- status: superseded by REQ-505
 
 ## REQ-217
 もし設定ファイルに公開記録の置き場が無いなら、accord は次に呼ぶ操作の名前を断りに返す。
 
 - 関係するファイル: `src/accord/services/public_records.py`、`src/accord/vocabulary/settings.py`
 - 検証手順: `uv run pytest tests/test_public_records.py -k REQ_217`
+- status: superseded by REQ-505
 
 ## REQ-218
 もし設定ファイルに公開記録の置き場が無いなら、accord は設定ファイルに足す 3 つの鍵の名前を含む書き方の例を断りに返す。
 
 - 関係するファイル: `src/accord/services/public_records.py`、`src/accord/vocabulary/settings.py`
 - 検証手順: `uv run pytest tests/test_public_records.py -k REQ_218`
+- status: superseded by REQ-505
 
 ## REQ-219
 もし公開記録の必須の欄が空なら、accord はその公開記録を登記しない。

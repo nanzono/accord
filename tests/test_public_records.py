@@ -13,7 +13,7 @@ from pathlib import Path
 from accord.models.results import ID_FORMAT_TEXT, PublicRecordDraft
 from accord.repository.markdown_repository import MarkdownRepository
 from accord.services.public_records import PublicRecordService
-from accord.vocabulary.settings import Settings, load_settings
+from accord.vocabulary.settings import Settings
 from conftest import source_digest
 
 # 同梱のサンプルにある受託案件の ID と、その見出し。通る入力の土台にして、1 か所だけ崩す。
@@ -48,12 +48,6 @@ PUBLIC_RECORD_REQUIRED_FIELDS_RULE = "公開記録の必須欄"
 PUBLIC_RECORD_KIND_VOCABULARY = "公開記録の種類の語彙"
 PUBLIC_RECORD_ROLE_VOCABULARY = "公開記録の役割の語彙"
 
-# 設定から抜くと、公開記録を使わない正本（この段より前の設定と同じ形）になる 3 行の書き出し。
-PUBLIC_RECORD_SETTING_LINES = (
-    "public_records = ",
-    "public_record_kinds = ",
-    "public_record_roles = ",
-)
 
 
 def _register(settings: Settings, **changes) -> object:
@@ -70,32 +64,6 @@ def _register(settings: Settings, **changes) -> object:
     }
     draft.update(changes)
     return PublicRecordService(settings).register(PublicRecordDraft(**draft))
-
-
-def _without_public_records(settings: Settings) -> Settings:
-    """写しの設定から、公開記録の置き場と語彙の 3 行を抜いて読み直す。"""
-    path: Path = settings.config_path
-    lines = path.read_text(encoding="utf-8").splitlines()
-    kept = [line for line in lines if not line.startswith(PUBLIC_RECORD_SETTING_LINES)]
-    assert len(kept) == len(lines) - 3, "写しの設定から抜く 3 行が見つからない"
-    path.write_text("\n".join(kept) + "\n", encoding="utf-8")
-    return load_settings(path)
-
-
-def _register_without_the_file(settings: Settings) -> tuple[Settings, object]:
-    """置き場を書いていない設定で登記を呼び、その設定と返り値を返す。"""
-    plain = _without_public_records(settings)
-    result = PublicRecordService(plain).register(
-        PublicRecordDraft(
-            id="data-meetup-talk",
-            name="配送データの集約を話した勉強会の発表",
-            kind="登壇",
-            published_on="2026-03-14",
-            publisher="データの置き場づくりを持ち寄る勉強会（架空の催し）",
-            role="登壇者",
-        )
-    )
-    return plain, result
 
 
 def _records(settings: Settings) -> list:
@@ -199,80 +167,6 @@ def test_REQ_213_a_public_record_without_an_origin_section_is_accepted(
 
 
 # ------------------------------------------------------------ 置き場の断り
-
-
-def test_REQ_214_a_settings_file_without_the_public_records_file_records_nothing(
-    settings: Settings,
-) -> None:
-    """置き場を書いていない設定では受け付けず、正本のバイト列も変えない。"""
-    plain = _without_public_records(settings)
-    before = source_digest(plain.source_dir)
-
-    result = PublicRecordService(plain).register(
-        PublicRecordDraft(
-            id="data-meetup-talk",
-            name="配送データの集約を話した勉強会の発表",
-            kind="登壇",
-            published_on="2026-03-14",
-            publisher="データの置き場づくりを持ち寄る勉強会（架空の催し）",
-            role="登壇者",
-        )
-    )
-
-    assert result.accepted is False
-    assert result.rejection is not None
-    assert source_digest(plain.source_dir) == before
-
-
-def test_REQ_215_missing_public_records_file_rejection_names_the_constraint(
-    settings: Settings,
-) -> None:
-    """置き場が無いときの断りは、当たった制約の名前を返す。"""
-    _, result = _register_without_the_file(settings)
-
-    assert result.rejection is not None
-    assert result.rejection.constraint == "公開記録の置き場の設定"
-
-
-def test_REQ_216_missing_public_records_file_rejection_names_the_settings_file(
-    settings: Settings,
-) -> None:
-    """置き場が無いときの断りは、設定ファイルの名前と書き足す先が決まらないことを理由に書く。"""
-    plain, result = _register_without_the_file(settings)
-
-    assert result.rejection is not None
-    reason = result.rejection.reason
-    assert plain.config_path.name in reason, reason
-    assert "書き足す先が決まらない" in reason, reason
-
-
-def test_REQ_217_missing_public_records_file_rejection_names_the_next_operation(
-    settings: Settings,
-) -> None:
-    """置き場が無いときの断りは、次に呼ぶ操作の名前を返す。"""
-    _, result = _register_without_the_file(settings)
-
-    assert result.rejection is not None
-    assert result.rejection.next_action.operation == "register_public_record"
-
-
-def test_REQ_218_missing_public_records_file_rejection_lists_the_three_keys(
-    settings: Settings,
-) -> None:
-    """置き場が無いときの断りは、設定に足す 3 つの鍵の名前を書き方の例に入れる。"""
-    _, result = _register_without_the_file(settings)
-
-    assert result.rejection is not None
-    listed = result.rejection.next_action.model_dump_json()
-    for key in ("public_records", "public_record_kinds", "public_record_roles"):
-        assert key in listed, listed
-    # 置き場の鍵は、足す先の節の名前とともに書く。この 1 行が無いと、
-    # 「public_records」はファイル名「public_records.md」の中にも現れるので、
-    # 鍵を 1 つも書かない例でもこのテストが通ってしまう。
-    assert "[source.files] に public_records = " in listed, listed
-
-
-# ------------------------------------------------------------ 必須の欄の断り
 
 
 def test_REQ_219_missing_required_fields_are_not_registered(settings: Settings) -> None:
@@ -420,7 +314,7 @@ def test_REQ_227_a_kind_outside_the_vocabulary_rejection_names_it_in_the_reason(
     assert result.rejection is not None
     reason = result.rejection.reason
     assert UNKNOWN_KIND in reason, reason
-    assert "public_record_kinds" in reason, reason
+    assert "公開記録の種類" in reason, reason
 
 
 def test_REQ_228_a_kind_outside_the_vocabulary_rejection_names_the_next_operation(
@@ -488,7 +382,7 @@ def test_REQ_233_a_role_outside_the_vocabulary_rejection_names_it_in_the_reason(
     assert result.rejection is not None
     reason = result.rejection.reason
     assert UNKNOWN_ROLE in reason, reason
-    assert "public_record_roles" in reason, reason
+    assert "公開記録の役割" in reason, reason
 
 
 def test_REQ_234_a_role_outside_the_vocabulary_rejection_names_the_next_operation(
@@ -651,17 +545,3 @@ def test_REQ_246_only_the_first_broken_rule_is_returned_when_registering(
     assert missing_field.rejection is not None
     assert missing_field.rejection.constraint == "公開記録の必須欄"
 
-    # 置き場の無い設定では、必須の欄より先に見る置き場の断りが返る。
-    plain = _without_public_records(settings)
-    no_file = PublicRecordService(plain).register(
-        PublicRecordDraft(
-            id="data-meetup-talk",
-            name="",
-            kind=UNKNOWN_KIND,
-            published_on="2026-03-14",
-            publisher="データの置き場づくりを持ち寄る勉強会（架空の催し）",
-            role=UNKNOWN_ROLE,
-        )
-    )
-    assert no_file.rejection is not None
-    assert no_file.rejection.constraint == "公開記録の置き場の設定"

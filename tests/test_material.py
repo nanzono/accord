@@ -13,7 +13,7 @@ from pathlib import Path
 from accord.models.results import MaterialRequest
 from accord.services.material import MaterialService
 from accord.vocabulary.settings import PRESENTATION_RULES_KEY
-from conftest import add_config_lines, source_digest
+from conftest import add_vocabulary_terms, source_digest
 
 # 決めも提示物もパッケージを ID で指すので、ID と見出し（表示名）の両方を持つ。
 CHANNEL = "tsukikusa"
@@ -96,11 +96,18 @@ def _material(settings, **kwargs):
 
 
 def _strip_presentation_rules(settings) -> str:
-    """見せ方の正本を題だけに切り詰め、その正本のファイル名を返す。"""
+    """見せ方の正本を題だけに切り詰め、媒体の規約のファイルを消して、見せ方の正本のファイル名を返す。
+
+    accord の形では、媒体の規約は提示物の置き場の `{媒体}/channel.md` にあり、禁じた言い回しは
+    見せ方の正本の節にある。どちらも無い状態を作る。
+    """
     rules = settings.path_for(PRESENTATION_RULES_KEY)
-    header, mark, _ = rules.read_text(encoding="utf-8").partition(f"## {CHANNEL}")
-    assert mark, "写しの見せ方の正本に、媒体の節が無い"
-    rules.write_text(header, encoding="utf-8")
+    header, mark, _ = rules.read_text(encoding="utf-8").partition("\n## ")
+    assert mark, "写しの見せ方の正本に、節が無い"
+    rules.write_text(header + "\n", encoding="utf-8")
+    channel_file = settings.presentations_dir / CHANNEL / "channel.md"
+    assert channel_file.is_file(), "写しに媒体の規約のファイルが無い"
+    channel_file.unlink()
     return settings.files[PRESENTATION_RULES_KEY]
 
 
@@ -240,7 +247,8 @@ def test_REQ_371_dropping_a_private_section_warning_names_the_rule(settings) -> 
 
     material = _material(settings)
 
-    dropped = [warning for warning in material.warnings if PRIVATE_SECTION in warning]
+    # 経歴の節を落とした知らせ（同じ節の名前を含む）とは別の、裏づけの節を落とした警告を見る。
+    dropped = [warning for warning in material.warnings if f"裏づけの節「{PRIVATE_SECTION}」" in warning]
     assert len(dropped) == 1, material.warnings
     assert dropped[0].startswith(f"{SOURCE_AND_EVIDENCE_DISCLOSURE}: "), dropped[0]
 
@@ -362,9 +370,7 @@ TARGET = "会社のホームページ"
 
 def _with_target(settings):
     """写しの設定に適用先の語を 1 つ足し、読み直した設定を返す。"""
-    return add_config_lines(
-        settings.config_path, "vocabulary", [f'positioning_targets = ["{TARGET}"]']
-    )
+    return add_vocabulary_terms(settings, "決めの適用先", [TARGET])
 
 
 def test_REQ_415_unknown_name_yields_no_material(settings) -> None:
@@ -519,7 +525,7 @@ def test_REQ_424_the_declaration_reaches_the_client_over_stdio(settings) -> None
     async def listed() -> dict:
         params = StdioServerParameters(
             command=sys.executable,
-            args=["-m", "accord", "--config", str(settings.config_path)],
+            args=["-m", "accord", "--data", str(settings.source_dir), "--presentations", str(settings.presentations_dir)],
         )
         async with stdio_client(params) as (read, write):
             async with ClientSession(read, write) as session:

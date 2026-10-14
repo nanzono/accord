@@ -43,7 +43,7 @@ types:
         label: 適用範囲
         type: text
         required: true
-        description: 媒体の名前か「全体」。媒体の名前は設定ファイルの一覧から取る。
+        description: 媒体の名前か「全体」。媒体の名前は語彙（vocabulary.md）の「媒体」から取る。
       - name: headline_package
         label: 前面に出す束
         type: text
@@ -84,7 +84,7 @@ types:
         label: 仮説の状態
         type: text
         required: true
-        description: 選べる語は設定ファイルの package_hypothesis_states が持つ一覧に限る。
+        description: 選べる語は語彙（vocabulary.md）の「パッケージの仮説の状態」の語に限る。
       - name: capabilities
         label: 束ねる機能
         type: text_list
@@ -135,7 +135,7 @@ types:
         label: 分類
         type: text
         required: true
-        description: 機能の台帳の節の名前。選べる語は設定ファイルから読む。
+        description: 機能の台帳の節の名前。選べる語は語彙（vocabulary.md）の「機能の分類」から読む。
       - name: evidence_sections
         label: 裏づけの節
         type: text_list
@@ -261,7 +261,7 @@ types:
         label: 種類
         type: text
         required: true
-        description: 選べる語は設定ファイルの public_record_kinds が持つ一覧に限る。
+        description: 選べる語は語彙（vocabulary.md）の「公開記録の種類」の語に限る。
       - name: published_on
         label: 日付
         type: text
@@ -281,7 +281,7 @@ types:
         label: 役割
         type: text
         required: true
-        description: 選べる語は設定ファイルの public_record_roles が持つ一覧に限る。
+        description: 選べる語は語彙（vocabulary.md）の「公開記録の役割」の語に限る。
       - name: origin_section
         label: 由来の節
         type: text
@@ -307,7 +307,7 @@ types:
         label: 宛先の媒体
         type: text
         required: true
-        description: 媒体の名前。設定ファイルの一覧から取る。
+        description: 媒体の名前。語彙（vocabulary.md）の「媒体」から取る。
       - name: declared_package
         label: 宣言する束
         type: text
@@ -342,7 +342,7 @@ types:
         label: 種類
         type: text
         required: true
-        description: ブロックの種類。「案件」か「在籍職歴の枠」。見出しの前置きで決まる（在籍職歴の枠は設定の frame_heading_prefix で始まる見出し）。
+        description: ブロックの種類。「案件」か「在籍職歴の枠」。見出しの前置きで決まる（在籍職歴の枠は「枠」で始まる見出し）。
       - name: entry_number
         label: 案件番号
         type: text
@@ -525,34 +525,34 @@ constraints:
     next_action: 欠けた欄の名前と、その欄の書き方の例を返す。
 
   - name: 公開記録の種類の語彙
-    watches: 公開記録の種類が、設定ファイルが持つ種類の語の一覧にあるか。
+    watches: 公開記録の種類が、語彙の「公開記録の種類」にあるか。
     enforced_by: [register_public_record, check_consistency]
     appears_as: 拒否
-    next_action: 設定が持つ種類の語の一覧を返す。
+    next_action: 語彙の「公開記録の種類」の語を返す。
 
   - name: 公開記録の役割の語彙
-    watches: 公開記録の役割が、設定ファイルが持つ役割の語の一覧にあるか。
+    watches: 公開記録の役割が、語彙の「公開記録の役割」にあるか。
     enforced_by: [register_public_record, check_consistency]
     appears_as: 拒否
-    next_action: 設定が持つ役割の語の一覧を返す。
+    next_action: 語彙の「公開記録の役割」の語を返す。
 
   - name: 機能の分類の語彙
-    watches: 機能の分類（機能の台帳の節の見出し）が、設定ファイルが持つ分類の語の一覧にあるか。
+    watches: 機能の分類（機能の台帳の節の見出し）が、語彙の「機能の分類」にあるか。
     enforced_by: [register_capability, check_consistency]
     appears_as: 拒否
-    next_action: 設定が持つ分類の語の一覧を返す。
+    next_action: 語彙の「機能の分類」の語を返す。
 
   - name: パッケージの仮説の状態の語彙
-    watches: パッケージ定義の仮説の状態（末尾の括弧書きの注を落とした語）が、設定ファイルが持つ仮説の状態の語の一覧にあるか。
+    watches: パッケージ定義の仮説の状態（末尾の括弧書きの注を落とした語）が、語彙の「パッケージの仮説の状態」にあるか。
     enforced_by: [check_consistency]
     appears_as: 検出
-    next_action: 設定が持つ仮説の状態の語の一覧を返す。
+    next_action: 語彙の「パッケージの仮説の状態」の語を返す。
 
   - name: 決めの適用範囲の語彙
-    watches: 売り方の決めの適用範囲（末尾の括弧書きの注を落とした語）が、「全体」か、設定ファイルが持つ媒体の名前か決めの適用先の語のどれかか。
+    watches: 売り方の決めの適用範囲（末尾の括弧書きの注を落とした語）が、「全体」か、語彙の媒体の名前か決めの適用先の語のどれかか。
     enforced_by: [check_consistency]
     appears_as: 検出
-    next_action: 「全体」と、設定が持つ媒体の名前と決めの適用先の語の一覧を返す。
+    next_action: 「全体」と、語彙の媒体の名前と決めの適用先の語の一覧を返す。
 
   - name: 由来の節の実在
     watches: 公開記録の由来の節に書いた ID が、職歴の枠か受託案件の ID として実在するか。

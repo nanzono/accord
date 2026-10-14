@@ -21,6 +21,7 @@
 - [経歴の正本は accord の持ち物にし、AI のセッションは操作だけで読み書きする](0013-read-and-write-the-source-only-through-accord.md) — 採用 / 2026-10-13
 - [説明書に、操作の流れをシーケンス図で載せる](0014-show-the-flows-as-sequence-diagrams-in-the-readme.md) — 採用 / 2026-10-14
 - [経歴のファイルを直接直す道を閉じ、どの変更も accord の操作で行う](0015-close-every-direct-edit-path-with-accord-operations.md) — 採用 / 2026-10-14
+- [設定ファイルを廃止し、accord の形を 1 つに固定する](0016-drop-the-settings-file-and-fix-one-form.md) — 採用 / 2026-10-14
 
 ## 記録の扱い
 

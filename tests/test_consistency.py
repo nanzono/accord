@@ -32,7 +32,7 @@ PRIVATE_DISCLOSURE = (
 )
 EXCEPTION_ENTRY = (
     "- 例外: なし",
-    "- 例外: presentations/tsukikusa/profile.md — 媒体側の審査待ちで、次の更新まで旧い束のまま残す",
+    "- 例外: tsukikusa/profile.md — 媒体側の審査待ちで、次の更新まで旧い束のまま残す",
 )
 
 # 第 2 のサンプルが持つ、正本に実在するが読み取り範囲の外にある節と、その居場所。
@@ -40,7 +40,7 @@ OUT_OF_RANGE_ID = "study-group-host"
 OUT_OF_RANGE_SECTION = "社外の勉強会の運営"
 OUT_OF_RANGE_PARENT = "職歴の外の活動"
 OUT_OF_RANGE_LEVEL = 3
-OUT_OF_RANGE_RULE_KEY = "under_headings"
+OUT_OF_RANGE_RULE_KEY = "束ねる見出し"
 
 # 第 2 のサンプルの受託案件のブロックと、そこから 1 行消す必須の欄。
 UNREADABLE_SECTION = "ナギサ書房 刊行計画の進行管理"
@@ -59,7 +59,9 @@ POINT_LEDGER_AT = (
 
 # 欄を 1 つも持たない提示物を写しに置くときの、件数と中身。
 FIELDLESS_PRESENTATION_COUNT = 40
-FIELDLESS_PRESENTATION_BODY = "# 下書き\n\n本文だけで、欄を 1 つも持たない。\n"
+# 宣言する束の行だけを持ち、ほかの必須の欄（宛先の媒体）を欠いた提示物。宣言を持つので提示物として読まれ、
+# 欄が足りない断りになる。
+FIELDLESS_PRESENTATION_BODY = "# 下書き\n\n- 宣言する束: requirements-and-progress\n\n本文だけで、宛先の欄を持たない。\n"
 
 EVIDENCE_SECTION_EXISTS = "裏づけ節名の実在"
 ID_FORMAT = "ID の形式"
@@ -151,7 +153,7 @@ def test_REQ_012_check_consistency_detects_outdated_offering_claim(settings) -> 
     outdated = [v for v in report.violations if v.constraint == OUTDATED_OFFERING_CLAIM]
     assert len(outdated) == 1, [v.model_dump() for v in report.violations]
     violation = outdated[0]
-    assert violation.file == "presentations/tsukikusa/profile.md"
+    assert violation.file == "tsukikusa/profile.md"
     assert violation.candidates == [HEADLINE_PACKAGE]
     assert HEADLINE_PACKAGE in violation.expected
 
@@ -167,7 +169,7 @@ def test_REQ_013_check_consistency_skips_claim_listed_as_exception(settings) -> 
     report = _report(settings)
 
     outdated = [v for v in report.violations if v.constraint == OUTDATED_OFFERING_CLAIM]
-    assert [v.file for v in outdated] == ["presentations/nagiho/skill_sheet.md"]
+    assert [v.file for v in outdated] == ["nagiho/skill_sheet.md"]
 
 
 def test_REQ_019_check_consistency_detects_private_source_section_in_ledger(settings) -> None:
@@ -203,7 +205,7 @@ def test_REQ_020_check_consistency_detects_dangling_pending_note(settings) -> No
         v
         for v in report.violations
         if v.constraint == NOTE_AND_SOURCE_SECTION_EXISTS
-        and v.file == "presentations/nagiho/skill_sheet.md"
+        and v.file == "nagiho/skill_sheet.md"
     ]
     assert len(dangling) == 1, [v.model_dump() for v in report.violations]
     assert "nagisa-publishing" in dangling[0].candidates
@@ -255,7 +257,7 @@ def test_REQ_024_check_consistency_names_a_capability_row_that_lost_a_field(sett
 
     listed = "\n".join(report.notes)
     assert settings.files["capabilities"] in listed, listed
-    assert "決めて、進める" in listed, listed
+    assert "決まりごとを動かす" in listed, listed
     assert "裏づけの節" in listed, listed
 
 
@@ -271,7 +273,7 @@ def test_REQ_010_check_consistency_lists_existing_scopes_for_an_unknown_name(set
     report = _report(settings, "shiokaze")
 
     listed = "\n".join(report.notes)
-    for name in ["全体", *settings.channels, "presentations/tsukikusa/profile.md"]:
+    for name in ["全体", *settings.channels, "tsukikusa/profile.md"]:
         assert name in listed, listed
 
 
@@ -284,7 +286,7 @@ def test_REQ_007_check_consistency_narrows_to_one_channel(settings) -> None:
     report = _report(settings, "nagiho")
 
     assert report.scope == "nagiho"
-    assert [v.file for v in report.violations] == ["presentations/nagiho/skill_sheet.md"]
+    assert [v.file for v in report.violations] == ["nagiho/skill_sheet.md"]
 
 
 def test_REQ_008_narrowed_scope_says_what_was_not_looked_at(settings) -> None:
@@ -368,7 +370,7 @@ def test_REQ_024_check_consistency_names_a_positioning_block_that_lost_a_field(s
 
     listed = "\n".join(report.notes)
     assert settings.files["positioning"] in listed, listed
-    assert "2026-09-10 全体" in listed, listed
+    assert "2026-09-10 見本の決め" in listed, listed
     assert "日付" in listed, listed
     assert "record_positioning" in listed, listed
 
@@ -407,15 +409,15 @@ def test_REQ_460_report_carries_the_config_name_and_version_and_source_location(
 
     provenance = report.provenance
     assert provenance is not None, report.model_dump()
-    config = settings.config_path.resolve()
-    assert provenance.config_name == f"{config.parent.name}/{config.name}"
+    data = settings.source_dir.resolve()
+    assert provenance.config_name == f"{data.name}/vocabulary.md"
     assert provenance.module_path == str(Path(accord.__file__).resolve().parent)
     assert provenance.version != ""
 
     as_json = report.model_dump_json()
     assert as_json.count(provenance.config_name) >= 1
     assert as_json.count(provenance.module_path) >= 1
-    assert str(config.parent) not in as_json
+    assert str(settings.source_dir.parent) not in as_json
 
 
 def test_REQ_005_reading_keys_say_default_when_the_config_has_no_reading_section(
@@ -426,21 +428,6 @@ def test_REQ_005_reading_keys_say_default_when_the_config_has_no_reading_section
 
     assert report.provenance is not None
     assert report.provenance.reading == ["既定"]
-
-
-def test_REQ_006_reading_keys_list_every_key_written_in_the_config(alt_settings) -> None:
-    """読み方の節を持つ設定では、設定に実際に書かれた鍵が、節と欄をつないだ形で並ぶ。"""
-    report = _report(alt_settings)
-
-    assert report.provenance is not None
-    applied = report.provenance.reading
-    assert len(applied) >= 10, applied
-    for key in (
-        "reading.career.heading_levels",
-        "reading.presentations.directories",
-        "reading.labels",
-    ):
-        assert key in applied, applied
 
 
 # ---------------------------------------------------------------- 注記の束ね
@@ -600,18 +587,6 @@ def _url_violations(report) -> list:
     return [v for v in report.violations if v.constraint == PRESENTATION_URL_MATCHES]
 
 
-def _without_public_records(settings):
-    """写しの設定から、公開記録の置き場と語彙の 3 行を抜いて読み直す。"""
-    from accord.vocabulary.settings import load_settings
-
-    path: Path = settings.config_path
-    lines = path.read_text(encoding="utf-8").splitlines()
-    kept = [line for line in lines if not line.startswith(PUBLIC_RECORD_SETTING_LINES)]
-    assert len(kept) == len(lines) - 3, "写しの設定から抜く 3 行が見つからない"
-    path.write_text("\n".join(kept) + "\n", encoding="utf-8")
-    return load_settings(path)
-
-
 def test_REQ_023_origin_section_that_does_not_exist_is_listed_as_a_violation(settings) -> None:
     """公開記録の由来の節が実在しないと、公開記録の正本のどのブロックかを名指しで挙げる。"""
     before = len(_report(settings).violations)
@@ -642,7 +617,7 @@ def test_REQ_030_presentation_url_missing_from_the_source_is_a_violation_with_cl
     urls = _url_violations(report)
     assert len(urls) == 1, [v.model_dump() for v in report.violations]
     violation = urls[0]
-    assert violation.file == "presentations/tsukikusa/profile.md"
+    assert violation.file == "tsukikusa/profile.md"
     assert UNKNOWN_URL in violation.location
     assert "register_public_record" in violation.expected
     # 違反の文だけで登記に行けるよう、必ず渡す欄の名前を正本の必須の別から引いて確かめる
@@ -709,29 +684,6 @@ def test_REQ_034_url_on_a_host_without_any_public_record_is_not_compared(setting
     urls = _url_violations(_report(settings))
     assert len(urls) == 1, [violation.model_dump() for violation in urls]
     assert OTHER_HOST_URL in urls[0].location
-
-
-def test_REQ_035_without_the_public_record_file_urls_are_not_compared(settings) -> None:
-    """公開記録の置き場を書いていない設定では、正本に無い URL を書いても違反にしない。"""
-    _rewrite(_profile(settings), RECORD_URL, UNKNOWN_URL)
-    plain = _without_public_records(settings)
-
-    report = _report(plain)
-
-    assert _url_violations(report) == []
-
-
-def test_REQ_036_without_the_public_record_file_a_note_names_the_keys_to_add(settings) -> None:
-    """公開記録の置き場を書いていない設定では、照合させるために足す鍵の名前を断りに返す。"""
-    _rewrite(_profile(settings), RECORD_URL, UNKNOWN_URL)
-    plain = _without_public_records(settings)
-
-    report = _report(plain)
-
-    listed = "\n".join(report.notes)
-    assert "公開記録の置き場が設定に無い" in listed, listed
-    for key in ("public_records", "public_record_kinds", "public_record_roles"):
-        assert key in listed, listed
 
 
 def test_REQ_037_public_record_not_carried_by_any_presentation_is_not_a_violation(
@@ -828,7 +780,7 @@ def _check_one_public_record_word_outside_the_vocabulary(
     assert label in violation.location, violation.location
     assert violation.candidates == getattr(settings, vocabulary_attribute)
     assert written in violation.expected, violation.expected
-    assert vocabulary_attribute in violation.expected, violation.expected
+    assert "vocabulary.md" in violation.expected, violation.expected
 
 
 def test_REQ_368_public_record_kind_outside_the_vocabulary_is_listed_as_a_violation(
@@ -880,14 +832,14 @@ def test_REQ_040_capability_category_outside_the_vocabulary_is_listed_as_a_viola
     assert OUTSIDE_CATEGORY_CAPABILITY in violation.location, violation.location
     assert violation.candidates == settings.capability_categories
     assert OUTSIDE_CATEGORY in violation.expected, violation.expected
-    assert "capability_categories" in violation.expected, violation.expected
+    assert "機能の分類" in violation.expected, violation.expected
 
 
 def test_REQ_002_untouched_samples_have_no_vocabulary_violation(settings, alt_settings) -> None:
-    """書き方の違う 2 つの同梱サンプルは、どちらも語彙の照合で違反が出ない（0 件のまま）。"""
+    """同梱の見本は、語彙の照合で違反が出ない（0 件のまま）。"""
     for target in (settings, alt_settings):
         report = _report(target)
-        assert [v.model_dump() for v in report.violations] == [], target.config_path.name
+        assert [v.model_dump() for v in report.violations] == [], target.source_dir.name
 
 
 # ---------------------------------------------------------------- 範囲の絞りと、束ねる機能
@@ -924,7 +876,7 @@ UNKNOWN_URL_TWICE = (
 
 # 提示物 1 件を範囲に渡すときの、ファイル名とその相対パス。
 ONE_PRESENTATION_NAME = "skill_sheet.md"
-ONE_PRESENTATION_PATH = "presentations/nagiho/skill_sheet.md"
+ONE_PRESENTATION_PATH = "nagiho/skill_sheet.md"
 
 
 def test_REQ_041_bundled_capability_missing_from_the_ledger_is_a_violation(settings) -> None:
@@ -1031,7 +983,7 @@ FRAME_BODY_EDIT = (
     "- やったこと: 3 社の案件を、相談の受けから運用の引き渡しまで 1 人で受け持った。",
 )
 # 第 1 のサンプルの台帳の案件 2 の、出典の指紋の行。
-ENTRY_2_FINGERPRINT_LINE = "- 出典の指紋: yukinoha-quality=a0c2d25e\n"
+ENTRY_2_FINGERPRINT_LINE = "- 出典の指紋: yukinoha-quality=af00a98b\n"
 # 第 2 のサンプルの台帳のうち、案件でも在籍職歴の枠でもない 2 つの節。
 UNREAD_LEDGER_HEADINGS = ("台帳の使い方", "出典の節の決め方")
 UNREAD_NOTE_MARK = "読み方の絞りで外れたので読んでいない"
@@ -1099,7 +1051,7 @@ def test_REQ_387_a_copy_without_a_fingerprint_is_an_unconfirmed_copy(settings) -
     assert len(stale) == 1, [item.model_dump() for item in stale]
     assert "案件番号 2" in stale[0].location, stale[0].location
     assert "未確認" in stale[0].expected, stale[0].expected
-    assert "出典の指紋: yukinoha-quality=a0c2d25e" in stale[0].expected, stale[0].expected
+    assert "出典の指紋: yukinoha-quality=af00a98b" in stale[0].expected, stale[0].expected
 
 
 def test_REQ_388_matching_fingerprints_raise_nothing(settings, alt_settings) -> None:
@@ -1166,15 +1118,10 @@ def test_REQ_390_an_unreadable_source_is_not_judged_for_freshness(settings) -> N
 
 def test_REQ_390_a_source_in_an_unreadable_file_is_not_judged_for_freshness(settings) -> None:
     """出典の節の正本そのものが読めていないときも、写しの鮮度は判定しない。"""
-    config = settings.config_path
-    text = config.read_text(encoding="utf-8")
-    config.write_text(
-        text.replace('engagements = "engagements.md"', 'engagements = "no_such.md"', 1),
-        encoding="utf-8",
-    )
-    from accord.vocabulary.settings import load_settings
+    career = settings.path_for("engagements")
+    career.rename(career.with_name("moved_away.md"))
 
-    assert _freshness(_report(load_settings(config))) == []
+    assert _freshness(_report(settings)) == []
 
 
 def _declare_sources(path: Path, sources: str, fingerprints: str | None) -> None:
@@ -1193,7 +1140,7 @@ def test_REQ_391_a_declared_presentation_is_judged_like_a_ledger_block(settings)
 
     stale = _freshness(_report(settings))
 
-    assert [item.file for item in stale] == ["presentations/nagiho/skill_sheet.md"]
+    assert [item.file for item in stale] == ["nagiho/skill_sheet.md"]
     assert "nagisa-publishing" in stale[0].expected, stale[0].expected
     assert f"出典の指紋: nagisa-publishing={current}" in stale[0].expected, stale[0].expected
 
@@ -1211,7 +1158,7 @@ def test_REQ_391_a_declared_presentation_with_the_current_fingerprint_is_fresh(s
 
     stale = _freshness(_report(settings))
 
-    assert [item.file for item in stale] == ["presentations/tsukikusa/profile.md"]
+    assert [item.file for item in stale] == ["tsukikusa/profile.md"]
     assert "未確認" in stale[0].expected, stale[0].expected
 
 
@@ -1239,7 +1186,7 @@ def test_REQ_393_a_presentation_source_that_does_not_exist_is_a_violation(settin
         item
         for item in report.violations
         if item.constraint == NOTE_AND_SOURCE_SECTION_EXISTS
-        and item.file == "presentations/nagiho/skill_sheet.md"
+        and item.file == "nagiho/skill_sheet.md"
     ]
     assert len(dangling) == 1, [item.model_dump() for item in report.violations]
     assert "nagisa-publishing" in dangling[0].candidates, dangling[0].candidates
@@ -1262,6 +1209,17 @@ def test_REQ_394_unread_ledger_sections_are_listed_in_one_note(alt_settings) -> 
 
 def test_REQ_395_no_unread_note_when_every_ledger_section_is_read(settings) -> None:
     """台帳の読み方の深さの節をすべて読んだときは、読まなかった節の断りを書かない。"""
+    ledger = settings.path_for("resume_ledger")
+    lines = ledger.read_text(encoding="utf-8").splitlines(keepends=True)
+    kept: list[str] = []
+    dropping = False
+    for line in lines:
+        if line.startswith("## "):
+            dropping = not line[3:].startswith(("案件", "枠"))
+        if not dropping:
+            kept.append(line)
+    ledger.write_text("".join(kept), encoding="utf-8")
+
     report = _report(settings)
 
     assert [note for note in report.notes if UNREAD_NOTE_MARK in note] == []
@@ -1298,7 +1256,6 @@ def _append_to_block(path: Path, heading: str, line: str) -> None:
 @pytest.mark.parametrize(
     ("which", "heading", "fingerprint_prefix"),
     [
-        ("settings", "案件 2 品質記録の集約と見える化", "- 出典の指紋: yukinoha-quality="),
         ("alt_settings", "案件2｜品質記録の集約と見える化", "- 出典の指紋: yukinoha-quality="),
         ("alt_settings", FRAME_HEADING, f"- 出典の指紋: {FRAME_ID}="),
     ],

@@ -19,7 +19,7 @@ EXPECTED_TOOLS = set(TOOL_NAMES)
 def _listed_names(settings) -> list[str]:
     """`accord --list` を呼び、終了コードと出力の行を返す。"""
     completed = subprocess.run(
-        [sys.executable, "-m", "accord", "--config", str(settings.config_path), "--list"],
+        [sys.executable, "-m", "accord", "--data", str(settings.source_dir), "--presentations", str(settings.presentations_dir), "--list"],
         capture_output=True,
         text=True,
     )
@@ -62,7 +62,7 @@ def test_REQ_337_the_server_opens_one_resource(settings) -> None:
 def test_REQ_338_listing_the_names_exits_zero(settings) -> None:
     """`accord --list` が終了コード 0 で終わる。"""
     completed = subprocess.run(
-        [sys.executable, "-m", "accord", "--config", str(settings.config_path), "--list"],
+        [sys.executable, "-m", "accord", "--data", str(settings.source_dir), "--presentations", str(settings.presentations_dir), "--list"],
         capture_output=True,
         text=True,
     )

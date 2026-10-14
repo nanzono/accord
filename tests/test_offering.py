@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+import re
+
 from datetime import date
 from pathlib import Path
 
@@ -67,7 +69,7 @@ CLOSE_CAPABILITY_NAME = "決まったことを段取りに落とす"
 QUOTED_EVIDENCE_ID = "teramina-warehouse"
 QUOTED_CAPABILITY = "plan-from-sketches"
 
-# 設定の語の一覧に無い、仮説の状態。
+# 語彙に無い、仮説の状態。
 UNKNOWN_HYPOTHESIS_STATE = "だいたい実績あり"
 
 # 型の正本のルールの名前。断りと警告にそのまま出る。
@@ -75,24 +77,6 @@ ID_FORMAT = "ID の形式"
 CAPABILITY_CATEGORY_VOCABULARY = "機能の分類の語彙"
 SOURCE_AND_EVIDENCE_DISCLOSURE = "出典と裏づけの節の公開可否"
 
-CONFIG_TEMPLATE = """[source]
-directory = "source"
-
-[source.files]
-positioning = "positioning.md"
-packages = "packages.md"
-capabilities = "capabilities.md"
-career = "career.md"
-engagements = "engagements.md"
-resume_ledger = "resume_ledger.md"
-presentations = "presentations"
-presentation_rules = "presentation_rules.md"
-
-[vocabulary]
-channels = ["tsukikusa", "nagiho"]
-capability_categories = [{categories}]
-package_hypothesis_states = ["仮説のみ", "検証中", "実績あり"]
-"""
 
 
 def _rewrite(path: Path, old: str, new: str) -> None:
@@ -102,10 +86,17 @@ def _rewrite(path: Path, old: str, new: str) -> None:
     path.write_text(text.replace(old, new, 1), encoding="utf-8")
 
 
-def _rewrite_categories(config_path: Path, categories: list[str]) -> None:
-    """設定ファイルの分類の 5 節を、別の語に差し替える。"""
-    listed = ", ".join(f'"{name}"' for name in categories)
-    config_path.write_text(CONFIG_TEMPLATE.format(categories=listed), encoding="utf-8")
+def _rewrite_categories(sample_copy: Path, categories: list[str]) -> None:
+    """写しの語彙（vocabulary.md）の機能の分類の語を、別の語に差し替える。"""
+    path = sample_copy / "data" / "vocabulary.md"
+    text = path.read_text(encoding="utf-8")
+    listed = "".join(f"- {name}\n" for name in categories)
+    text = re.sub(r"(## 機能の分類\n\n)(?:- .*\n)+", lambda m: m.group(1) + listed, text, count=1)
+    path.write_text(text, encoding="utf-8")
+
+
+def _load(sample_copy: Path):
+    return load_settings(sample_copy / "data", sample_copy / "presentations")
 
 
 def _rejection_of(result: WriteResult) -> Rejection:
@@ -155,11 +146,10 @@ def _missing_fields_result(settings) -> WriteResult:
 
 def _old_category_result(sample_copy: Path) -> tuple[WriteResult, str]:
     """設定の分類を差し替えた後に、差し替え前の分類で登記を試み、返り値とその分類を返す。"""
-    config_path = sample_copy / "accord.toml"
-    before = load_settings(config_path)
+    before = _load(sample_copy)
     old_category = before.capability_categories[0]
-    _rewrite_categories(config_path, OTHER_CATEGORIES)
-    after = load_settings(config_path)
+    _rewrite_categories(sample_copy, OTHER_CATEGORIES)
+    after = _load(sample_copy)
     heading = MarkdownRepository(after).load().section_headings()[-1]
     result = OfferingService(after).register_capability(
         CapabilityDraft(
@@ -234,13 +224,12 @@ def _hypothesis_state_result(settings) -> WriteResult:
 
 def test_REQ_109_capability_categories_come_from_settings(sample_copy: Path) -> None:
     """分類の 5 節を設定で差し替えると、受け付ける分類もコードを直さずに変わる。"""
-    config_path = sample_copy / "accord.toml"
-    before = load_settings(config_path)
+    before = _load(sample_copy)
     old_category = before.capability_categories[0]
     assert old_category not in OTHER_CATEGORIES
 
-    _rewrite_categories(config_path, OTHER_CATEGORIES)
-    after = load_settings(config_path)
+    _rewrite_categories(sample_copy, OTHER_CATEGORIES)
+    after = _load(sample_copy)
     assert after.capability_categories == OTHER_CATEGORIES
 
     heading = MarkdownRepository(after).load().section_headings()[-1]

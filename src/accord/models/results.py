@@ -432,17 +432,17 @@ class Material(BaseModel):
 
 
 class Provenance(BaseModel):
-    """この検査が、どの設定を、どの読み方で、どの版の accord で走ったか。
+    """この検査が、どの置き場の語彙を、どの読み方で、どの版の accord で走ったか。
 
     版番号だけでは足りない。入れ直していない古い環境と、直したばかりのソースが、同じ版番号を
     名乗ることがあるからである。見分けがつくのは、実際に動いているソースの置き場である。
     """
 
     config_name: str = Field(
-        description="読んだ設定ファイルの名前（親のディレクトリの名前と設定ファイルの名前。絶対パスは出さない）"
+        description="読んだ語彙のファイルの名前（置き場のディレクトリの名前と vocabulary.md。絶対パスは出さない）"
     )
     reading: list[str] = Field(
-        default_factory=list, description="適用した [reading] の鍵。1 つも無ければ「既定」"
+        default_factory=list, description="適用した読み方。accord の形の 1 通りなので、いつも「既定」"
     )
     version: str = Field(default="", description="accord の版")
     module_path: str = Field(description="実際に動いている accord のソースの置き場（絶対パス）")
@@ -452,11 +452,11 @@ class ConsistencyReport(BaseModel):
     """整合検査の返り値。違反の一覧と、違反ではない断りを持つ。
 
     足跡（provenance）を欄の宣言の先頭に置くのは、JSON にしたときに先頭に出るのが宣言の順
-    だからである。読んだ側が、まず「どの設定を、どのソースが読んだか」を目にする形にする。
+    だからである。読んだ側が、まず「どの置き場を、どのソースが読んだか」を目にする形にする。
     """
 
     provenance: Provenance | None = Field(
-        default=None, description="どの設定を、どの読み方で、どの版の accord が読んだか"
+        default=None, description="どの置き場の語彙を、どの読み方で、どの版の accord が読んだか"
     )
     scope: str = Field(default="全体", description="検査した範囲")
     violations: list[Violation] = Field(default_factory=list, description="違反の一覧")
@@ -501,8 +501,8 @@ class SkippedHeading(BaseModel):
     """正本のファイルにあるが、その正本の読み方では読んでいない見出し 1 つ。
 
     指された見出しが読めていないとき、それが「どこにも無い」のか「実在するが読み取り範囲の
-    外にある」のかで、直し先が正反対になる。前者は指す側の名前を直し、後者は設定の絞りを
-    広げるか正本の節を動かす。その言い分けをするために、外れた見出しを居場所つきで持ち帰る。
+    外にある」のかで、直し先が正反対になる。前者は指す側の名前を直し、後者は正本の節を
+    読み取り範囲の中へ動かす。その言い分けをするために、外れた見出しを居場所つきで持ち帰る。
     """
 
     source_key: str = Field(
@@ -608,7 +608,7 @@ class SourceSnapshot(BaseModel):
 class SourceSection(BaseModel):
     """正本のファイルの節 1 つ。読み書きの層が返し、節の読み書きのサービスがこれだけを見て判断する。"""
 
-    file: str = Field(description="設定に書いたファイルの名前")
+    file: str = Field(description="正本のファイルの名前（accord の形の名前）")
     heading_path: str = Field(description="見出しの道筋")
     heading: str = Field(default="", description="見出しの文字（# と前後の空白を含まない）")
     heading_line: str = Field(description="見出しの行そのもの（# を含む）")
@@ -625,7 +625,7 @@ class SourceSection(BaseModel):
 class SectionEntry(BaseModel):
     """節の一覧の 1 行。"""
 
-    file: str = Field(description="設定に書いたファイルの名前")
+    file: str = Field(description="正本のファイルの名前（accord の形の名前）")
     heading_path: str = Field(description="見出しの道筋")
     fingerprint: str = Field(description="本文の指紋（節を書き換えるときに渡す）")
     chars: int = Field(description="本文の字数")
@@ -667,7 +667,7 @@ class SectionText(BaseModel):
 class FactHit(BaseModel):
     """事実の検索で当たった行 1 つ。"""
 
-    file: str = Field(description="設定に書いたファイルの名前")
+    file: str = Field(description="正本のファイルの名前（accord の形の名前）")
     heading_path: str = Field(description="その行がある節の見出しの道筋（最初の見出しより前なら空）")
     line: str = Field(description="当たった行の文")
 

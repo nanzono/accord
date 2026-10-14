@@ -39,6 +39,12 @@ ID の形式と ID の一意性は [id-reference.md](id-reference.md) です。�
 - 関係するファイル: `src/accord/services/offering.py`、`src/accord/services/positioning.py`、`src/accord/services/public_records.py`
 - 検証手順: `uv run pytest tests/test_write_guards.py -k REQ_325`
 
+## REQ-513
+常に、accord は書き込みの操作で変えたファイルを、書き込み 1 件につき 1 件の git のコミットに記録し、コミットの説明に操作の名前を示す行（`Accord-Operation: <操作の名前>`）を書く。
+
+- 関係するファイル: `src/accord/services/recording.py`、`src/accord/repository/git_commits.py`
+- 検証手順: `uv run pytest tests/test_write_commits.py -k REQ_513`
+
 ## 未決の質問
 
 - この 4 件は、書きの操作が執行する制約をすべて覆っているかどうかを制約の単位で見ます。同じ制約を

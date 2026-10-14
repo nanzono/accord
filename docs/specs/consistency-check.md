@@ -45,6 +45,7 @@
 
 - 関係するファイル: `src/accord/services/consistency.py`
 - 検証手順: `uv run pytest tests/test_consistency.py -k REQ_006`
+- status: superseded by REQ-506
 
 ## REQ-007
 媒体の名前を範囲に渡されたとき、accord はその媒体の提示物だけを検査する。
@@ -219,12 +220,14 @@ URL を持たない公開記録だけが正本にあるとき、accord は提示
 
 - 関係するファイル: `src/accord/services/consistency.py`
 - 検証手順: `uv run pytest tests/test_consistency.py -k REQ_035`
+- status: superseded by REQ-505
 
 ## REQ-036
 もし設定に公開記録の置き場が無いなら、accord は URL を照合させるために設定へ足す鍵の名前を断りに書く。
 
 - 関係するファイル: `src/accord/services/consistency.py`
 - 検証手順: `uv run pytest tests/test_consistency.py -k REQ_036`
+- status: superseded by REQ-505
 
 ## REQ-037
 看板の裏づけになっている公開記録がその範囲のどの提示物にも載っていないとき、accord はそれを違反にしない。

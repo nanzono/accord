@@ -181,7 +181,7 @@ EMPTY_MARK = "なし"
 # 列の並びは「ID、機能名、説明、裏づけ」で、読み込みはこの並びに依存する。
 CAPABILITY_TABLE_HEADER = ("| ID | 機能名 | 説明 | 裏づけの節 |", "|---|---|---|---|")
 
-# ID の欄のラベル。設定の [reading.labels] で別の語に読み替えられる。
+# ID の欄のラベル。
 ID_LABEL = "ID"
 
 # 公開可否の欄のラベル。職歴の枠と受託案件が持つ。
@@ -249,29 +249,29 @@ def _skip_reasons(section: Section, above: list[str], rule: BlockRule) -> list[s
     """その節が、読み方のどの絞りに当たって外れたかを並べる。1 つも当たらなければ空の一覧。
 
     絞りは select_blocks の 5 つと同じで、判定の順も同じである。当たったものを全部返すのは、
-    設定のどの鍵を広げれば読めるようになるかを、理由の文だけで言い切るためである。
+    accord の形のどの決まりに合わせれば読めるようになるかを、理由の文だけで言い切るためである。
     """
     reasons: list[str] = []
     if section.level not in set(rule.heading_levels):
         levels = " / ".join(str(item) for item in rule.heading_levels)
-        reasons.append(f"深さ {section.level} が heading_levels（{levels}）に無い")
+        reasons.append(f"深さ {section.level} が、accord の形の見出しの深さ（{levels}）に無い")
     if rule.under_headings and not any(name in rule.under_headings for name in above):
         parents = "、".join(above) if above else "上位の見出しなし"
         wanted = " / ".join(rule.under_headings)
-        reasons.append(f"上位の見出し（{parents}）に under_headings（{wanted}）の名前が無い")
-    skipped = [name for name in (section.heading, *above) if name in rule.skip_headings]
-    if skipped:
-        reasons.append(f"skip_headings に挙げた見出し（{' / '.join(skipped)}）の中にある")
+        reasons.append(f"上位の見出し（{parents}）に、束ねる見出し「{wanted}」が無い")
     if not prefix_matches(section.heading, rule):
         if rule.frame_heading_prefix:
             reasons.append(
-                f"heading_prefix「{rule.heading_prefix}」でも、"
-                f"frame_heading_prefix「{rule.frame_heading_prefix}」でも始まっていない"
+                f"見出しが「{rule.heading_prefix}」でも「{rule.frame_heading_prefix}」でも始まっていない"
             )
         else:
-            reasons.append(f"heading_prefix「{rule.heading_prefix}」で始まっていない")
+            reasons.append(f"見出しが「{rule.heading_prefix}」で始まっていない")
     if rule.skip_sections_without_fields and not read_fields(section, rule):
         reasons.append("欄を 1 つも持たないので、束ねるための見出しとして読み飛ばしている")
+    if rule.skip_sections_without_labels and not (
+        set(rule.skip_sections_without_labels) & set(read_fields(section, rule))
+    ):
+        reasons.append("型の欄を 1 つも持たないので、覚え書きの節として読み飛ばしている")
     return reasons
 
 
@@ -350,17 +350,16 @@ class MarkdownRepository:
         return path.read_text(encoding="utf-8")
 
     def _rule(self, key: str) -> BlockRule:
-        """正本 1 種の読み方を返す。設定に書き方の節が無ければ、第 1 版と同じ読み方になる。"""
+        """正本 1 種の読み方を返す。読み方は accord の形が決める。"""
         return self.settings.reading.rule_for(key)
 
     def _blocks(self, key: str) -> tuple[list[Section], BlockRule]:
         """正本 1 種を読み、その正本の読み方で選んだ節と、読み方そのものを返す。
 
         職歴の枠と受託案件のように、1 つのファイルを 2 種の正本として読むこともある。
-        設定の `[source.files]` に同じファイル名を書き、見出しの深さで分ける。
+        accord の形では同じファイルを指し、見出しの深さで分ける。
         """
         rule = self._rule(key)
-        # spec: REQ-058
         return select_blocks(split_sections(self._read(key)), rule), rule
 
     def _blocks_in(self, key: str, text: str) -> list[Section]:
@@ -814,17 +813,14 @@ class MarkdownRepository:
                 name: fields.get(label) for label, name in LEDGER_LABELS.items()
             }
             is_frame = is_frame_heading(block.heading, rule)
-            # spec: REQ-375
             values["kind"] = LEDGER_KIND_FRAME if is_frame else LEDGER_KIND_ENTRY
             values["heading"] = block.heading
             values["fold_line"] = _optional(values.get("fold_line"))
             values["source_fingerprints"] = parse_fingerprints(
                 str(values.get("source_fingerprints") or "")
             )
-            # spec: REQ-062
             if rule.entry_number_from_heading:
                 # 案件番号を欄ではなく見出しの数字で持つ書き方。欄があればそちらを優先しない。
-                # spec: REQ-378
                 prefix = rule.frame_heading_prefix if is_frame else rule.heading_prefix
                 number = leading_number(block.heading, prefix)
                 if number:
@@ -864,22 +860,19 @@ class MarkdownRepository:
     def _presentation_files(self) -> list[Path]:
         """提示物として読む Markdown を集める。
 
-        置き場の一覧が設定にあれば、その一覧のディレクトリの下だけをたどる。無ければ、
-        設定が提示物として指したディレクトリの下を全部たどる（第 1 版と同じ）。
-        媒体ディレクトリの下に、提示物でないファイルが同居している正本があるためである。
+        提示物の置き場の下の、語彙の媒体と同じ名前のディレクトリだけをたどる。媒体ディレクトリの
+        下には、提示物でないファイルも同居するので、宣言の行で絞るのは読む側である。
+        提示物の置き場が起動の引数で渡されていなければ、提示物は 0 件である。
         """
-        # spec: REQ-065
-        names = self.settings.reading.presentation_directories
-        # spec: REQ-398
-        roots = (
-            [self.settings.presentations_dir / name for name in names]
-            if names
-            else [self.settings.path_for("presentations")]
-        )
+        # spec: REQ-504
+        if self.settings.presentations_dir is None:
+            return []
+        root = self.settings.path_for("presentations")
         found: list[Path] = []
-        for root in roots:
-            if root.is_dir():
-                found.extend(sorted(root.rglob("*.md")))
+        for name in self.settings.reading.presentation_directories:
+            directory = root / name
+            if directory.is_dir():
+                found.extend(sorted(directory.rglob("*.md")))
         return found
 
     def _load_presentations(
@@ -910,7 +903,6 @@ class MarkdownRepository:
             }
             values["path"] = relative
 
-            # spec: REQ-066
             if require_declaration and not values.get("declared_package"):
                 continue
 
@@ -1001,9 +993,10 @@ class MarkdownRepository:
         節もファイルも無ければ空の一覧を返す。
         """
         rules = self.settings.reading
-        # spec: REQ-068
         if rules.channel_rules_from == CHANNEL_RULES_PER_CHANNEL_FILE:
-            # spec: REQ-398
+            # spec: REQ-504
+            if self.settings.presentations_dir is None:
+                return []
             path = self.settings.presentations_dir / rules.channel_rules_file.replace(
                 CHANNEL_PLACEHOLDER, channel
             )
@@ -1024,7 +1017,6 @@ class MarkdownRepository:
         """
         rules = self.settings.reading
         sections = split_sections(self._read(PRESENTATION_RULES_KEY))
-        # spec: REQ-070
         if not rules.forbidden_phrases_any_level:
             sections = select_blocks(sections, self._rule(PRESENTATION_RULES_KEY))
 
@@ -1049,9 +1041,7 @@ class MarkdownRepository:
             tables = table_blocks(section.body)
             if not tables:
                 return []
-            # spec: REQ-072
             return [cells[0] for cells in tables[0] if cells and cells[0]]
-        # spec: REQ-074
         return bullet_items(section.body, first_block=True)
 
     # ------------------------------------------------------------ 正本のファイルを節で読む

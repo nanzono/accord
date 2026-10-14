@@ -1,23 +1,28 @@
-"""書き込みの記録。設定で有効にしたとき、書き込みの操作が変えた正本のファイルを git にコミットする。
+"""書き込みの記録。書き込みの操作が変えた正本のファイルを、書き込み 1 件につき 1 件の git のコミットにする。
 
 正本のファイルは、人も AI のセッションも直接触らない。accord がコミットしなければ、正本の変更の
 履歴が残らない。だから書いた操作の側で、書いたファイルだけをコミットする。accord を通さない変更が
 まだコミットされずに残っているファイルには書かない。その変更を accord のコミットに混ぜて、
 accord が書いたものとして履歴にしないためである。
 
-有効でないときは、git を 1 度も呼ばない。
+コミットの説明には、操作の名前を示す行（`Accord-Operation: <操作の名前>`）を書く。accord が書いた
+コミットと、accord を通さないコミットを、履歴から見分ける印である。置き場は起動のときに git の
+作業ツリーの根であることを確かめてあるので、記録はいつも行う。
 """
 from __future__ import annotations
 
 from accord.models.results import NextAction, Rejection
 from accord.repository.git_commits import GitCommits, GitError
-from accord.vocabulary.settings import COMMIT_WRITES_KEY, Settings
+from accord.vocabulary.settings import Settings
 
-# 断りに名乗る名前。型の正本の制約ではなく、書き込みの記録の設定が持つ決まりである。
+# 断りに名乗る名前。型の正本の制約ではなく、書き込みの記録が持つ決まりである。
 UNCOMMITTED_CHANGE = "書く前の未コミットの変更"
 
 # コミットの文の書き出し。
 COMMIT_PREFIX = "accord"
+
+# コミットの説明に置く、操作の名前を示す行の書き出し。accord のコミットの印になる。
+OPERATION_TRAILER = "Accord-Operation"
 
 
 class WriteRecorder:
@@ -29,8 +34,9 @@ class WriteRecorder:
 
     @property
     def enabled(self) -> bool:
-        """書き込みの記録が有効か。"""
-        return self.settings.commit_writes
+        """書き込みの記録が有効か。置き場はいつも git の作業ツリーの根なので、いつも有効。"""
+        # spec: REQ-513
+        return True
 
     def git(self) -> GitCommits:
         if self._git is None:
@@ -39,9 +45,6 @@ class WriteRecorder:
 
     def refusal(self, file_name: str, operation: str) -> Rejection | None:
         """書く前のファイルに未コミットの変更があれば、書かない理由を返す。無ければ None。"""
-        # spec: REQ-404
-        if not self.enabled:
-            return None
         path = self.settings.source_dir / file_name
         try:
             dirty = self.git().has_uncommitted_change(path)
@@ -72,19 +75,19 @@ class WriteRecorder:
         )
 
     def record(self, file_name: str, operation: str, summary: str) -> list[str]:
-        """書いたファイルだけをコミットし、知らせの行を返す。無効なら何もしない。"""
-        # spec: REQ-404
-        if not self.enabled:
-            return []
+        """書いたファイルだけを 1 件のコミットにし、知らせの行を返す。"""
         path = self.settings.source_dir / file_name
-        message = f"{COMMIT_PREFIX}: {operation} {file_name}（{summary}）"
+        # spec: REQ-513
+        message = (
+            f"{COMMIT_PREFIX}: {operation} {file_name}（{summary}）\n\n"
+            f"{OPERATION_TRAILER}: {operation}"
+        )
         try:
-            # spec: REQ-403
             commit = self.git().commit_file(path, message)
         except GitError as error:
             return [
                 f"{file_name} に書いたが、git へのコミットが通らなかった（{error}）。"
-                f"設定 {COMMIT_WRITES_KEY} が有効なのに、この書き込みは履歴に残っていない。"
+                "この書き込みは履歴に残っていない。"
                 "このことを依頼した人に伝える。"
             ]
         if not commit:

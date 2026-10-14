@@ -40,7 +40,7 @@ from accord.repository.markdown_repository import (
     MarkdownRepository,
 )
 from accord.repository.sections import strip_note
-from accord.vocabulary.settings import Settings
+from accord.vocabulary.settings import VOCABULARY_FILE, Settings
 
 # 適用範囲の「全体」。媒体の名前は設定から読むが、この語だけは型の欄の定義（適用範囲は
 # 媒体の名前か「全体」）が持つ構造の語なので、設定ではなくここに置く。
@@ -188,14 +188,14 @@ def unknown_channel_notes(settings: Settings, channel: str, operation: str) -> l
     """
     notes = [
         # spec: REQ-169
-        f"媒体「{channel}」は、設定ファイル {settings.config_path.name} の媒体の一覧に無い。",
+        f"媒体「{channel}」は、語彙（{VOCABULARY_FILE}）の媒体の一覧に無い。",
         # spec: REQ-170
         "実在する媒体: " + " / ".join(settings.channels),
     ]
     if settings.positioning_targets:
         # spec: REQ-416
         notes[0] = (
-            f"「{channel}」は、設定ファイル {settings.config_path.name} の"
+            f"「{channel}」は、語彙（{VOCABULARY_FILE}）の"
             "媒体の一覧にも適用先の語にも無い。"
         )
         notes.append("実在する適用先の語: " + " / ".join(settings.positioning_targets))
@@ -205,7 +205,7 @@ def unknown_channel_notes(settings: Settings, channel: str, operation: str) -> l
 
 
 def accepted_scopes(settings: Settings) -> list[str]:
-    """決めの適用範囲に書ける語。「全体」、設定の媒体の名前、設定の適用先の語の順に並べる。"""
+    """決めの適用範囲に書ける語。「全体」、語彙の媒体の名前、語彙の決めの適用先の語の順に並べる。"""
     return [WHOLE_SCOPE, *settings.channels, *settings.positioning_targets]
 
 
@@ -359,7 +359,7 @@ class PositioningService:
             return WriteResult(accepted=False, rejection=refusal)
         # spec: REQ-179
         self.repository.append_positioning(positioning)
-        # spec: REQ-403
+        # spec: REQ-513
         notes = self.recorder.record(
             file_name, RECORD_OPERATION, f"{positioning.decided_on} {positioning.scope}"
         )
@@ -424,7 +424,7 @@ class PositioningService:
                     # spec: REQ-411
                     f"適用範囲「{draft.scope}」は、媒体の名前でも「{WHOLE_SCOPE}」でも"
                     "適用先の語でもない。"
-                    f"媒体の名前と適用先の語は設定ファイル {self.settings.config_path.name} の"
+                    f"媒体の名前と適用先の語は語彙（{VOCABULARY_FILE}）の"
                     "一覧に限る。"
                 ),
                 next_action=NextAction(
@@ -436,7 +436,7 @@ class PositioningService:
                     example=(
                         f"すべての媒体に効かせるなら「{WHOLE_SCOPE}」、"
                         "媒体 1 つに限るなら上の候補の媒体名を、媒体ではない場所"
-                        "（設定の適用先の語）に限るならその語をそのまま渡す。"
+                        "（語彙の決めの適用先の語）に限るならその語をそのまま渡す。"
                     ),
                 ),
             )

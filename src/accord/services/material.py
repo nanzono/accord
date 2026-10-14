@@ -129,7 +129,7 @@ class MaterialService:
             channel_rules: list[str] = []
             # spec: REQ-466
             warnings.append(
-                f"「{channel}」は設定の適用先の語で、媒体ではないので、媒体の規約を持たない。"
+                f"「{channel}」は語彙の決めの適用先の語で、媒体ではないので、媒体の規約を持たない。"
                 "媒体の規約は空の一覧で返した。文字数の上限や書き出しの決まりは、書く先の求めに従う。"
             )
         else:

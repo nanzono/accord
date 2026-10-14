@@ -475,12 +475,14 @@ ID のラベルを読み替える設定で呼ばれたとき、accord は読み�
 
 - 関係するファイル: `src/accord/services/consistency.py`
 - 検証手順: `uv run pytest tests/test_id_reference.py -k REQ_366`
+- status: superseded by REQ-505
 
 ## REQ-367
 もし設定に公開記録の置き場が無いなら、accord は公開記録の ID を一意性の検査に入れない。
 
 - 関係するファイル: `src/accord/services/consistency.py`
 - 検証手順: `uv run pytest tests/test_id_reference.py -k REQ_367`
+- status: superseded by REQ-505
 
 ## REQ-379
 台帳の在籍職歴の枠の出典の節が職歴の枠の ID を指しているとき、accord はその参照を違反にしない。

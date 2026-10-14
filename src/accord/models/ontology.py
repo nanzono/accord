@@ -21,7 +21,7 @@ ONTOLOGY_PATH = Path(__file__).resolve().parent.parent / "ontology.yaml"
 KIND_FIELD = "kind"
 
 # 欄の書き方の例を組み立てるときの、型ごとの見本。ontology.yaml が欄に書ける型の 5 つに対応する。
-# 値そのものの例（媒体の名前、分類の名前）は語彙なので、ここには置かず設定から取る。
+# 値そのものの例（媒体の名前、分類の名前）は語彙なので、ここには置かず語彙のファイルから取る。
 FIELD_EXAMPLES = {
     "date": "2026-09-16",
     "text": "1 行の文",

@@ -19,7 +19,6 @@ from accord.services.material import MaterialService
 from accord.services.positioning import PositioningService
 from accord.services.sections import SectionService
 from accord.services.watch import SourceWatch
-from conftest import add_config_lines
 
 # 職歴の枠の ID の行を消すと、その ID を指す裏づけと出典が読めなくなり、違反が出る。
 BROKEN_ID_LINE = "- ID: freelance-solo\n"
@@ -36,7 +35,7 @@ def _break_the_source(settings) -> None:
 def _start_server(settings) -> subprocess.CompletedProcess[str]:
     """標準入出力のサーバーを起動し、入力を閉じて終わらせる。"""
     return subprocess.run(
-        [sys.executable, "-m", "accord", "--config", str(settings.config_path)],
+        [sys.executable, "-m", "accord", "--data", str(settings.source_dir), "--presentations", str(settings.presentations_dir)],
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
@@ -79,7 +78,7 @@ def test_REQ_458_reading_a_broken_source_carries_the_notice(settings) -> None:
         SectionService(settings, watch=watch).list_sections(),
         SectionService(settings, watch=watch).read_section("freelance-solo"),
         SectionService(settings, watch=watch).search_facts("置き場"),
-        SectionService(settings, watch=watch).export_source(),
+        SectionService(settings, watch=watch).export_source(str(settings.source_dir / "export.md")),
     ]
 
     for view in views:
@@ -129,7 +128,7 @@ def test_REQ_459_an_unchanged_source_is_not_checked_again(settings, monkeypatch)
     assert calls == [None, None]
 
 
-def _call_every_tool(settings) -> list[str]:
+def _call_every_tool(settings, export_path: str = "") -> list[str]:
     """18 の操作を、書き出し先を設定した写しの上ですべて呼び、返り値の文字列を集める。"""
     server = create_server(settings)
     calls = {
@@ -208,7 +207,7 @@ def _call_every_tool(settings) -> list[str]:
             "fingerprint": "00000000",
             "reason": "置き場が返り値に出ないことを見るため",
         },
-        "export_source": {},
+        "export_source": {"path": export_path},
     }
     assert set(calls) == {tool.name for tool in asyncio.run(server.list_tools())}
     return [str(asyncio.run(server.call_tool(name, arguments))) for name, arguments in calls.items()]
@@ -216,16 +215,13 @@ def _call_every_tool(settings) -> list[str]:
 
 def test_REQ_461_no_operation_returns_the_absolute_source_location(settings, tmp_path) -> None:
     """どの操作の返り値にも、正本の置き場の絶対パスを入れない。"""
-    settings = add_config_lines(
-        settings.config_path, "source", ['export_path = "../export/all.md"']
-    )
     _break_the_source(settings)
 
-    outputs = _call_every_tool(settings)
+    outputs = _call_every_tool(settings, str(tmp_path / "export" / "all.md"))
 
     forbidden = [
         str(settings.source_dir),
-        str(settings.config_path.parent),
+        str(settings.presentations_dir),
         json.dumps(str(settings.source_dir))[1:-1],
     ]
     for output in outputs:

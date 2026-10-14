@@ -28,9 +28,10 @@ from accord.models.types import PublicRecord
 from accord.services.recording import WriteRecorder
 from accord.repository.markdown_repository import EMPTY_WORDS, MarkdownRepository
 from accord.vocabulary.settings import (
-    PUBLIC_RECORD_KINDS_KEY,
-    PUBLIC_RECORD_ROLES_KEY,
+    PUBLIC_RECORD_KINDS_KIND,
+    PUBLIC_RECORD_ROLES_KIND,
     PUBLIC_RECORDS_KEY,
+    VOCABULARY_FILE,
     Settings,
 )
 
@@ -42,10 +43,6 @@ PUBLIC_RECORD_ROLE_VOCABULARY = CONSTRAINT_BY_NAME["公開記録の役割の語�
 ORIGIN_SECTION_EXISTS = CONSTRAINT_BY_NAME["由来の節の実在"].name
 ID_FORMAT = CONSTRAINT_BY_NAME["ID の形式"].name
 ID_UNIQUENESS = CONSTRAINT_BY_NAME["ID の一意性"].name
-
-# 次の 1 つは型の正本の制約ではなく、設定に置き場が書かれているかどうかである。
-# 公開記録の置き場は書かなくてよい鍵なので、書いていない正本では登記そのものが成り立たない。
-PUBLIC_RECORDS_FILE_SETTING = "公開記録の置き場の設定"
 
 # 入力の欄を引くときの、型の名前。
 PUBLIC_RECORD_TYPE_NAME = "PublicRecord"
@@ -91,7 +88,7 @@ class PublicRecordService:
             return WriteResult(accepted=False, rejection=refusal)
         # spec: REQ-207
         self.repository.append_public_record(record)
-        # spec: REQ-403
+        # spec: REQ-513
         notes = self.recorder.record(file_name, REGISTER_OPERATION, record.id)
 
         # spec: REQ-209
@@ -104,13 +101,9 @@ class PublicRecordService:
     def _rejection(self, draft: PublicRecordDraft) -> Rejection | None:
         """入力を制約に当てる。通れば None を返し、通らなければ次の一手つきの拒否を返す。
 
-        見る順は、置き場が設定にあるか、必須の欄、ID の形、ID の重なり、種類の語彙、役割の語彙、
+        見る順は、必須の欄、ID の形、ID の重なり、種類の語彙、役割の語彙、
         由来の節の実在である。1 つ目に当たった時点で返すので、正本は 1 バイトも変わらない。
         """
-        # spec: REQ-214
-        if not self.settings.has_file(PUBLIC_RECORDS_KEY):
-            return self._missing_file_rejection()
-
         missing = missing_required_fields(PUBLIC_RECORD_TYPE_NAME, draft)
         # spec: REQ-219
         if missing:
@@ -151,31 +144,8 @@ class PublicRecordService:
 
         return self._origin_section_rejection(draft, snapshot)
 
-    def _missing_file_rejection(self) -> Rejection:
-        """公開記録の置き場が設定に無いときの拒否。足す鍵 3 つを名前で返す。"""
-        return Rejection(
-            # spec: REQ-215
-            constraint=PUBLIC_RECORDS_FILE_SETTING,
-            reason=(
-                # spec: REQ-216
-                f"設定ファイル {self.settings.config_path.name} に公開記録の置き場が無いので、"
-                "書き足す先が決まらない。この正本は公開記録を使わない正本として動いている。"
-            ),
-            next_action=NextAction(
-                # spec: REQ-217
-                operation=REGISTER_OPERATION,
-                example=(
-                    # spec: REQ-218
-                    f"設定の [source.files] に {PUBLIC_RECORDS_KEY} = "
-                    '"public_records.md" を足し、[vocabulary] に '
-                    f"{PUBLIC_RECORD_KINDS_KEY} と {PUBLIC_RECORD_ROLES_KEY} を"
-                    "（それぞれ 1 語以上の一覧で）足してから、もう一度この操作を呼ぶ。"
-                ),
-            ),
-        )
-
     def _vocabulary_rejection(self, draft: PublicRecordDraft) -> Rejection | None:
-        """種類と役割が、設定の語の一覧にあるかを見る。種類を先に見る。
+        """種類と役割が、語彙にあるかを見る。種類を先に見る。
 
         種類と役割は別のルールなので、外れた側のルールの名前を断りに入れる。
         """
@@ -186,7 +156,7 @@ class PublicRecordService:
                 "種類",
                 draft.kind,
                 self.settings.public_record_kinds,
-                PUBLIC_RECORD_KINDS_KEY,
+                PUBLIC_RECORD_KINDS_KIND,
             ),
             # spec: REQ-231
             (
@@ -194,7 +164,7 @@ class PublicRecordService:
                 "役割",
                 draft.role,
                 self.settings.public_record_roles,
-                PUBLIC_RECORD_ROLES_KEY,
+                PUBLIC_RECORD_ROLES_KIND,
             ),
         ):
             if value in words:
@@ -204,8 +174,7 @@ class PublicRecordService:
                 constraint=constraint,
                 reason=(
                     # spec: REQ-227
-                    f"{label}「{value}」は、設定ファイル {self.settings.config_path.name} の "
-                    f"{key} が持つ語の一覧に無い。"
+                    f"{label}「{value}」は、語彙（{VOCABULARY_FILE}）の「{key}」に無い。"
                 ),
                 next_action=NextAction(
                     # spec: REQ-228
@@ -216,7 +185,7 @@ class PublicRecordService:
                         # spec: REQ-230
                         f"{label}には「{words[0]}」のように、上の候補のどれかをそのまま渡す。"
                         if words
-                        else f"設定の [vocabulary] の {key} に、渡したい語を足してから呼び直す。"
+                        else f"語彙の「{key}」に、渡したい語を足してから呼び直す。"
                     ),
                 ),
             )

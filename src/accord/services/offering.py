@@ -26,7 +26,12 @@ from accord.models.results import (
 from accord.models.types import Capability, Package
 from accord.services.recording import WriteRecorder
 from accord.repository.markdown_repository import MarkdownRepository
-from accord.vocabulary.settings import Settings
+from accord.vocabulary.settings import (
+    CAPABILITY_CATEGORIES_KIND,
+    PACKAGE_HYPOTHESIS_STATES_KIND,
+    VOCABULARY_FILE,
+    Settings,
+)
 
 # 制約は名前で参照する。名前を正本（ontology.yaml）で変えたら、ここで鍵が見つからず落ちる。
 CONSTRAINT_BY_NAME = {constraint.name: constraint for constraint in CONSTRAINTS}
@@ -38,7 +43,7 @@ SOURCE_AND_EVIDENCE_DISCLOSURE = CONSTRAINT_BY_NAME["出典と裏づけの節の
 CAPABILITY_CATEGORY_VOCABULARY = CONSTRAINT_BY_NAME["機能の分類の語彙"].name
 
 # 次の 3 つは型の正本の制約ではなく、型 Capability と型 Package の欄の定義である
-# （選べる仮説の状態の語は設定が持つ）。
+# （選べる仮説の状態の語は語彙が持つ）。
 CAPABILITY_REQUIRED_FIELDS = "機能の必須欄"
 PACKAGE_HYPOTHESIS_STATE_ENUM = "仮説の状態の列挙"
 PACKAGE_REQUIRED_FIELDS = "パッケージの必須欄"
@@ -113,7 +118,7 @@ class OfferingService:
                     # spec: REQ-123
                     reason=(
                         f"分類「{draft.category}」は機能の台帳の節に無い。"
-                        f"分類は設定ファイル {self.settings.config_path.name} が持つ節の名前に限る。"
+                        f"分類は語彙（{VOCABULARY_FILE}）の「{CAPABILITY_CATEGORIES_KIND}」の語に限る。"
                     ),
                     next_action=NextAction(
                         # spec: REQ-124
@@ -183,7 +188,7 @@ class OfferingService:
         if refusal is not None:
             return WriteResult(accepted=False, rejection=refusal)
         self.repository.append_capability(capability)
-        # spec: REQ-403
+        # spec: REQ-513
         notes = self.recorder.record(file_name, "register_capability", capability.id)
 
         # 公開記録は定義により公開されているものなので、公開可否の欄を持たない。
@@ -255,7 +260,7 @@ class OfferingService:
             return WriteResult(accepted=False, rejection=refusal)
         # spec: REQ-135
         self.repository.write_package(package)
-        # spec: REQ-403
+        # spec: REQ-513
         warnings = warnings + self.recorder.record(file_name, "revise_package", package.id)
 
         return WriteResult(
@@ -317,7 +322,7 @@ class OfferingService:
                 # spec: REQ-153
                 reason=(
                     f"仮説の状態「{draft.hypothesis_state}」は、"
-                    f"設定ファイル {self.settings.config_path.name} が持つ語の一覧に無い。"
+                    f"語彙（{VOCABULARY_FILE}）の「{PACKAGE_HYPOTHESIS_STATES_KIND}」に無い。"
                 ),
                 next_action=NextAction(
                     # spec: REQ-154

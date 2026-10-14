@@ -10,14 +10,13 @@
 読めないブロックが出るなら書かない。ただし「写しの鮮度」の違反は断る理由にせず、書いた後に
 読み比べるべき写しとして返す。元の節を正しく直すたびに写しが古くなるのは当然で、それで書き込みを
 止めると事実を直せなくなるためである。書いた後の正本の検査は、正本のファイルを一時の場所に写した
-上で走らせる（本物のファイルは、検査が通るまで変えない）。構造と公開可否を変える 5 つは、書き込みの
-記録が有効な置き場でだけ書き、変えたファイルをいつも 1 件のコミットにする。
+上で走らせる（本物のファイルは、検査が通るまで変えない）。書き込みの操作は、変えたファイルを
+いつも 1 件のコミットにする。
 
-書き出しは、正本の各ファイルをファイルの名前の見出しでつないだ Markdown を、設定の書き出し先の
-ファイル 1 つに書く。書き出し先は設定で固定し、返り値にはファイルの名前と字数だけを入れる。
-セッションが書き出した写しを開いて、accord を通らずに読む道を作らないためである。
+書き出しは、正本の各ファイルをファイルの名前の見出しでつないだ Markdown を、呼ぶ側が渡した書き出し先の
+ファイル 1 つに書く。書き出し先は置き場の外に限り、返り値にはファイルの名前と字数だけを入れる。
 
-どの返り値にも、正本の置き場の絶対パスを入れない。ファイルは設定に書いた名前で指す。
+どの返り値にも、正本の置き場の絶対パスを入れない。ファイルは accord の形の名前で指す。
 """
 from __future__ import annotations
 
@@ -53,7 +52,7 @@ from accord.repository.sections import (
     heading_text_is_valid,
 )
 from accord.services.recording import WriteRecorder
-from accord.vocabulary.settings import COMMIT_WRITES_KEY, EXPORT_PATH_KEY, Settings
+from accord.vocabulary.settings import Settings
 
 # 操作の名前。次の一手にそのまま載せる。
 LIST_OPERATION = "list_sections"
@@ -83,7 +82,7 @@ NO_HEADING_IN_BODY = "本文に見出しの行を書かない"
 ID_FIELD_KEPT = "ID の欄を元の値のまま残す"
 FACT_NOT_A_FIELD = "事実の文を欄の書き方で書かない"
 REVISION_REASON_REQUIRED = "節の書き換えの理由"
-EXPORT_PATH_REQUIRED = "書き出し先の設定"
+EXPORT_OUTSIDE_DATA = "書き出し先は置き場の外"
 HEADING_FORMAT = "見出しの書き方"
 DEPTH_LIMIT = "見出しの深さの上限"
 PRECEDE_A_CHILD = "前に置く節は親の直下の節"
@@ -94,7 +93,6 @@ DISCLOSURE_NEEDS_ID = "公開可否は ID の欄を持つ節に置く"
 DISCLOSURE_FORMAT = "公開可否の書き方"
 SIBLING_HEADINGS_UNIQUE = "同じ親の下の見出しの重なり"
 REASON_REQUIRED = "書き換えの理由"
-RECORDING_REQUIRED = "構造の操作の書き込みの記録"
 DISCLOSURE_LINE_NUMBER = "公開可否の行の番号"
 DISCLOSURE_DECLARED = "公開可否の行の申告"
 ITEM_NEEDS_DISCLOSURE = "公開可否の行の無い項目を足さない"
@@ -529,9 +527,6 @@ class SectionService:
 
     def rename_heading(self, section: str, heading: str, fingerprint: str, reason: str) -> WriteResult:
         """節の見出しの文字だけを置き換える。深さ・本文・下位の節は変えない。"""
-        refusal = self._needs_recording(RENAME_OPERATION)
-        if refusal is not None:
-            return refusal
         target, refusal = self._find_one(section, RENAME_OPERATION)
         if refusal is not None:
             return refusal
@@ -574,7 +569,7 @@ class SectionService:
         親の節を渡さずにファイルを渡すと、そのファイルの末尾に深さ 1 の節を足す（before に深さ 1 の
         節を渡せばその直前）。
         """
-        refusal = self._needs_recording(ADD_OPERATION) or self._unknown_file(file, ADD_OPERATION)
+        refusal = self._unknown_file(file, ADD_OPERATION)
         if refusal is not None:
             return refusal
         target: SourceSection | None = None
@@ -643,9 +638,6 @@ class SectionService:
 
     def remove_section(self, section: str, fingerprint: str, reason: str) -> WriteResult:
         """節の見出しの行と本文を消す。下位の節を持つ節は消さない。"""
-        refusal = self._needs_recording(REMOVE_OPERATION)
-        if refusal is not None:
-            return refusal
         target, refusal = self._find_one(section, REMOVE_OPERATION)
         if refusal is not None:
             return refusal
@@ -690,7 +682,7 @@ class SectionService:
         新しい親を渡さなければ、同じファイルの深さ 1 の節として末尾（before に深さ 1 の節を渡せば
         その直前）へ移す。
         """
-        refusal = self._needs_recording(MOVE_OPERATION) or self._unknown_file(file, MOVE_OPERATION)
+        refusal = self._unknown_file(file, MOVE_OPERATION)
         if refusal is not None:
             return refusal
         target, refusal = self._find_one(section, MOVE_OPERATION, file)
@@ -783,9 +775,6 @@ class SectionService:
 
         公開可否の行を 2 行以上持つ節では、何行目か（line、1 始まり）を受け、その行だけを置き換える。
         """
-        refusal = self._needs_recording(DISCLOSURE_OPERATION)
-        if refusal is not None:
-            return refusal
         target, refusal = self._find_one(section, DISCLOSURE_OPERATION)
         if refusal is not None:
             return refusal
@@ -892,21 +881,6 @@ class SectionService:
                 example="候補のファイルの名前つきの見出しの道筋をそのまま渡して、もう一度呼ぶ。",
             )
         return matched[0], None
-
-    def _needs_recording(self, operation: str) -> WriteResult | None:
-        """書き込みの記録が無効な置き場なら、構造と公開可否を変える操作の断りを返す。"""
-        # spec: REQ-488
-        if self.recorder.enabled:
-            return None
-        return self._refuse(
-            RECORDING_REQUIRED,
-            "書き込みの記録が有効でない置き場なので、書かなかった。見出しの変更・節の追加・節の削除・"
-            "節の移動・公開可否の変更は、変えたファイルをいつも 1 件の git のコミットに残すので、"
-            "書き込みの記録が要る。",
-            operation,
-            missing_fields=[COMMIT_WRITES_KEY],
-            example=f"accord の設定の [source] に {COMMIT_WRITES_KEY} = true を書いてから、同じ引数で呼び直す。",
-        )
 
     def _bad_heading(self, heading: str, operation: str) -> WriteResult | None:
         """見出しの文字として書けなければ断りを返す。"""
@@ -1119,7 +1093,7 @@ class SectionService:
             )
 
         self.repository.write_source_file(file_name, new_text)
-        # spec: REQ-488
+        # spec: REQ-513
         notes = self.recorder.record(file_name, operation, summary)
         located = locate(self.repository.source_sections(file_name)) if locate else None
         stale = [item for item in appeared if item.constraint == COPY_FRESHNESS]
@@ -1166,9 +1140,6 @@ class SectionService:
             copied = dataclasses.replace(
                 self.settings,
                 source_dir=root,
-                presentations_root=self.settings.presentations_dir,
-                commit_writes=False,
-                export_path=None,
             )
             violations = ConsistencyService(copied).inspect(None).violations
             defects = MarkdownRepository(copied).load().defects
@@ -1200,35 +1171,35 @@ class SectionService:
 
     # ------------------------------------------------------------ 書き出す
 
-    def export_source(self) -> ExportResult:
-        """正本の各ファイルを、ファイルの名前の見出しを付けてつなぎ、設定の書き出し先に書く。"""
-        result = self._export_source()
+    def export_source(self, path: str) -> ExportResult:
+        """正本の各ファイルを、ファイルの名前の見出しを付けてつなぎ、渡された書き出し先に書く。"""
+        result = self._export_source(path)
         # spec: REQ-458
         result.consistency_notice = self._watch().notice()
         return result
 
-    def _export_source(self) -> ExportResult:
-        destination = self.settings.export_path
-        # spec: REQ-454
-        if destination is None:
+    def _export_source(self, path: str) -> ExportResult:
+        destination = Path(str(path or "")).expanduser().resolve()
+        data_dir = self.settings.source_dir.resolve()
+        # spec: REQ-525
+        if not str(path or "").strip() or destination == data_dir or data_dir in destination.parents:
             return ExportResult(
                 written=False,
                 rejection=Rejection(
-                    constraint=EXPORT_PATH_REQUIRED,
+                    constraint=EXPORT_OUTSIDE_DATA,
                     reason=(
-                        f"設定に書き出し先が無いので、書き出さなかった。設定の [source] に鍵 {EXPORT_PATH_KEY} を足す"
-                        "（正本の置き場と提示物の置き場の外のファイルを指す）。"
+                        "書き出し先が経歴データの置き場の中を指しているので、書き出さなかった。"
+                        "置き場の中には accord の正本と語彙のファイルのほかを置かない。"
                     ),
                     next_action=NextAction(
                         operation=EXPORT_OPERATION,
-                        missing_fields=[EXPORT_PATH_KEY],
-                        example=f'[source] に {EXPORT_PATH_KEY} = "../accord_export.md" のように書く。',
+                        missing_fields=["path"],
+                        example="置き場の外のファイルのパス（例: ~/accord_export.md）を path に渡して呼び直す。",
                     ),
                 ),
             )
         parts = []
         for name in self.repository.source_file_names():
-            # spec: REQ-452
             parts.append(f"# {name}\n\n{self.repository.read_source_file(name).strip()}\n")
         text = "\n".join(parts)
         destination.parent.mkdir(parents=True, exist_ok=True)
