@@ -30,20 +30,22 @@ def _listed_names(settings) -> list[str]:
 # ---------------------------------------------------------------- 起動して開く口
 
 
-def test_REQ_489_the_server_opens_eighteen_tools(settings) -> None:
-    """サンプルだけで起動したサーバーが、決めを読むから書き出すまでのツール 18 本を開く。"""
+def test_REQ_549_the_server_opens_nineteen_tools(settings) -> None:
+    """サンプルだけで起動したサーバーが、決めを読むから書き出すまでの 18 本に移行の操作を加えたツール 19 本を開く。"""
     server = create_server(settings)
 
     tools = asyncio.run(server.list_tools())
 
     assert {tool.name for tool in tools} == EXPECTED_TOOLS
-    assert len(tools) == 18
+    assert len(tools) == 19
+    assert "migrate_data" in EXPECTED_TOOLS
     assert {
         "rename_heading",
         "add_section",
         "remove_section",
         "move_section",
         "set_disclosure",
+        "export_source",
     } <= EXPECTED_TOOLS
 
 
@@ -71,17 +73,17 @@ def test_REQ_338_listing_the_names_exits_zero(settings) -> None:
 
 
 def test_REQ_339_listing_the_names_prints_every_name(settings) -> None:
-    """`accord --list` が、サーバーが開くツール 18 本と資源 1 本の名前をすべて出す。"""
+    """`accord --list` が、サーバーが開くツール 19 本と資源 1 本の名前をすべて出す。"""
     lines = _listed_names(settings)
 
     assert set(lines) == EXPECTED_TOOLS | {ONTOLOGY_URI}
 
 
 def test_REQ_340_listing_the_names_prints_no_duplicate(settings) -> None:
-    """`accord --list` が、同じ名前を 2 度出さない（19 行で、重なりが無い）。"""
+    """`accord --list` が、同じ名前を 2 度出さない（20 行で、重なりが無い）。"""
     lines = _listed_names(settings)
 
-    assert len(lines) == 19
+    assert len(lines) == 20
     assert len(lines) == len(set(lines))
 
 

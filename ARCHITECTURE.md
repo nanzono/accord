@@ -21,7 +21,7 @@ accord は、職務経歴書やプロフィールの元になる経歴の記録�
 | 層 | 置き場 | 役目 |
 |---|---|---|
 | 公開の口 | `server/` | MCP のツールと資源を公開する。引数の型を確かめ、戻り値を整えるだけで、判断はしない |
-| 決まりの適用 | `services/` | 材料をまとめ、節を読み書きし（見出し・節の追加と削除と移動・公開可否の変更を含む）、書き込みの可否を決め、全体を検査する。`MaterialService`・`PositioningService`・`OfferingService`・`PublicRecordService`・`SectionService`・`ConsistencyService`。読みの前の検査と知らせは `SourceWatch`、書いた後のコミットは `WriteRecorder` が 1 か所で持つ |
+| 決まりの適用 | `services/` | 材料をまとめ、節を読み書きし（見出し・節の追加と削除と移動・公開可否の変更を含む）、書き込みの可否を決め、全体を検査する。`MaterialService`・`PositioningService`・`OfferingService`・`PublicRecordService`・`SectionService`・`ConsistencyService`。読みの前の検査と知らせは `SourceWatch`、書いた後のコミットと、移行の前の置き場で移行のほかの操作を断ることは `WriteRecorder` が 1 か所で持つ。移行の操作は `MigrationService` |
 | 読み書き | `repository/` | Markdown を節に切り、欄を読み、行を足し、節の本文を置き換え、見出しの行を置き換え、節を足し・消し・下位の節ごと動かし、欄の値を置き換える。`MarkdownRepository` と `Section`。git を呼ぶのは `GitCommits` だけ |
 | 正本 | Markdown ファイル | 経歴の記録の本体。人も AI も直接開かず、上の層の操作だけで読み書きする |
 
@@ -42,7 +42,7 @@ Markdown の書式を知っているのは、読み書きの層だけです。�
 
 **足跡（provenance）。** 検査の戻り値の先頭に、読んだ語彙のファイルの名前（経歴データの置き場の名前と `vocabulary.md`）、動いているソースの置き場と版が付きます。組み立てるのは決まりの適用の層です。診断の情報は、公開の口を通さない直接呼びでも同じように要るからです。
 
-**accord の形は 1 つ。** 見出しの深さ、箇条書きか表か、項目名の言い換えは、accord の形として固定し、読み方を変える設定も引数も持ちません。違う書き方の正本は、移行の操作で accord の形に変換します（理由は [設定ファイルを廃止し、accord の形を 1 つに固定する](docs/decisions/0016-drop-the-settings-file-and-fix-one-form.md)）。
+**accord の形は 1 つ。** 見出しの深さ、箇条書きか表か、項目名の言い換えは、accord の形として固定し、読み方を変える設定も引数も持ちません。前の版の設定ファイルを持ち、語彙のファイルを持たない置き場は、移行の操作（`migrate_data`）で accord の形の置き場にします。移行は、設定ファイルの置き場と読み方が accord の形と同じことを確かめてから、語彙のファイルを作り、設定ファイルを消し、その 2 つを 1 件のコミットにします。移行の前の置き場では、ほかの操作はどれも移行の操作を指して断ります（理由は [設定ファイルを廃止し、accord の形を 1 つに固定する](docs/decisions/0016-drop-the-settings-file-and-fix-one-form.md)）。
 
 **拒否は戻り値。** 決まりに反する入力は、例外ではなく、理由と次の一手を持つ値（`Rejection` と `NextAction`）で返します。読むだけの操作と検査は、正本のファイルを一切変えません（書き出しの操作が書くのは、呼ぶ側が渡した、経歴データの置き場の外のファイル 1 つだけです）。
 

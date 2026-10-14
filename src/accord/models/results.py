@@ -381,6 +381,10 @@ class PositioningView(BaseModel):
     consistency_notice: ConsistencyNotice | None = Field(
         default=None, description="整合の知らせ（正本全体に違反があるときだけ）"
     )
+    rejection: Rejection | None = Field(
+        default=None,
+        description="読まなかった理由と次の一手（移行の前の置き場で呼んだとき。読めたときは null）",
+    )
 
 
 class ConsistencyNotice(BaseModel):
@@ -429,6 +433,10 @@ class Material(BaseModel):
     consistency_notice: ConsistencyNotice | None = Field(
         default=None, description="整合の知らせ（正本全体に違反があるときだけ）"
     )
+    rejection: Rejection | None = Field(
+        default=None,
+        description="読まなかった理由と次の一手（移行の前の置き場で呼んだとき。読めたときは null）",
+    )
 
 
 class Provenance(BaseModel):
@@ -461,6 +469,10 @@ class ConsistencyReport(BaseModel):
     scope: str = Field(default="全体", description="検査した範囲")
     violations: list[Violation] = Field(default_factory=list, description="違反の一覧")
     notes: list[str] = Field(default_factory=list, description="違反ではない断り")
+    rejection: Rejection | None = Field(
+        default=None,
+        description="読まなかった理由と次の一手（移行の前の置き場で呼んだとき。読めたときは null）",
+    )
 
 
 class SourceDefect(BaseModel):
@@ -644,6 +656,10 @@ class SectionList(BaseModel):
     consistency_notice: ConsistencyNotice | None = Field(
         default=None, description="整合の知らせ（正本全体に違反があるときだけ）"
     )
+    rejection: Rejection | None = Field(
+        default=None,
+        description="読まなかった理由と次の一手（移行の前の置き場で呼んだとき。読めたときは null）",
+    )
 
 
 class SectionText(BaseModel):
@@ -661,6 +677,10 @@ class SectionText(BaseModel):
     warnings: list[str] = Field(default_factory=list, description="断り")
     consistency_notice: ConsistencyNotice | None = Field(
         default=None, description="整合の知らせ（正本全体に違反があるときだけ）"
+    )
+    rejection: Rejection | None = Field(
+        default=None,
+        description="読まなかった理由と次の一手（移行の前の置き場で呼んだとき。読めたときは null）",
     )
 
 
@@ -681,6 +701,10 @@ class FactSearch(BaseModel):
     warnings: list[str] = Field(default_factory=list, description="断り")
     consistency_notice: ConsistencyNotice | None = Field(
         default=None, description="整合の知らせ（正本全体に違反があるときだけ）"
+    )
+    rejection: Rejection | None = Field(
+        default=None,
+        description="読まなかった理由と次の一手（移行の前の置き場で呼んだとき。読めたときは null）",
     )
 
 

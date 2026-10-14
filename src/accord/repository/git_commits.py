@@ -62,3 +62,27 @@ class GitCommits:
             raise GitError("git のコミットが通らなかった")
         head = self._run("rev-parse", "--short", "HEAD")
         return head.stdout.strip()
+
+    def commit_paths(self, added: list[Path], removed: list[Path], message: str) -> str:
+        """足したか変えたファイルと、消したファイルだけを 1 件のコミットにし、短い識別子を返す。
+
+        移行の操作が、語彙のファイルを作ることと設定ファイルを消すことを 1 件のコミットにするために使う。
+        ほかのファイルの変更は巻き込まない（渡したパスだけを確定する）。
+        """
+        paths: list[str] = []
+        for path in added:
+            if self._run("add", "--", str(path)).returncode != 0:
+                raise GitError("git の索引にファイルを積めなかった")
+            paths.append(str(path))
+        for path in removed:
+            tracked = self._run("ls-files", "--error-unmatch", "--", str(path)).returncode == 0
+            if not tracked:
+                continue
+            if self._run("rm", "-q", "--cached", "--", str(path)).returncode != 0:
+                raise GitError("git の索引からファイルを外せなかった")
+            paths.append(str(path))
+        committed = self._run(*self._identity(), "commit", "-q", "-m", message, "--", *paths)
+        if committed.returncode != 0:
+            raise GitError("git のコミットが通らなかった")
+        head = self._run("rev-parse", "--short", "HEAD")
+        return head.stdout.strip()

@@ -139,6 +139,13 @@ accord が開く口の顔ぶれを述べます。ルールが 1 件ずつ何を�
 
 - 関係するファイル: `src/accord/server/app.py`
 - 検証手順: `uv run pytest tests/test_smoke.py -k REQ_489`
+- status: superseded by REQ-549
+
+## REQ-549
+起動されたとき、accord は REQ-489 の 18 の操作に移行の操作を加えた 19 の操作を開く。
+
+- 関係するファイル: `src/accord/server/app.py`
+- 検証手順: `uv run pytest tests/test_smoke.py -k REQ_549`
 
 ## 未決の質問
 

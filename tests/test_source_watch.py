@@ -129,7 +129,7 @@ def test_REQ_459_an_unchanged_source_is_not_checked_again(settings, monkeypatch)
 
 
 def _call_every_tool(settings, export_path: str = "") -> list[str]:
-    """18 の操作を、書き出し先を設定した写しの上ですべて呼び、返り値の文字列を集める。"""
+    """19 の操作を、書き出し先を設定した写しの上ですべて呼び、返り値の文字列を集める。"""
     server = create_server(settings)
     calls = {
         "get_positioning": {},
@@ -208,6 +208,7 @@ def _call_every_tool(settings, export_path: str = "") -> list[str]:
             "reason": "置き場が返り値に出ないことを見るため",
         },
         "export_source": {"path": export_path},
+        "migrate_data": {},
     }
     assert set(calls) == {tool.name for tool in asyncio.run(server.list_tools())}
     return [str(asyncio.run(server.call_tool(name, arguments))) for name, arguments in calls.items()]

@@ -68,6 +68,8 @@ from accord.vocabulary.settings import (
     PRESENTATION_RULES_KEY,
     PUBLIC_RECORDS_KEY,
     RESUME_LEDGER_KEY,
+    VOCABULARY_KINDS,
+    VOCABULARY_TITLE,
     BlockRule,
     Settings,
 )
@@ -1246,14 +1248,60 @@ class MarkdownRepository:
         self.source_path(name).write_text(text, encoding="utf-8")
 
     def source_digest(self) -> str:
-        """正本のファイルすべての中身から、1 つの指紋を作る。中身が 1 バイトでも変われば値が変わる。"""
+        """正本のファイルすべてと語彙のファイルの中身から、1 つの指紋を作る。1 バイトでも変われば値が変わる。
+
+        語彙のファイルを入れるのは、移行の操作が語彙を作った後に、移行の前の語彙で検査した結果を
+        使い回さないためである。
+        """
         digest = hashlib.sha256()
+        vocabulary = self.settings.vocabulary_path
+        digest.update(vocabulary.read_bytes() if vocabulary.is_file() else b"\1missing")
+        digest.update(b"\0")
         for name in self.source_file_names():
             path = self.source_path(name)
             digest.update(name.encode("utf-8") + b"\0")
             digest.update(path.read_bytes() if path.is_file() else b"\1missing")
             digest.update(b"\0")
         return digest.hexdigest()
+
+    # ------------------------------------------------------------ 語彙のファイルと、移行の確かめ
+
+    @staticmethod
+    def vocabulary_text(vocabulary: dict[str, list[str]]) -> str:
+        """語彙を、accord の形の vocabulary.md の全文にする。
+
+        1 行目に語彙の見出し、種類ごとに深さ 2 の見出しの節を置き、語を「- 語」で 1 行ずつ書く。
+        語が 0 件の種類も節を置く。
+        """
+        lines = [f"# {VOCABULARY_TITLE}"]
+        for kind, _ in VOCABULARY_KINDS:
+            lines += ["", f"## {kind}"]
+            words = vocabulary.get(kind, [])
+            if words:
+                lines.append("")
+                lines += [f"- {word}" for word in words]
+        return "\n".join(lines) + "\n"
+
+    def write_vocabulary_file(self, text: str) -> None:
+        """語彙のファイルを書く。"""
+        self.settings.vocabulary_path.write_text(text, encoding="utf-8")
+
+    def form_skipped_headings(self, key: str) -> list[str]:
+        """その正本のうち、accord の形の読み方の深さにあり、型の欄を 1 つも持たないので読み飛ばす節の見出し。
+
+        移行の操作が、移行の前の設定ファイルに書かれた読み飛ばす見出しと比べるために使う。
+        """
+        rule = self._rule(key)
+        if not rule.skip_sections_without_labels:
+            return []
+        labels = set(rule.skip_sections_without_labels)
+        return [
+            section.heading
+            for section in split_sections(self._read(key))
+            if section.heading
+            and section.level in set(rule.heading_levels)
+            and not labels & set(read_fields(section, rule))
+        ]
 
     # ------------------------------------------------------------ 書き戻す
 

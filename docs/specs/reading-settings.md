@@ -1,6 +1,6 @@
 # 起動と置き場と正本の読み方
 
-起動と、置き場と、正本の読み方（accord の形）の要件です。accord は設定ファイルを読みません。経歴データの置き場（`--data`）と提示物の置き場（`--presentations`）を起動の引数で受け、語彙を置き場の `vocabulary.md` から読み、正本を 1 通りの書き方（accord の形）で読みます。accord の形の全体は [docs/data-format.md](../data-format.md) にあり、同梱の見本（`samples/data/` と `samples/presentations/`）がその実例です。
+起動と、置き場と、正本の読み方（accord の形）の要件です。accord は設定ファイルを読みません。経歴データの置き場（`--data`）と提示物の置き場（`--presentations`）を起動の引数で受け、語彙を置き場の `vocabulary.md` から読み、正本を 1 通りの書き方（accord の形）で読みます。accord の形の全体は [docs/data-format.md](../data-format.md) にあり、同梱の見本（`samples/data/` と `samples/presentations/`）がその実例です。移行の操作（`migrate_data`）の要件もここに置きます。移行の操作は、前の版の設定ファイル `accord.toml` を持つ置き場を、`vocabulary.md` を持つ accord の形の置き場にします。
 
 前の版では、読み方を設定ファイルの読み方の節で変えられました。その要件（読み方の鍵ごとの要件と、設定ファイルの書き方の要件）は、accord の形を 1 つに固定した要件に取って代わられ、状態の行を持ちます（そう決めた理由は [docs/decisions/0016-drop-the-settings-file-and-fix-one-form.md](../decisions/0016-drop-the-settings-file-and-fix-one-form.md)）。
 
@@ -399,6 +399,30 @@
 
 - 関係するファイル: `src/accord/__main__.py`、`src/accord/vocabulary/settings.py`
 - 検証手順: `uv run pytest tests/test_reading_settings.py -k REQ_546`
+
+## REQ-522
+もし置き場に accord.toml があり vocabulary.md が無いなら、accord は移行の操作のほかの操作を断り、移行の操作の名前を返す。
+
+- 関係するファイル: `src/accord/services/recording.py`、`src/accord/server/app.py`、`src/accord/models/results.py`
+- 検証手順: `uv run pytest tests/test_migration.py -k REQ_522`
+
+## REQ-523
+移行の操作が呼ばれたとき、accord は accord.toml の語彙の節から vocabulary.md を作り、accord.toml を消し、その 2 つを操作の名前を示す行を持つ 1 件のコミットにする。
+
+- 関係するファイル: `src/accord/services/recording.py`、`src/accord/repository/markdown_repository.py`、`src/accord/repository/git_commits.py`、`src/accord/vocabulary/settings.py`
+- 検証手順: `uv run pytest tests/test_migration.py -k REQ_523`
+
+## REQ-524
+もし accord.toml の置き場の節か読み方の節が accord の形と違うなら、accord は移行せずに、違う鍵と、accord の形の値を断りに返す。
+
+- 関係するファイル: `src/accord/services/recording.py`、`src/accord/vocabulary/settings.py`、`src/accord/repository/markdown_repository.py`
+- 検証手順: `uv run pytest tests/test_migration.py -k REQ_524`
+
+## REQ-544
+もし移行済みの置き場で移行の操作が呼ばれたなら、accord は書かずに、移行済みであることを断りに返す。
+
+- 関係するファイル: `src/accord/services/recording.py`
+- 検証手順: `uv run pytest tests/test_migration.py -k REQ_544`
 
 ## 未決の質問
 

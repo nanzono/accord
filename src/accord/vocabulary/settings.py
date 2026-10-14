@@ -261,6 +261,22 @@ class Settings:
         """語彙のファイルの場所。"""
         return self.source_dir / VOCABULARY_FILE
 
+    def refresh_vocabulary(self) -> None:
+        """置き場の vocabulary.md を読み直し、語彙とそれに従う読み方を、この設定の中で入れ替える。
+
+        移行の操作が vocabulary.md を作った後、同じ設定を共有するサービスのどれもが、移行の後の
+        語彙で判断するように、設定そのものを差し替えずに中身を入れ替える。
+        """
+        if not self.vocabulary_path.is_file():
+            return
+        vocabulary = parse_vocabulary(self.vocabulary_path.read_text(encoding="utf-8"))
+        for kind, name in VOCABULARY_KINDS:
+            getattr(self, name)[:] = vocabulary[kind]
+        object.__setattr__(self, "needs_migration", False)
+        object.__setattr__(
+            self, "reading", replace(self.reading, presentation_directories=tuple(self.channels))
+        )
+
     def vocabulary(self) -> dict[str, list[str]]:
         """語彙の種類の名前から、その種類の語の一覧への対応を、節の並びで返す。"""
         return {kind: list(getattr(self, name)) for kind, name in VOCABULARY_KINDS}
@@ -414,3 +430,206 @@ def load_settings(data: Path, presentations: Path | None = None) -> Settings:
         needs_migration=needs_migration,
         **values,
     )
+
+
+# ------------------------------------------------------------------ 移行の前の設定ファイルと accord の形の突き合わせ
+# ここから下の名前は、移行の前の設定ファイルの鍵の名前で、accord の形を決める名前ではない。
+# 移行の操作だけが使う。
+
+# 移行の前の設定ファイルの、語彙の節の鍵と、語彙の種類の名前の対応。
+LEGACY_VOCABULARY_KEYS = {
+    "channels": CHANNELS_KIND,
+    "positioning_targets": POSITIONING_TARGETS_KIND,
+    "capability_categories": CAPABILITY_CATEGORIES_KIND,
+    "package_hypothesis_states": PACKAGE_HYPOTHESIS_STATES_KIND,
+    "public_record_kinds": PUBLIC_RECORD_KINDS_KIND,
+    "public_record_roles": PUBLIC_RECORD_ROLES_KIND,
+}
+
+# 移行の前の設定ファイルで、パッケージ定義の読み飛ばす見出しを書いた鍵の道。
+LEGACY_PACKAGE_SKIP_KEY = "reading.packages.skip_headings"
+
+# 移行の前の設定ファイルの、正本 1 種の読み方の鍵と、書かなかったときの値。
+_LEGACY_BLOCK_DEFAULTS = {
+    "heading_levels": [2],
+    "under_headings": [],
+    "heading_prefix": "",
+    "skip_headings": [],
+    "skip_sections_without_fields": False,
+    "fields_from_table": False,
+    "bare_labels": [],
+    "entry_number_from_heading": False,
+}
+# 職務経歴書の台帳の節にだけ書けた鍵。
+_LEGACY_LEDGER_DEFAULTS = {"frame_heading_prefix": ""}
+_LEGACY_PRESENTATION_DEFAULTS = {"directories": [], "require_declaration": False}
+_LEGACY_RULES_DEFAULTS = {
+    "channel_rules_from": CHANNEL_RULES_ONE_FILE,
+    "channel_rules_file": "",
+    "forbidden_phrases_heading": "禁じた言い回し",
+    "forbidden_phrases_any_level": False,
+    "forbidden_phrases_from": PHRASES_FROM_BULLETS,
+}
+# 読み方の節の直下に書けた、正本を問わない鍵。
+_LEGACY_COMMON_KEYS = ("strip_label_note", "labels")
+
+
+def read_legacy_config(path: Path) -> dict:
+    """移行の前の設定ファイルを読む。TOML として読めなければ SettingsError。"""
+    import tomllib
+
+    try:
+        return tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
+        raise SettingsError(
+            f"{LEGACY_CONFIG_FILE} を TOML として読めなかった（{type(error).__name__}）"
+        ) from error
+
+
+def legacy_vocabulary(document: dict) -> dict[str, list[str]]:
+    """移行の前の設定ファイルの語彙の節を、語彙の種類の名前から語の一覧への対応にする。"""
+    table = document.get("vocabulary", {})
+    result: dict[str, list[str]] = {kind: [] for kind, _ in VOCABULARY_KINDS}
+    if not isinstance(table, dict):
+        return result
+    for key, kind in LEGACY_VOCABULARY_KEYS.items():
+        words = table.get(key, [])
+        if isinstance(words, list):
+            result[kind] = [str(item) for item in words]
+    return result
+
+
+def _block_keys(key: str) -> dict[str, object]:
+    """移行の前の設定ファイルで、その正本の読み方の節に書けた鍵と、書かなかったときの値。"""
+    keys = dict(_LEGACY_BLOCK_DEFAULTS)
+    if key == RESUME_LEDGER_KEY:
+        keys.update(_LEGACY_LEDGER_DEFAULTS)
+    if key == "presentations":
+        keys.update(_LEGACY_PRESENTATION_DEFAULTS)
+    if key == PRESENTATION_RULES_KEY:
+        keys.update(_LEGACY_RULES_DEFAULTS)
+    return keys
+
+
+def _form_reading_table(channels: list[str]) -> dict[str, object]:
+    """accord の形を、移行の前の設定ファイルの読み方の節の鍵の道と値で書いたもの。"""
+    table: dict[str, object] = {
+        "reading.strip_label_note": True,
+        "reading.labels": {label: list(names) for label, names in LABEL_ALIASES.items()},
+    }
+    for key in FILE_KEYS:
+        rule = ACCORD_FORM.rule_for(key)
+        values: dict[str, object] = {
+            "heading_levels": list(rule.heading_levels),
+            "under_headings": list(rule.under_headings),
+            "heading_prefix": rule.heading_prefix,
+            "skip_headings": [],
+            "skip_sections_without_fields": rule.skip_sections_without_fields,
+            "fields_from_table": rule.fields_from_table,
+            "bare_labels": list(rule.bare_labels),
+            "entry_number_from_heading": rule.entry_number_from_heading,
+        }
+        if key == RESUME_LEDGER_KEY:
+            values["frame_heading_prefix"] = rule.frame_heading_prefix
+        if key == "presentations":
+            values["directories"] = list(channels)
+            values["require_declaration"] = ACCORD_FORM.require_presentation_declaration
+        if key == PRESENTATION_RULES_KEY:
+            values["channel_rules_from"] = ACCORD_FORM.channel_rules_from
+            values["channel_rules_file"] = ACCORD_FORM.channel_rules_file
+            values["forbidden_phrases_heading"] = ACCORD_FORM.forbidden_phrases_heading
+            values["forbidden_phrases_any_level"] = ACCORD_FORM.forbidden_phrases_any_level
+            values["forbidden_phrases_from"] = ACCORD_FORM.forbidden_phrases_from
+        for name, value in values.items():
+            table[f"reading.{key}.{name}"] = value
+    return table
+
+
+def _plain(value: object) -> object:
+    """TOML の値を、比べられる形（一覧・表・文字列・数・真偽）にそろえる。"""
+    if isinstance(value, tuple):
+        return [_plain(item) for item in value]
+    if isinstance(value, list):
+        return [_plain(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _plain(item) for key, item in value.items()}
+    return value
+
+
+def _legacy_reading_table(reading: dict) -> tuple[dict[str, object], list[str]]:
+    """移行の前の設定ファイルの読み方の節を、書かなかった鍵を書かなかったときの値で埋めた鍵の道と値にする。
+
+    あわせて、読み方の節にある知らない鍵の道を返す。
+    """
+    unknown: list[str] = []
+    table: dict[str, object] = {
+        "reading.strip_label_note": bool(reading.get("strip_label_note", False)),
+        "reading.labels": _plain(reading.get("labels", {})),
+    }
+    for name in reading:
+        if name not in _LEGACY_COMMON_KEYS and name not in FILE_KEYS:
+            unknown.append(f"reading.{name}")
+    for key in FILE_KEYS:
+        section = reading.get(key, {})
+        if not isinstance(section, dict):
+            unknown.append(f"reading.{key}")
+            section = {}
+        keys = _block_keys(key)
+        for name, default in keys.items():
+            table[f"reading.{key}.{name}"] = _plain(section.get(name, default))
+        for name in section:
+            if name not in keys:
+                unknown.append(f"reading.{key}.{name}")
+    return table, unknown
+
+
+def legacy_form_differences(document: dict) -> tuple[list[tuple[str, str]], list[str]]:
+    """移行の前の設定ファイルの置き場の節と読み方の節を、accord の形と比べる。
+
+    返すのは、違う鍵と accord の形の値（文）の組の並びと、パッケージ定義の読み飛ばす見出しの並びである。
+    読み飛ばす見出しが accord の形で読み飛ばされる節と同じかは、正本を読む側が確かめる。
+    置き場の節で比べるのは、正本の置き場（directory）と 7 ファイルの名前と置き場だけで、
+    置き場の節のほかの鍵（接続の鍵）は accord の形に入らないので比べない。
+    読み方の節にある知らない鍵は、違う鍵として返す。
+    """
+    differences: list[tuple[str, str]] = []
+    source = document.get("source", {})
+    if not isinstance(source, dict):
+        source = {}
+    if str(source.get("directory", "source")) != ".":
+        differences.append(("source.directory", "."))
+    files = source.get("files", {})
+    if not isinstance(files, dict):
+        files = {}
+    for key, name in FORM_FILES.items():
+        if str(files.get(key, "")) != name:
+            differences.append((f"source.files.{key}", name))
+
+    channels = legacy_vocabulary(document)[CHANNELS_KIND]
+    expected = _form_reading_table(channels)
+    reading = document.get("reading", {})
+    if not isinstance(reading, dict):
+        reading = {}
+    written, unknown = _legacy_reading_table(reading)
+    skipped = written.pop(LEGACY_PACKAGE_SKIP_KEY, [])
+    expected.pop(LEGACY_PACKAGE_SKIP_KEY)
+    for key, value in expected.items():
+        if written.get(key) != value:
+            differences.append((key, _value_text(value)))
+    for key in unknown:
+        differences.append((key, "（accord の形に無い鍵）"))
+    skip_list = [str(item) for item in skipped] if isinstance(skipped, list) else [str(skipped)]
+    return differences, skip_list
+
+
+def _value_text(value: object) -> str:
+    """accord の形の値を、断りの候補に載せる 1 つの文にする。"""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, list):
+        return "[" + ", ".join(_value_text(item) for item in value) + "]"
+    if isinstance(value, dict):
+        return "{" + ", ".join(f"{key} = {_value_text(item)}" for key, item in value.items()) + "}"
+    if isinstance(value, str):
+        return f'"{value}"'
+    return str(value)
