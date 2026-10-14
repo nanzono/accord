@@ -62,7 +62,7 @@ def main(argv: list[str] | None = None) -> int:
 def report_startup_check(watch: SourceWatch) -> None:
     """起動時に正本全体の整合を検査し、違反と断りの件数を標準エラーに書く。違反があっても止めない。
 
-    人の手の編集の途中でも読めるように、起動は続ける。違反の中身は、読みの操作の整合の知らせと
+    正本が食い違った状態でも読めるように、起動は続ける。違反の中身は、読みの操作の整合の知らせと
     check_consistency が返す。
     """
     try:

@@ -2,7 +2,7 @@
 
 要件 1 件につきテストを 1 本置く。もとは 2 本で見ていたものを、返り値に現れる 1 か所ごとに割った。
 起動したサーバーが開く操作と資源で 2 本、`accord --list` の終了コードと出す名前と重なりで 3 本、
-サーバーと操作の説明が依頼の言葉を持つかで 3 本である。
+サーバーと操作の説明が依頼の言葉を持つかで 4 本である。
 """
 
 from __future__ import annotations
@@ -30,14 +30,21 @@ def _listed_names(settings) -> list[str]:
 # ---------------------------------------------------------------- 起動して開く口
 
 
-def test_REQ_462_the_server_opens_thirteen_tools(settings) -> None:
-    """サンプルだけで起動したサーバーが、決めを読むから書き出すまでのツール 13 本を開く。"""
+def test_REQ_489_the_server_opens_eighteen_tools(settings) -> None:
+    """サンプルだけで起動したサーバーが、決めを読むから書き出すまでのツール 18 本を開く。"""
     server = create_server(settings)
 
     tools = asyncio.run(server.list_tools())
 
     assert {tool.name for tool in tools} == EXPECTED_TOOLS
-    assert len(tools) == 13
+    assert len(tools) == 18
+    assert {
+        "rename_heading",
+        "add_section",
+        "remove_section",
+        "move_section",
+        "set_disclosure",
+    } <= EXPECTED_TOOLS
 
 
 def test_REQ_337_the_server_opens_one_resource(settings) -> None:
@@ -64,17 +71,17 @@ def test_REQ_338_listing_the_names_exits_zero(settings) -> None:
 
 
 def test_REQ_339_listing_the_names_prints_every_name(settings) -> None:
-    """`accord --list` が、サーバーが開くツール 13 本と資源 1 本の名前をすべて出す。"""
+    """`accord --list` が、サーバーが開くツール 18 本と資源 1 本の名前をすべて出す。"""
     lines = _listed_names(settings)
 
     assert set(lines) == EXPECTED_TOOLS | {ONTOLOGY_URI}
 
 
 def test_REQ_340_listing_the_names_prints_no_duplicate(settings) -> None:
-    """`accord --list` が、同じ名前を 2 度出さない（14 行で、重なりが無い）。"""
+    """`accord --list` が、同じ名前を 2 度出さない（19 行で、重なりが無い）。"""
     lines = _listed_names(settings)
 
-    assert len(lines) == 14
+    assert len(lines) == 19
     assert len(lines) == len(set(lines))
 
 
@@ -105,3 +112,12 @@ def test_REQ_465_the_record_fact_description_says_when_to_call_it(settings) -> N
     description = _description(settings, "record_fact")
 
     assert description.startswith("実績や経歴の事実を書き足すときに呼ぶ")
+
+
+def test_REQ_487_the_server_says_structure_changes_go_through_accord(settings) -> None:
+    """サーバーの説明に、見出しの変更・節の追加・削除・移動・公開可否の変更も accord の操作で行うことが書いてある。"""
+    server = create_server(settings)
+
+    assert "見出しの変更と節の追加と節の削除と節の移動と公開可否の変更も accord の操作で行う" in server.instructions
+    for name in ("rename_heading", "add_section", "remove_section", "move_section", "set_disclosure"):
+        assert name in server.instructions

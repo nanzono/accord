@@ -301,6 +301,7 @@
 
 - 関係するファイル: `src/accord/services/recording.py`、`src/accord/repository/git_commits.py`
 - 検証手順: `uv run pytest tests/test_write_commits.py -k REQ_405`
+- 注: 断りの文のうち「先にその変更をコミットすること」は、置き場で git を直接操作する案内なので REQ-500 が改める（accord を通さない変更があるので書かなかったことを返す）。ファイルの名前を添えて書かずに断ることそのものは、この要件のまま変わらない。
 
 ## REQ-406
 もし書き込みの記録が有効で、正本の置き場が git のリポジトリの中に無いなら、accord は設定の鍵の名前を添えて起動をやめる。

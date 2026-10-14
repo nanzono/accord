@@ -114,6 +114,7 @@ accord が開く口の顔ぶれを述べます。ルールが 1 件ずつ何を�
 
 - 関係するファイル: `src/accord/server/app.py`
 - 検証手順: `uv run pytest tests/test_smoke.py -k REQ_462`
+- status: superseded by REQ-489
 
 ## REQ-463
 起動されたとき、accord はサーバーの説明に、正本のファイルを直接開かずに accord の操作で読み書きすることを書く。
@@ -132,6 +133,12 @@ accord が開く口の顔ぶれを述べます。ルールが 1 件ずつ何を�
 
 - 関係するファイル: `src/accord/server/app.py`
 - 検証手順: `uv run pytest tests/test_smoke.py -k REQ_465`
+
+## REQ-489
+起動されたとき、accord は決めを読む・材料を取り出す・決めを登記する・機能を登記する・公開記録を登記する・パッケージを改訂する・整合を検査する・節を一覧する・節を読む・事実を検索する・事実を登記する・節を書き換える・見出しを変える・節を足す・節を消す・節を動かす・公開可否を変える・書き出すの 18 の操作を開く。（REQ-462 に取って代わる）
+
+- 関係するファイル: `src/accord/server/app.py`
+- 検証手順: `uv run pytest tests/test_smoke.py -k REQ_489`
 
 ## 未決の質問
 

@@ -23,6 +23,19 @@ HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t]*$")
 # 定義の行。「- ラベル: 値」の形で、正本の欄はこの書き方で持つ。
 DEFINITION_RE = re.compile(r"^[-*][ \t]+([^:：]+)[:：][ \t]*(.*)$")
 
+# 公開可否の欄のラベル。この欄だけは、ほかの欄より広い書き方を欄として読む。
+DISCLOSURE_FIELD = "公開可否"
+
+# 公開可否の欄の広い書き方。箇条書き（「- 」「* 」）か番号つきの箇条書き（「1. 」）か、記号の無い行の頭に
+# ラベルを置き、区切りに「:」「：」「＝」「=」のどれかを使う。ラベルは太字（「**公開可否**：」）でもよく、
+# 区切りが太字の中にあってもよい（「**公開可否：**」）。行の頭の字下げは見ない（続きの行も読む）。
+# 欄の名前の照らし合わせの前に当てる（区切りが「＝」の行は、ほかの欄の書き方では読めないため）。
+DISCLOSURE_FORM_RE = re.compile(
+    r"^((?:(?:[-*]|\d+\.)[ \t]+)?(?:\*\*)?"
+    + DISCLOSURE_FIELD
+    + r"(?:\*\*)?[ \t]*[:：＝=](?:\*\*)?[ \t]*)(.*)$"
+)
+
 # 箇条書きの行。「- 中身」の形で、ラベルを持たない並びはこの書き方で持つ。
 BULLET_RE = re.compile(r"^[-*][ \t]+(.+?)[ \t]*$")
 
@@ -333,6 +346,11 @@ def drop_field_lines(
     kept: list[str] = []
     for raw in body.splitlines():
         line = raw.strip()
+        if DISCLOSURE_FORM_RE.match(line) is not None:
+            if is_wanted(DISCLOSURE_FIELD):
+                continue
+            kept.append(raw)
+            continue
         match = DEFINITION_RE.match(line)
         if match is not None:
             if is_wanted(match.group(1).strip()):
@@ -360,6 +378,10 @@ def _definition_entries(body: str, bare_labels: tuple[str, ...] = ()) -> list[tu
     entries: list[tuple[str, str]] = []
     for raw in body.splitlines():
         line = raw.strip()
+        wide = DISCLOSURE_FORM_RE.match(line)
+        if wide is not None:
+            entries.append((DISCLOSURE_FIELD, wide.group(2).strip()))
+            continue
         match = DEFINITION_RE.match(line)
         if match is not None:
             entries.append((match.group(1).strip(), match.group(2).strip()))
@@ -458,3 +480,363 @@ def append_section_line(text: str, section: Section, line: str) -> str:
     if insert_at + len(addition) < len(lines) and lines[insert_at + len(addition)].strip():
         lines.insert(insert_at + len(addition), "")
     return _join(lines)
+
+
+# ------------------------------------------------------------ 節の構造と欄を書き換える
+
+# 見出しの深さの上限。Markdown の ATX 形式の見出しは 6 段まで。
+MAX_HEADING_LEVEL = 6
+
+# 欄の行のうち、値の手前までを取る形。「- ラベル: 」と行頭の宣言「ラベル: 」の 2 つ。
+DEFINITION_PREFIX_RE = re.compile(r"^([ \t]*[-*][ \t]+([^:：]+)[:：][ \t]*)(.*)$")
+
+
+def heading_text_is_valid(heading: str) -> bool:
+    """見出しの文字として書けるか。空・改行を含む・「#」で始まるものは書けない。"""
+    text = (heading or "").strip()
+    return bool(text) and "\n" not in heading and "\r" not in heading and not text.startswith("#")
+
+
+def _rejoin(lines: list[str], original: str) -> str:
+    """行の並びを、元の全文の末尾の改行の有無に合わせてつなぐ。"""
+    while lines and not lines[-1].strip():
+        lines.pop()
+    return "\n".join(lines) + ("\n" if original.endswith("\n") or not original else "")
+
+
+def _level_at(lines: list[str], index: int) -> int:
+    match = HEADING_RE.match(lines[index])
+    if match is None:
+        raise ValueError(f"{index + 1} 行目は見出しの行ではない")
+    return len(match.group(1))
+
+
+def subtree_end(lines: list[str], start: int) -> int:
+    """見出しの行 start の節を、下位の節ごと含めたときの終わり（次の同じか浅い見出しの行の位置）。"""
+    level = _level_at(lines, start)
+    for index in range(start + 1, len(lines)):
+        match = HEADING_RE.match(lines[index])
+        if match is not None and len(match.group(1)) <= level:
+            return index
+    return len(lines)
+
+
+def _make_heading(level: int, heading: str) -> str:
+    return f"{'#' * level} {heading.strip()}"
+
+
+def _insert_block(lines: list[str], at: int, block: list[str]) -> None:
+    """行の位置 at に、前後に空行を 1 つずつ置いて塊を差し込む。前後の行そのものは変えない。"""
+    while block and not block[-1].strip():
+        block = block[:-1]
+    addition: list[str] = []
+    if at > 0 and lines[at - 1].strip():
+        addition.append("")
+    addition.extend(block)
+    if at < len(lines):
+        addition.append("")
+    lines[at:at] = addition
+
+
+def rename_heading(text: str, start: int, heading: str) -> str:
+    """見出しの行 start の文字だけを置き換えた全文を返す。深さ・本文・下位の節は変えない。"""
+    lines = text.splitlines()
+    lines[start] = _make_heading(_level_at(lines, start), heading)
+    return _rejoin(lines, text)
+
+
+def _parent_level(lines: list[str], parent_start: int | None) -> int:
+    """親の見出しの深さ。親が無い（ファイルの直下に置く）なら 0。"""
+    return _level_at(lines, parent_start) if parent_start is not None else 0
+
+
+def _parent_end(lines: list[str], parent_start: int | None) -> int:
+    """親の下位の節の末尾の位置。親が無いならファイルの末尾。"""
+    return subtree_end(lines, parent_start) if parent_start is not None else len(lines)
+
+
+def insert_section(
+    text: str, parent_start: int | None, heading: str, body: str, before_start: int | None = None
+) -> str:
+    """親の節より 1 段深い節を足した全文を返す。親が無ければ（None）、深さ 1 の節を足す。
+
+    before_start が無ければ親の下位の節の末尾（親が無ければファイルの末尾）に、あればその見出しの
+    行の直前に置く。
+    """
+    lines = text.splitlines()
+    level = _parent_level(lines, parent_start) + 1
+    at = before_start if before_start is not None else _parent_end(lines, parent_start)
+    block = [_make_heading(level, heading)]
+    body_lines = body.strip("\n").splitlines()
+    if body_lines:
+        block.extend(["", *body_lines])
+    _insert_block(lines, at, block)
+    return _rejoin(lines, text)
+
+
+def delete_section(text: str, start: int) -> str:
+    """見出しの行 start の節（見出しの行と本文）を消した全文を返す。下位の節を持たない節に使う。"""
+    lines = text.splitlines()
+    end = subtree_end(lines, start)
+    del lines[start:end]
+    return _rejoin(lines, text)
+
+
+def shifted_levels(text: str, start: int, new_parent_start: int | None) -> list[int]:
+    """節を新しい親の下（親が None なら深さ 1）へ動かしたときの、その節と下位の節の深さを並びの順に返す。"""
+    lines = text.splitlines()
+    delta = _parent_level(lines, new_parent_start) + 1 - _level_at(lines, start)
+    end = subtree_end(lines, start)
+    return [
+        len(match.group(1)) + delta
+        for match in (HEADING_RE.match(line) for line in lines[start:end])
+        if match is not None
+    ]
+
+
+def move_section(
+    text: str, start: int, new_parent_start: int | None, before_start: int | None = None
+) -> str:
+    """節を下位の節ごと、新しい親の下位の末尾（before_start があればその直前）へ移した全文を返す。
+
+    新しい親が None なら、深さ 1 の節としてファイルの末尾（before_start があればその直前）へ移す。
+    見出しの深さは新しい親より 1 段深くそろえ、下位の節も同じ段数ずらす。見出しの行の深さの
+    ほかは、移す節の本文も下位の節の本文も 1 文字も変えない。
+    """
+    lines = text.splitlines()
+    end = subtree_end(lines, start)
+    delta = _parent_level(lines, new_parent_start) + 1 - _level_at(lines, start)
+    block: list[str] = []
+    for line in lines[start:end]:
+        match = HEADING_RE.match(line)
+        if match is not None and delta:
+            block.append(_make_heading(len(match.group(1)) + delta, match.group(2)))
+        else:
+            block.append(line)
+    target = before_start if before_start is not None else _parent_end(lines, new_parent_start)
+    if start <= target <= end:
+        target = start
+    elif target > end:
+        target -= end - start
+    remaining = lines[:start] + lines[end:]
+    # 抜いた跡に空行が 2 つ並んだら 1 つにする（抜いた節の前の空行と、次の見出しの前の空行）。
+    if 0 < start < len(remaining) and not remaining[start - 1].strip() and not remaining[start].strip():
+        del remaining[start]
+        if target > start:
+            target -= 1
+    _insert_block(remaining, target, block)
+    return _rejoin(remaining, text)
+
+
+def _label_is(label: str, names: set[str], rule: BlockRule) -> bool:
+    """欄のラベルが、読み替えと括弧書きの除去の後に names のどれかに当たるか。"""
+    name = strip_note(label) if rule.strip_label_note else label
+    return bool(names & set(rule.labels.get(name, (name,))))
+
+
+def _field_label(line: str, rule: BlockRule) -> str | None:
+    """行が欄の行なら、そのラベル（読み替えの前）を返す。欄の行でなければ None。"""
+    stripped = line.strip()
+    if DISCLOSURE_FORM_RE.match(stripped) is not None:
+        return DISCLOSURE_FIELD
+    match = DEFINITION_RE.match(stripped)
+    if match is not None:
+        return match.group(1).strip()
+    if rule.fields_from_table and stripped.startswith("|"):
+        cells = [cell.strip() for cell in stripped.strip("|").split("|")]
+        if len(cells) >= 2 and cells[0]:
+            return cells[0]
+    for label in rule.bare_labels:
+        if _bare_declaration(stripped, label) is not None:
+            return label
+    return None
+
+
+def _with_value(line: str, value: str, rule: BlockRule) -> str:
+    """欄の行の値だけを置き換えた行を返す。ラベルと書き方（箇条書き・表・行頭の宣言）はそのまま。"""
+    indent = line[: len(line) - len(line.lstrip())]
+    wide = DISCLOSURE_FORM_RE.match(line.strip())
+    if wide is not None:
+        return f"{indent}{wide.group(1)}{value}"
+    match = DEFINITION_PREFIX_RE.match(line)
+    if match is not None:
+        return f"{match.group(1)}{value}"
+    stripped = line.strip()
+    if rule.fields_from_table and stripped.startswith("|"):
+        cells = [cell.strip() for cell in stripped.strip("|").split("|")]
+        cells[1] = value
+        indent = line[: len(line) - len(line.lstrip())]
+        return f"{indent}| " + " | ".join(cells) + " |"
+    for label in rule.bare_labels:
+        if _bare_declaration(stripped, label) is not None:
+            indent = line[: len(line) - len(line.lstrip())]
+            separator = stripped[len(label) :].lstrip()[0]
+            return f"{indent}{label}{separator} {value}"
+    return line
+
+
+def _body_end(lines: list[str], start: int) -> int:
+    """見出しの行 start の節の本文の終わり（次の見出しの行の位置）。"""
+    for index in range(start + 1, len(lines)):
+        if HEADING_RE.match(lines[index]):
+            return index
+    return len(lines)
+
+
+def _value_of(line: str, rule: BlockRule) -> str:
+    """欄の行の値を返す。"""
+    wide = DISCLOSURE_FORM_RE.match(line.strip())
+    if wide is not None:
+        return wide.group(2).strip()
+    match = DEFINITION_PREFIX_RE.match(line)
+    if match is not None:
+        return match.group(3).strip()
+    stripped = line.strip()
+    if rule.fields_from_table and stripped.startswith("|"):
+        cells = [cell.strip() for cell in stripped.strip("|").split("|")]
+        return cells[1] if len(cells) > 1 else ""
+    for label in rule.bare_labels:
+        value = _bare_declaration(stripped, label)
+        if value is not None:
+            return value
+    return ""
+
+
+def field_lines(
+    text: str, start: int, name: str, rule: BlockRule = DEFAULT_BLOCK_RULE
+) -> list[tuple[str, str]]:
+    """見出しの行 start の節の本文にある欄 name の行を、（行そのもの、値）の組で、書かれた順に返す。"""
+    lines = text.splitlines()
+    found: list[tuple[str, str]] = []
+    for index in range(start + 1, _body_end(lines, start)):
+        label = _field_label(lines[index], rule)
+        if label is not None and _label_is(label, {name}, rule):
+            found.append((lines[index].strip(), _value_of(lines[index], rule)))
+    return found
+
+
+def set_field(
+    text: str,
+    start: int,
+    name: str,
+    value: str,
+    anchor: str,
+    rule: BlockRule = DEFAULT_BLOCK_RULE,
+    number: int | None = None,
+) -> str:
+    """見出しの行 start の節の本文で、欄 name の値だけを置き換えた全文を返す。
+
+    number（1 始まり）を渡すと、欄 name の行のうちその番号の行だけを置き換える。渡さなければ
+    欄 name の行をすべて置き換える。欄が無ければ、欄 anchor の行の直後に、anchor の行と同じ書き方で
+    欄の行を足す。下位の節の本文と、ほかの行は 1 文字も変えない。
+    """
+    lines = text.splitlines()
+    end = _body_end(lines, start)
+    replaced = False
+    seen = 0
+    anchor_at: int | None = None
+    for index in range(start + 1, end):
+        label = _field_label(lines[index], rule)
+        if label is None:
+            continue
+        if _label_is(label, {name}, rule):
+            seen += 1
+            if number is None or seen == number:
+                lines[index] = _with_value(lines[index], value, rule)
+            replaced = True
+        elif anchor_at is None and _label_is(label, {anchor}, rule):
+            anchor_at = index
+    if not replaced:
+        if anchor_at is None:
+            raise ValueError(f"欄「{anchor}」の行が無い")
+        source = lines[anchor_at]
+        stripped = source.strip()
+        indent = source[: len(source) - len(source.lstrip())]
+        if rule.fields_from_table and stripped.startswith("|"):
+            new_line = f"{indent}| {name} | {value} |"
+        else:
+            bullet = DEFINITION_PREFIX_RE.match(source)
+            mark = bullet.group(1).lstrip()[0] if bullet is not None else "-"
+            new_line = f"{indent}{mark} {name}: {value}"
+        lines.insert(anchor_at + 1, new_line)
+    return _rejoin(lines, text)
+
+
+# 箇条書きの行頭の印。「- 」「* 」と「1. 」の形。
+LIST_ITEM_RE = re.compile(r"^([ \t]*)(?:[-*]|\d+\.)[ \t]+")
+
+
+def list_items(
+    text: str,
+    start: int,
+    name: str,
+    known_labels: set[str],
+    rule: BlockRule = DEFAULT_BLOCK_RULE,
+) -> list[tuple[str, bool]]:
+    """見出しの行 start の節の本文の、いちばん浅い箇条書きの項目を、（項目の先頭の行、欄 name の行を持つか）で返す。
+
+    項目は、いちばん浅い字下げの箇条書きの行から、次に同じか浅い字下げの空でない行が来る手前までとする
+    （下の字下げの行と入れ子の箇条書きを含む）。先頭の行が型の欄の行（ラベルが known_labels のどれかに
+    読める「- ラベル: 値」）の項目は、節の欄なので数えない。欄 name の行を持つかは、項目の中の欄の行
+    （入れ子の箇条書きの「- name: 値」を含む）で見る。
+    """
+    lines = text.splitlines()
+    end = _body_end(lines, start)
+    body = list(range(start + 1, end))
+    depths = [len(LIST_ITEM_RE.match(lines[i]).group(1)) for i in body if LIST_ITEM_RE.match(lines[i])]
+    if not depths:
+        return []
+    top = min(depths)
+    heads = [
+        i
+        for i in body
+        if LIST_ITEM_RE.match(lines[i]) and len(LIST_ITEM_RE.match(lines[i]).group(1)) == top
+    ]
+    found: list[tuple[str, bool]] = []
+    for head in heads:
+        stop = end
+        for index in range(head + 1, end):
+            line = lines[index]
+            if line.strip() and len(line) - len(line.lstrip()) <= top:
+                stop = index
+                break
+        label = _field_label(lines[head], rule)
+        if label is not None and _label_is(label, known_labels, rule):
+            continue
+        has = any(
+            (found_label := _field_label(lines[index], rule)) is not None
+            and _label_is(found_label, {name}, rule)
+            for index in range(head, stop)
+        )
+        found.append((lines[head].strip(), has))
+    return found
+
+
+def field_lines_with_items(
+    text: str, start: int, name: str, rule: BlockRule = DEFAULT_BLOCK_RULE
+) -> list[tuple[str, str, str | None]]:
+    """見出しの行 start の節の欄 name の行を、（行そのもの、値、その行が属する項目の先頭の行）で返す。
+
+    項目は list_items と同じく、いちばん浅い字下げの箇条書きの行から始まる塊とする。欄の行そのものが
+    いちばん浅い字下げにある（節の欄として書かれた）ときは、項目の先頭の行を None にする。
+    """
+    lines = text.splitlines()
+    end = _body_end(lines, start)
+    body = list(range(start + 1, end))
+    depths = [len(LIST_ITEM_RE.match(lines[i]).group(1)) for i in body if LIST_ITEM_RE.match(lines[i])]
+    top = min(depths) if depths else 0
+    found: list[tuple[str, str, str | None]] = []
+    head: str | None = None
+    for index in body:
+        line = lines[index]
+        match = LIST_ITEM_RE.match(line)
+        if line.strip() and len(line) - len(line.lstrip()) <= top:
+            head = line.strip() if match is not None and len(match.group(1)) == top else None
+            at_top = True
+        else:
+            at_top = False
+        label = _field_label(line, rule)
+        if label is None or not _label_is(label, {name}, rule):
+            continue
+        found.append((line.strip(), _value_of(line, rule), None if at_top else head))
+    return found

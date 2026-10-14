@@ -36,7 +36,7 @@ CONSTRAINTS_PY = REPO_ROOT / "src" / "accord" / "models" / "constraints.py"
 EXPECTED_TYPES = 8
 EXPECTED_RELATIONS = 9
 EXPECTED_RELATION_EDGES = 14
-EXPECTED_CONSTRAINTS = 17
+EXPECTED_CONSTRAINTS = 19
 
 # ID の欄を必須で持つ、指される側の 5 つの型。
 ID_BEARING_TYPES = ("CareerFrame", "Engagement", "PublicRecord", "Capability", "Package")
@@ -86,7 +86,7 @@ def _names_pulled_from_the_declaration(path: Path) -> set[str]:
 
 
 def test_REQ_326_five_types_require_an_id_field() -> None:
-    """指される側の 5 つの型が、必須の text の欄 id を持ち、制約は 17 件ある。"""
+    """指される側の 5 つの型が、必須の text の欄 id を持ち、制約は 19 件ある。"""
     ontology = load_ontology()
 
     for name in ID_BEARING_TYPES:
@@ -121,7 +121,7 @@ def test_REQ_328_the_resource_returns_every_relation(settings) -> None:
 
 
 def test_REQ_329_the_resource_returns_every_constraint(settings) -> None:
-    """資源 accord://ontology が、正本の制約をすべて返す（いまは 17 件）。"""
+    """資源 accord://ontology が、正本の制約をすべて返す（いまは 19 件）。"""
     document = _resource_document(settings)
 
     assert len(document["constraints"]) == EXPECTED_CONSTRAINTS

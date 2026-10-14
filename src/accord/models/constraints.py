@@ -1,7 +1,7 @@
 # 生成物。直すなら src/accord/ontology.yaml を直す
 """accord が執行する制約の宣言。
 
-制約は 17 つで、正本 src/accord/ontology.yaml が
+制約は 19 つで、正本 src/accord/ontology.yaml が
 挙げる制約に 1 対 1 で対応する。サービスの実装も資源の定義も、この 1 か所を名前で参照する。
 同じ制約が、書きの操作では拒否、読みの操作では警告、検査の操作では一覧として現れる。
 """
@@ -114,6 +114,20 @@ CONSTRAINTS: tuple[Constraint, ...] = (
         enforced_by=("register_capability", "check_consistency"),
         appears_as="拒否",
         next_action="設定が持つ分類の語の一覧を返す。",
+    ),
+    Constraint(
+        name="パッケージの仮説の状態の語彙",
+        watches="パッケージ定義の仮説の状態（末尾の括弧書きの注を落とした語）が、設定ファイルが持つ仮説の状態の語の一覧にあるか。",
+        enforced_by=("check_consistency",),
+        appears_as="検出",
+        next_action="設定が持つ仮説の状態の語の一覧を返す。",
+    ),
+    Constraint(
+        name="決めの適用範囲の語彙",
+        watches="売り方の決めの適用範囲（末尾の括弧書きの注を落とした語）が、「全体」か、設定ファイルが持つ媒体の名前か決めの適用先の語のどれかか。",
+        enforced_by=("check_consistency",),
+        appears_as="検出",
+        next_action="「全体」と、設定が持つ媒体の名前と決めの適用先の語の一覧を返す。",
     ),
     Constraint(
         name="由来の節の実在",

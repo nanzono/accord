@@ -9,7 +9,7 @@
 
 書きの操作が書き込みの瞬間に拒否する制約（ID の形式・ID の一意性・裏づけ節名の実在・
 束ねる機能名の一致・由来の節の実在・公開記録の種類の語彙・公開記録の役割の語彙・機能の分類の語彙）にも
-後から食い違う経路があるので当て直し、書きでは拒否できず後から食い違う制約（パッケージ定義の鮮度・
+後から食い違う経路があるので当て直し、パッケージの仮説の状態と決めの適用範囲の語彙も当て、書きでは拒否できず後から食い違う制約（パッケージ定義の鮮度・
 提示物の宣言と看板の一致・注記と出典の節の実在・出典と裏づけの節の公開可否・提示物の URL と公開記録の一致・
 写しの鮮度）を加えて、正本全体に当てる。
 決めの必須欄と公開記録の必須欄は、それぞれを登記する操作だけが見る
@@ -64,11 +64,13 @@ from accord.repository.markdown_repository import (
     format_fingerprints,
     split_ids,
 )
+from accord.repository.sections import strip_note
 from accord.services.material import MaterialService
 from accord.services.offering import OfferingService
 from accord.services.positioning import (
     WHOLE_SCOPE,
     PositioningService,
+    accepted_scopes,
     applicable_positioning,
     defect_notes,
     latest_positioning,
@@ -76,6 +78,7 @@ from accord.services.positioning import (
 )
 from accord.services.public_records import REGISTER_OPERATION, PublicRecordService
 from accord.vocabulary.settings import (
+    POSITIONING_TARGETS_KEY,
     PUBLIC_RECORD_KINDS_KEY,
     PUBLIC_RECORD_ROLES_KEY,
     PUBLIC_RECORDS_KEY,
@@ -98,6 +101,12 @@ PUBLIC_RECORD_REQUIRED_FIELDS = CONSTRAINT_BY_NAME["公開記録の必須欄"].n
 PUBLIC_RECORD_KIND_VOCABULARY = CONSTRAINT_BY_NAME["公開記録の種類の語彙"].name
 PUBLIC_RECORD_ROLE_VOCABULARY = CONSTRAINT_BY_NAME["公開記録の役割の語彙"].name
 CAPABILITY_CATEGORY_VOCABULARY = CONSTRAINT_BY_NAME["機能の分類の語彙"].name
+PACKAGE_HYPOTHESIS_STATE_VOCABULARY = CONSTRAINT_BY_NAME["パッケージの仮説の状態の語彙"].name
+POSITIONING_SCOPE_VOCABULARY = CONSTRAINT_BY_NAME["決めの適用範囲の語彙"].name
+
+# 設定の [vocabulary] の鍵のうち、この 2 つの語彙を持つもの。違反の直し先に書く。
+PACKAGE_HYPOTHESIS_STATES_KEY = "package_hypothesis_states"
+CHANNELS_KEY = "channels"
 ORIGIN_SECTION_EXISTS = CONSTRAINT_BY_NAME["由来の節の実在"].name
 PRESENTATION_URL_MATCHES = CONSTRAINT_BY_NAME["提示物の URL と公開記録の一致"].name
 COPY_FRESHNESS = CONSTRAINT_BY_NAME["写しの鮮度"].name
@@ -274,6 +283,14 @@ def explain_heading(
             continue
         missing = "、".join(f"「{name}」" for name in defect.missing_fields)
         where = defect.heading or defect.location
+        if defect.invalid_fields and not defect.missing_fields:
+            return (
+                False,
+                f"{label}「{wanted}」は {defect.file} の「{where}」に実在するが、"
+                f"{defect.reason}ので型にできず、いまの正本として読んでいない。"
+                f"直すのはこのファイルではなく、{defect.file} の「{where}」の値である。",
+                [],
+            )
         return (
             False,
             f"{label}「{wanted}」は {defect.file} の「{where}」に実在するが、"
@@ -755,9 +772,9 @@ class ConsistencyService:
     def _check_vocabulary(
         self, snapshot: SourceSnapshot, target: InspectionScope
     ) -> list[Violation]:
-        """公開記録の種類と役割、機能の分類が、設定が持つ語の一覧にあるかを見る。
+        """公開記録の種類と役割、機能の分類、パッケージの仮説の状態、決めの適用範囲が、設定が持つ語の一覧にあるかを見る。
 
-        登記の操作も書き込みの瞬間に同じことを見るが、正本は accord を通さずに手で直すことがある。
+        登記の操作も書き込みの瞬間に同じことを見るが、正本には accord を通さずに入った行が残っていることがある。
         設定の外の語でも型にはできるので読み込みは通り、必須の欄の欠けだけを見る検査は黙って通る。
         だから、裏づけ節名の実在と同じく、読み込んだ正本に対しても当て直す。
         語の外れたブロックを読み飛ばさず違反 1 件として挙げるので、材料の取り出しからは消えない。
@@ -828,6 +845,54 @@ class ConsistencyService:
                         f"「{capability.category}」を足す。"
                     ),
                     candidates=list(categories),
+                )
+            )
+
+        states = self.settings.package_hypothesis_states
+        for package in target.packages:
+            # spec: REQ-528
+            # 値の末尾の括弧書きの注（「検証中（引き合い 2 件）」の括弧の部分）は落としてから照らす。
+            if strip_note(package.hypothesis_state) in states:
+                continue
+            violations.append(
+                Violation(
+                    constraint=PACKAGE_HYPOTHESIS_STATE_VOCABULARY,
+                    file=self.settings.files["packages"],
+                    location=f"「{package.name}」（{package.id}）の節の「仮説の状態」の行",
+                    expected=(
+                        f"仮説の状態「{package.hypothesis_state}」は、設定が持つ語の一覧に無い。"
+                        f"この行を下の候補のどれかに書き換えるか、設定 {config_name} の"
+                        f" [vocabulary] の {PACKAGE_HYPOTHESIS_STATES_KEY} に「{package.hypothesis_state}」を足す。"
+                    ),
+                    candidates=list(states),
+                )
+            )
+
+        scopes = accepted_scopes(self.settings)
+        # 全体の検査では、適用される決めだけでなく、積んだ決めのすべてを見る（過去の決めの直しも断るため）。
+        # 媒体（か適用先の語）で絞った検査では、その語を適用範囲に持つ決めにだけ当てる。
+        positionings = (
+            snapshot.positionings
+            if target.label == WHOLE_SCOPE
+            else [item for item in snapshot.positionings if strip_note(item.scope) == target.label]
+        )
+        for positioning in positionings:
+            # spec: REQ-529
+            # 値の末尾の括弧書きの注は落としてから照らす。
+            if strip_note(positioning.scope) in scopes:
+                continue
+            violations.append(
+                Violation(
+                    constraint=POSITIONING_SCOPE_VOCABULARY,
+                    file=self.settings.files["positioning"],
+                    location=f"{positioning.decided_on} の決めの「適用範囲」の行",
+                    expected=(
+                        f"適用範囲「{positioning.scope}」は、「{WHOLE_SCOPE}」でも、設定が持つ媒体の名前"
+                        "でも決めの適用先の語でもない。この行を下の候補のどれかに書き換えるか、"
+                        f"設定 {config_name} の [vocabulary] の {CHANNELS_KEY} か {POSITIONING_TARGETS_KEY}"
+                        f" に「{positioning.scope}」を足す。"
+                    ),
+                    candidates=list(scopes),
                 )
             )
         return violations
@@ -1400,6 +1465,12 @@ ENFORCEMENT: dict[str, dict[str, tuple[Callable[..., Any], ...]]] = {
     },
     CAPABILITY_CATEGORY_VOCABULARY: {
         "register_capability": (OfferingService.register_capability,),
+        "check_consistency": (ConsistencyService._check_vocabulary,),
+    },
+    PACKAGE_HYPOTHESIS_STATE_VOCABULARY: {
+        "check_consistency": (ConsistencyService._check_vocabulary,),
+    },
+    POSITIONING_SCOPE_VOCABULARY: {
         "check_consistency": (ConsistencyService._check_vocabulary,),
     },
     ORIGIN_SECTION_EXISTS: {

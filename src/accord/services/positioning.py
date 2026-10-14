@@ -39,6 +39,7 @@ from accord.repository.markdown_repository import (
     EXCEPTION_REASON_KEY,
     MarkdownRepository,
 )
+from accord.repository.sections import strip_note
 from accord.vocabulary.settings import Settings
 
 # 適用範囲の「全体」。媒体の名前は設定から読むが、この語だけは型の欄の定義（適用範囲は
@@ -74,8 +75,12 @@ def latest_positioning(positionings: list[Positioning], scope: str) -> Positioni
     """適用範囲がその語に一致する決めのうち、いちばん新しい 1 件を返す。
 
     同じ日付が並んだときは、正本の後ろにあるブロックを新しいものとして扱う（決めは下に足すため）。
+    適用範囲の値の末尾の括弧書きの注（「全体（媒体を問わない）」の括弧の部分）は落としてから比べる。
     """
-    matching = [(index, item) for index, item in enumerate(positionings) if item.scope == scope]
+    # spec: REQ-532
+    matching = [
+        (index, item) for index, item in enumerate(positionings) if strip_note(item.scope) == scope
+    ]
     if not matching:
         return None
     # spec: REQ-160
@@ -131,10 +136,12 @@ def defect_notes(settings: Settings, snapshot: SourceSnapshot) -> list[str]:
     groups: dict[tuple[str, tuple[str, ...]], list[SourceDefect]] = {}
     for defect in snapshot.defects:
         # spec: REQ-025
-        groups.setdefault((defect.source_key, tuple(defect.missing_fields)), []).append(defect)
+        groups.setdefault(
+            (defect.source_key, tuple(defect.missing_fields), tuple(defect.invalid_fields)), []
+        ).append(defect)
 
     notes: list[str] = []
-    for (source_key, missing_fields), defects in list(groups.items())[:DEFECT_GROUP_LIMIT]:
+    for (source_key, missing_fields, invalid_fields), defects in list(groups.items())[:DEFECT_GROUP_LIMIT]:
         files = {defect.file for defect in defects}
         places = [
             defect.location if len(files) == 1 else f"{defect.file} の{defect.location}"
@@ -142,6 +149,15 @@ def defect_notes(settings: Settings, snapshot: SourceSnapshot) -> list[str]:
         ]
         missing = "、".join(f"「{name}」" for name in missing_fields)
         where = settings.files.get(source_key, next(iter(files), ""))
+        if invalid_fields:
+            # spec: REQ-541
+            notes.append(
+                "欄" + "、".join(f"「{name}」" for name in invalid_fields)
+                + f"の値が型に合わないので型にできず、いまの正本として読んでいないブロックが {where} に "
+                f"{len(defects)} 件ある（{fold_names(places, keep=DEFECT_SAMPLE_COUNT)}）。"
+                f"{defects[0].reason}。値を型に合う形に直す（revise_section）。"
+            )
+            continue
         # spec: REQ-024
         notes.append(
             f"必須の欄{missing}が無いので型にできず、いまの正本として読んでいないブロックが "
@@ -465,7 +481,8 @@ class PositioningService:
         """
         from accord.services.consistency import ConsistencyService
 
-        scope = None if positioning.scope == WHOLE_SCOPE else positioning.scope
+        written = strip_note(positioning.scope)
+        scope = None if written == WHOLE_SCOPE else written
         report = ConsistencyService(self.settings, self.repository).inspect(
             scope, allow_targets=True
         )

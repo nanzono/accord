@@ -12,6 +12,8 @@ from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 
+from pydantic import ValidationError
+
 from accord.models.ontology import missing_required_fields
 from accord.models.results import (
     PRIVATE_DISCLOSURE_PREFIX,
@@ -36,17 +38,26 @@ from accord.repository.sections import (
     Section,
     append_section_line,
     bullet_items,
+    delete_section,
     drop_field_lines,
+    field_lines,
+    field_lines_with_items,
     find_section,
     find_urls,
+    insert_section,
     is_frame_heading,
+    list_items,
     leading_number,
+    move_section,
     outline_sections,
     prefix_matches,
     read_fields,
+    rename_heading,
     replace_section_body,
     section_fingerprint,
     select_blocks,
+    set_field,
+    shifted_levels,
     split_sections,
     strip_note,
     table_blocks,
@@ -282,6 +293,42 @@ def _as_section(section: SourceSection) -> Section:
     )
 
 
+# 型の欄の名前（英字）から、正本の欄の名前を引けないときに使う、機能の台帳の列の名前。
+CAPABILITY_COLUMN_LABELS = {"ID": "id", "機能名": "name", "説明": "description", "裏づけの節": "evidence_sections"}
+
+
+def _type_word(error_type: str) -> str:
+    """型の検査の誤りの種類を、読めなかった値の型の言葉にする。"""
+    if "date" in error_type:
+        return "日付"
+    if "int" in error_type or "float" in error_type or "decimal" in error_type:
+        return "数"
+    if "url" in error_type:
+        return "URL"
+    return "型に合う値"
+
+
+def _typed(model, values: dict, labels: dict[str, str], defect: dict):
+    """values で型を作る。値が型に合わず作れなければ、読めない欄と理由を持つ SourceDefect を返す。
+
+    必須の欄の欠けは呼ぶ側が先に見る。ここに来るのは、欄はあるが値が型に合わない場合
+    （日付の欄に日付として読めない値がある、など）である。例外で落とさず、読めないブロックとして返す。
+    """
+    try:
+        return model(**values)
+    except ValidationError as error:
+        names = {name: label for label, name in labels.items()}
+        fields: list[str] = []
+        reasons: list[str] = []
+        for entry in error.errors():
+            name = str(entry["loc"][0]) if entry.get("loc") else ""
+            label = names.get(name, name)
+            if label not in fields:
+                fields.append(label)
+                reasons.append(f"欄「{label}」の値を{_type_word(entry.get('type', ''))}として読めない")
+        return SourceDefect(**defect, missing_fields=[], invalid_fields=fields, reason="、".join(reasons))
+
+
 def _text(value: object) -> str:
     """欄の値を、断りに載せる文字列にそろえる。読めていなければ空文字。"""
     return str(value).strip() if value is not None else ""
@@ -473,7 +520,21 @@ class MarkdownRepository:
             values["exceptions"] = self._parse_exceptions(
                 fields.get(POSITIONING_EXCEPTIONS_LABEL, "")
             )
-            result.append(Positioning(**values))
+            item = _typed(
+                Positioning,
+                values,
+                POSITIONING_LABELS,
+                {
+                    "file": self.settings.files["positioning"],
+                    "location": f"「{block.heading}」のブロック",
+                    "source_key": "positioning",
+                    "heading": block.heading,
+                },
+            )
+            if isinstance(item, SourceDefect):
+                defects.append(item)
+                continue
+            result.append(item)
         return result, defects
 
     @staticmethod
@@ -525,7 +586,22 @@ class MarkdownRepository:
 
             for optional_name in ("basis", "source", "breaks_when"):
                 values[optional_name] = _optional(values.get(optional_name))
-            result.append(Package(**values))
+            item = _typed(
+                Package,
+                values,
+                PACKAGE_LABELS,
+                {
+                    "file": self.settings.files["packages"],
+                    "location": f"「{block.heading}」の節",
+                    "source_key": "packages",
+                    "heading": block.heading,
+                    "id": _text(values.get("id")),
+                },
+            )
+            if isinstance(item, SourceDefect):
+                defects.append(item)
+                continue
+            result.append(item)
         return result, defects
 
     def _load_capabilities(self) -> tuple[list[Capability], list[SourceDefect]]:
@@ -563,7 +639,22 @@ class MarkdownRepository:
                         )
                     )
                     continue
-                result.append(Capability(**values))
+                item = _typed(
+                    Capability,
+                    values,
+                    CAPABILITY_COLUMN_LABELS,
+                    {
+                        "file": self.settings.files["capabilities"],
+                        "location": f"分類「{block.heading}」の表の{index}行目",
+                        "source_key": "capabilities",
+                        "heading": block.heading,
+                        "id": _text(values.get("id")),
+                    },
+                )
+                if isinstance(item, SourceDefect):
+                    defects.append(item)
+                    continue
+                result.append(item)
         return result, defects
 
     def _load_career_frames(self) -> tuple[list[CareerFrame], list[SourceDefect]]:
@@ -591,7 +682,22 @@ class MarkdownRepository:
                     )
                 )
                 continue
-            result.append(CareerFrame(**values))
+            item = _typed(
+                CareerFrame,
+                values,
+                CAREER_LABELS,
+                {
+                    "file": self.settings.files["career"],
+                    "location": f"「{block.heading}」のブロック",
+                    "source_key": "career",
+                    "heading": block.heading,
+                    "id": _text(values.get("id")),
+                },
+            )
+            if isinstance(item, SourceDefect):
+                defects.append(item)
+                continue
+            result.append(item)
         return result, defects
 
     def _load_engagements(self) -> tuple[list[Engagement], list[SourceDefect]]:
@@ -619,7 +725,22 @@ class MarkdownRepository:
                     )
                 )
                 continue
-            result.append(Engagement(**values))
+            item = _typed(
+                Engagement,
+                values,
+                ENGAGEMENT_LABELS,
+                {
+                    "file": self.settings.files["engagements"],
+                    "location": f"「{block.heading}」のブロック",
+                    "source_key": "engagements",
+                    "heading": block.heading,
+                    "id": _text(values.get("id")),
+                },
+            )
+            if isinstance(item, SourceDefect):
+                defects.append(item)
+                continue
+            result.append(item)
         return result, defects
 
     def _load_public_records(self) -> tuple[list[PublicRecord], list[SourceDefect]]:
@@ -658,7 +779,22 @@ class MarkdownRepository:
             # URL・由来の節・出所は、空を表す語（「なし」など）で書かれていたら持たないものとして読む。
             for optional_name in ("url", "origin_section", "source"):
                 values[optional_name] = _optional(values.get(optional_name))
-            result.append(PublicRecord(**values))
+            item = _typed(
+                PublicRecord,
+                values,
+                PUBLIC_RECORD_LABELS,
+                {
+                    "file": self.settings.files[PUBLIC_RECORDS_KEY],
+                    "location": f"「{block.heading}」のブロック",
+                    "source_key": PUBLIC_RECORDS_KEY,
+                    "heading": block.heading,
+                    "id": _text(values.get("id")),
+                },
+            )
+            if isinstance(item, SourceDefect):
+                defects.append(item)
+                continue
+            result.append(item)
         return result, defects
 
     def _load_ledger_entries(self) -> tuple[list[ResumeLedger], list[SourceDefect]]:
@@ -708,7 +844,21 @@ class MarkdownRepository:
                     )
                 )
                 continue
-            result.append(ResumeLedger(**values))
+            item = _typed(
+                ResumeLedger,
+                values,
+                LEDGER_LABELS,
+                {
+                    "file": self.settings.files[LEDGER_KEY],
+                    "location": f"「{block.heading}」のブロック",
+                    "source_key": LEDGER_KEY,
+                    "heading": block.heading,
+                },
+            )
+            if isinstance(item, SourceDefect):
+                defects.append(item)
+                continue
+            result.append(item)
         return result, defects
 
     def _presentation_files(self) -> list[Path]:
@@ -787,7 +937,16 @@ class MarkdownRepository:
                 for note in fields.get("未反映の注記", "").splitlines()
                 if note.strip() and note.strip() not in EMPTY_WORDS
             ]
-            result.append(Presentation(**values))
+            item = _typed(
+                Presentation,
+                values,
+                PRESENTATION_LABELS,
+                {"file": relative, "location": "先頭の欄", "source_key": "presentations"},
+            )
+            if isinstance(item, SourceDefect):
+                defects.append(item)
+                continue
+            result.append(item)
             urls.extend(self._presentation_urls(relative, text))
         return result, urls, defects
 
@@ -935,6 +1094,7 @@ class MarkdownRepository:
                 SourceSection(
                     file=name,
                     heading_path=item.path,
+                    heading=section.heading,
                     heading_line=content.splitlines()[section.start],
                     body=section.body,
                     fingerprint=section_fingerprint(section.body),
@@ -980,6 +1140,116 @@ class MarkdownRepository:
         """節の本文の末尾に 1 行足した後のファイルの全文を返す。ファイルには書かない。"""
         text = self.read_source_file(section.file)
         return append_section_line(text, _as_section(section), line)
+
+    def renamed_text(self, section: SourceSection, heading: str) -> str:
+        """節の見出しの文字だけを置き換えた後のファイルの全文を返す。ファイルには書かない。"""
+        return rename_heading(self.read_source_file(section.file), section.start, heading)
+
+    def added_text(
+        self,
+        file_name: str,
+        parent: SourceSection | None,
+        heading: str,
+        body: str,
+        before: SourceSection | None = None,
+    ) -> str:
+        """親の節の下（親が None なら深さ 1）に節を 1 つ足した後のファイルの全文を返す。ファイルには書かない。"""
+        return insert_section(
+            self.read_source_file(file_name),
+            parent.start if parent is not None else None,
+            heading,
+            body,
+            before.start if before is not None else None,
+        )
+
+    def removed_text(self, section: SourceSection) -> str:
+        """節の見出しの行と本文を消した後のファイルの全文を返す。ファイルには書かない。"""
+        return delete_section(self.read_source_file(section.file), section.start)
+
+    def moved_levels(self, section: SourceSection, new_parent: SourceSection | None) -> list[int]:
+        """節を新しい親の下（親が None なら深さ 1）へ動かしたときの、その節と下位の節の深さを返す。"""
+        return shifted_levels(
+            self.read_source_file(section.file),
+            section.start,
+            new_parent.start if new_parent is not None else None,
+        )
+
+    def moved_text(
+        self,
+        section: SourceSection,
+        new_parent: SourceSection | None,
+        before: SourceSection | None = None,
+    ) -> str:
+        """節を下位の節ごと新しい親の下（親が None なら深さ 1）へ移した後の全文を返す。ファイルには書かない。"""
+        return move_section(
+            self.read_source_file(section.file),
+            section.start,
+            new_parent.start if new_parent is not None else None,
+            before.start if before is not None else None,
+        )
+
+    def disclosure_lines(self, section: SourceSection) -> list[tuple[str, str]]:
+        """節の本文の公開可否の欄の行を、（行そのもの、値）の組で書かれた順に返す。"""
+        return field_lines(
+            self.read_source_file(section.file),
+            section.start,
+            DISCLOSURE_LABEL,
+            self._rule_for_file(section.file),
+        )
+
+    def disclosure_lines_in(self, section: SourceSection, text: str) -> list[tuple[str, str]]:
+        """全文 text の中の、section と同じ位置の節の公開可否の欄の行を返す（書く前の判定に使う）。"""
+        return field_lines(text, section.start, DISCLOSURE_LABEL, self._rule_for_file(section.file))
+
+    def disclosure_lines_by_item(
+        self, section: SourceSection, text: str | None = None
+    ) -> list[tuple[str, str | None]]:
+        """節の公開可否の行を、（行そのもの、その行が属する項目の先頭の行。節の欄なら None）で返す。
+
+        text を渡すと、ファイルではなくその全文の、同じ位置の節を見る。
+        """
+        content = self.read_source_file(section.file) if text is None else text
+        return [
+            (line, head)
+            for line, _, head in field_lines_with_items(
+                content, section.start, DISCLOSURE_LABEL, self._rule_for_file(section.file)
+            )
+        ]
+
+    def disclosure_items(self, section: SourceSection, text: str | None = None) -> list[tuple[str, bool]]:
+        """節の本文のいちばん浅い箇条書きの項目を、（先頭の行、公開可否の行を持つか）で返す。
+
+        型の欄の行（「- 期間: …」のような、型の欄の名前に読める行）で始まる項目は数えない。
+        text を渡すと、ファイルではなくその全文の、同じ位置の節を見る。
+        """
+        known = {
+            *CAREER_LABELS,
+            *ENGAGEMENT_LABELS,
+            *LEDGER_LABELS,
+            *PUBLIC_RECORD_LABELS,
+            *PACKAGE_LABELS,
+            *POSITIONING_LABELS,
+            *PRESENTATION_LABELS,
+            PACKAGE_CAPABILITIES_LABEL,
+            POSITIONING_EXCEPTIONS_LABEL,
+        }
+        content = self.read_source_file(section.file) if text is None else text
+        return list_items(content, section.start, DISCLOSURE_LABEL, known, self._rule_for_file(section.file))
+
+    def disclosure_text(self, section: SourceSection, value: str, number: int | None = None) -> str:
+        """節の公開可否の欄の値を置き換えた（欄が無ければ ID の欄の行の直後に足した）後の全文を返す。
+
+        number（1 始まり）を渡すと、公開可否の行のうちその番号の行だけを置き換える。
+        """
+        return set_field(
+            self.read_source_file(section.file),
+            section.start,
+            DISCLOSURE_LABEL,
+            value,
+            ID_LABEL,
+            self._rule_for_file(section.file),
+            number,
+        )
 
     def write_source_file(self, name: str, text: str) -> None:
         """正本のファイル 1 つを、渡された全文で書き換える。"""

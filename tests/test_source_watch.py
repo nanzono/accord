@@ -1,7 +1,7 @@
 """起動時と読みの前の整合の検査と、返り値に正本の置き場の絶対パスを出さないことのテスト。
 
 起動時の検査は、標準入出力のサーバーを子のプロセスで起動して標準エラーを見る（入力を閉じると
-サーバーは終わる）。読みの前の知らせは、読みの操作の返り値の欄で見る。13 の操作をすべて
+サーバーは終わる）。読みの前の知らせは、読みの操作の返り値の欄で見る。18 の操作をすべて
 一時の写しの上で呼び、返り値を JSON にした文字列に写しの絶対パスが現れないことも見る。
 """
 
@@ -130,7 +130,7 @@ def test_REQ_459_an_unchanged_source_is_not_checked_again(settings, monkeypatch)
 
 
 def _call_every_tool(settings) -> list[str]:
-    """13 の操作を、書き出し先を設定した写しの上ですべて呼び、返り値の文字列を集める。"""
+    """18 の操作を、書き出し先を設定した写しの上ですべて呼び、返り値の文字列を集める。"""
     server = create_server(settings)
     calls = {
         "get_positioning": {},
@@ -176,6 +176,35 @@ def _call_every_tool(settings) -> list[str]:
         "revise_section": {
             "section": "freelance-solo",
             "body": "中身",
+            "fingerprint": "00000000",
+            "reason": "置き場が返り値に出ないことを見るため",
+        },
+        "rename_heading": {
+            "section": "freelance-solo",
+            "heading": "新しい見出し",
+            "fingerprint": "00000000",
+            "reason": "置き場が返り値に出ないことを見るため",
+        },
+        "add_section": {
+            "parent": "freelance-solo",
+            "heading": "新しい節",
+            "body": "中身",
+            "reason": "置き場が返り値に出ないことを見るため",
+        },
+        "remove_section": {
+            "section": "freelance-solo",
+            "fingerprint": "00000000",
+            "reason": "置き場が返り値に出ないことを見るため",
+        },
+        "move_section": {
+            "section": "freelance-solo",
+            "new_parent": "missing",
+            "fingerprint": "00000000",
+            "reason": "置き場が返り値に出ないことを見るため",
+        },
+        "set_disclosure": {
+            "section": "freelance-solo",
+            "disclosure": "公開可",
             "fingerprint": "00000000",
             "reason": "置き場が返り値に出ないことを見るため",
         },

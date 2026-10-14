@@ -1,4 +1,4 @@
-"""MCP のツール 13 本と資源 1 本を開く、薄い皮。
+"""MCP のツール 18 本と資源 1 本を開く、薄い皮。
 
 この文書がするのは、引数の型を確かめてサービスに渡し、返ってきた型をそのまま返すことだけである。
 制約の判断はサービスにあり、正本の在処はリポジトリにある。ここに業務の判断を書かないのは、
@@ -39,7 +39,7 @@ from accord.services.watch import SourceWatch
 from accord.vocabulary.settings import Settings
 
 # ツールと資源の名前。README の「動かす」の表と同じ綴りで、変えない。
-# spec: REQ-462
+# spec: REQ-489
 TOOL_NAMES = (
     "get_positioning",
     "assemble_material",
@@ -53,6 +53,11 @@ TOOL_NAMES = (
     "search_facts",
     "record_fact",
     "revise_section",
+    "rename_heading",
+    "add_section",
+    "remove_section",
+    "move_section",
+    "set_disclosure",
     "export_source",
 )
 ONTOLOGY_URI = "accord://ontology"
@@ -76,6 +81,8 @@ def as_date(text: str) -> date | None:
 
 
 # spec: REQ-463
+# spec: REQ-487
+# spec: REQ-500
 INSTRUCTIONS = """accord は、案件獲得の正本（何ができるか、何をしてきたか、どう売るか）と、
 そこから派生する対外表現が食い違わないようにする道具である。
 正本のファイルを直接開かず、accord の操作で読み書きする。正本の置き場は教えない。
@@ -83,12 +90,15 @@ INSTRUCTIONS = """accord は、案件獲得の正本（何ができるか、何�
 応募文・プロフィール・職務経歴書を書く前に assemble_material を 1 回呼ぶ。経歴の節がすべてそろう。
 事実を確かめるときは list_sections・read_section・search_facts で読む。
 実績や経歴の事実を書き足すときは record_fact、節を直すときは read_section で読んでから revise_section を呼ぶ。
+見出しの変更と節の追加と節の削除と節の移動と公開可否の変更も accord の操作で行う。
+見出しは rename_heading、節を足すのは add_section、消すのは remove_section、動かすのは move_section、
+公開可否は set_disclosure で変える。どれも read_section で読んだ指紋を渡す（節を足すときは要らない）。
 外に出す前に check_consistency を呼ぶ。
 """
 
 
 def create_server(settings: Settings, watch: SourceWatch | None = None) -> MCPServer:
-    """設定を 1 つ受け取り、ツール 13 本と資源 1 本を登録したサーバーを返す。
+    """設定を 1 つ受け取り、ツール 18 本と資源 1 本を登録したサーバーを返す。
 
     読みの前の整合の検査（watch）は、読みの操作のすべてで 1 つを共有する。起動時の検査の結果も
     これに残るので、起動後の最初の読みは、正本が変わっていなければ検査を走らせ直さない。
@@ -286,15 +296,102 @@ def create_server(settings: Settings, watch: SourceWatch | None = None) -> MCPSe
         return section_service.record_fact(section, fact, source, date)
 
     @mcp.tool()
-    def revise_section(section: str, body: str, fingerprint: str, reason: str) -> WriteResult:
+    def revise_section(
+        section: str,
+        body: str,
+        fingerprint: str,
+        reason: str,
+        disclosures: list[str] | None = None,
+    ) -> WriteResult:
         """節 1 つの本文を書き換える。read_section で読んでから、そのとき得た指紋を添えて呼ぶ。
 
-        書けるのは、経歴の正本・職務経歴書の台帳・見せ方の正本の節。見出しの行と下位の節は変わらない。
-        本文に見出しの行を書くと断る（節の新設と見出しの変更はできない）。ID の欄は元の値のまま残す。
-        読んだ後に誰かが直していれば（指紋が違えば）書かない。reason は何をなぜ直すかの 1 文。
+        正本のどのファイルの節も書ける。見出しの行と下位の節は変わらない。本文に見出しの行を書くと断る
+        （節を足すのは add_section、見出しを変えるのは rename_heading）。ID の欄は元の値のまま残す。
+        公開可否の行を足す・消す・並べ替える・値を変えるときは、書いた後の公開可否の行の値を上から順に
+        disclosures に並べて渡す（申告）。申告が無いか実際の並びと違えば書かない。通ると、変わる前と後の
+        公開可否の行が返り、コミットの説明にも残る。公開可否の行を 2 行以上持つ節では、公開可否の行の無い
+        箇条書きの項目を増やせない。読んだ後に誰かが直していれば（指紋が違えば）書かない。書いた後に
+        整合の検査の違反か読めないブロックが新しく出るなら書かない。reason は何をなぜ直すかの 1 文。
         通ると、節の新しい指紋と、読み比べるべき写しが返る。
         """
-        return section_service.revise_section(section, body, fingerprint, reason)
+        return section_service.revise_section(section, body, fingerprint, reason, disclosures)
+
+    @mcp.tool()
+    def rename_heading(section: str, heading: str, fingerprint: str, reason: str) -> WriteResult:
+        """節の見出しの文字だけを変える。深さ・本文・下位の節は変わらない。
+
+        section は節の ID か見出しの道筋、heading は「#」を付けない新しい見出しの文字（1 行）、
+        fingerprint は read_section で得た指紋、reason は何をなぜ変えるかの 1 文。
+        ファイルの 1 行目の見出しもこれで変える。通ると、変えたファイルを 1 件のコミットにする。
+        """
+        return section_service.rename_heading(section, heading, fingerprint, reason)
+
+    @mcp.tool()
+    def add_section(
+        heading: str,
+        body: str,
+        reason: str,
+        parent: str | None = None,
+        file: str | None = None,
+        before: str | None = None,
+    ) -> WriteResult:
+        """節を 1 つ足す。parent を渡すと、その節より 1 段深い節を親の下位の節の末尾に置く。
+
+        parent は親の節の ID か見出しの道筋。parent を渡さずに file（正本のファイルの名前）を渡すと、
+        そのファイルの末尾に深さ 1 の節を足す（parent と file の両方を渡すと、親をそのファイルの中で探す。
+        file が正本のファイルに無い名前なら、parent があっても断る）。heading は「#」を付けない見出しの文字、body は本文
+        （見出しの行を含めない。下位の節は、足した節を親にしてもう一度呼んで作る）、reason は理由の 1 文。
+        before に親の直下の節（parent が無ければ深さ 1 の節）を渡すと、その節の直前に置く
+        （新しい順に並べる正本のため）。通ると、変えたファイルを 1 件のコミットにする。
+        """
+        return section_service.add_section(parent, heading, body, reason, before, file)
+
+    @mcp.tool()
+    def remove_section(section: str, fingerprint: str, reason: str) -> WriteResult:
+        """節の見出しの行と本文を消す。下位の節を持つ節は消さない（先に下位の節を消す）。
+
+        fingerprint は read_section で得た指紋、reason は何をなぜ消すかの 1 文。ほかの項目がこの節の
+        ID を指していれば、書いた後の検査が違反を出すので消さない。通ると、変えたファイルを 1 件のコミットにする。
+        """
+        return section_service.remove_section(section, fingerprint, reason)
+
+    @mcp.tool()
+    def move_section(
+        section: str,
+        fingerprint: str,
+        reason: str,
+        new_parent: str | None = None,
+        before: str | None = None,
+        file: str | None = None,
+    ) -> WriteResult:
+        """節を下位の節ごと、新しい親の節の下へ動かす。同じ親の中の並べ替えにも使う。
+
+        深さは新しい親より 1 段深くそろえ、下位の節も同じ段数ずらす。既定では新しい親の下位の末尾、
+        before に新しい親の直下の節を渡すとその直前に置く。new_parent を渡さなければ、同じファイルの
+        深さ 1 の節として末尾へ動かす（before に深さ 1 の節を渡せばその直前。深さ 1 の節どうしの
+        並べ替えもこれで行う）。ファイルをまたいでは動かせない。fingerprint は動かす節を read_section で
+        読んだ指紋。file に正本のファイルの名前を渡すと、動かす節と新しい親をそのファイルの中で探す
+        （正本のファイルに無い名前なら断る）。通ると、1 件のコミットにする。
+        """
+        return section_service.move_section(section, new_parent, fingerprint, reason, before, file)
+
+    @mcp.tool()
+    def set_disclosure(
+        section: str,
+        disclosure: str,
+        fingerprint: str,
+        reason: str,
+        line: int | None = None,
+    ) -> WriteResult:
+        """ID の欄を持つ節の公開可否を変える。欄が無ければ ID の欄の行の直後に足す。
+
+        disclosure は新しい公開可否の 1 行（「公開不可」で始まる値は材料に載らない）。
+        「公開不可」で始まる値から外すと、材料の取り出しに新しく出ることと、元の値・新しい値・理由が返る。
+        fingerprint は read_section で得た指紋、reason は理由の 1 文。通ると、元の値と新しい値を書いた
+        1 件のコミットにする。公開可否の行を 2 行以上持つ節では、line に何行目か（1 始まり）を渡し、
+        その行だけを変える。line が無いか当たらなければ書かずに、いまの公開可否の行を番号つきで返す。
+        """
+        return section_service.set_disclosure(section, disclosure, fingerprint, reason, line)
 
     @mcp.tool()
     def export_source() -> ExportResult:

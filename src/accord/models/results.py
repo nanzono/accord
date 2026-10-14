@@ -482,6 +482,19 @@ class SourceDefect(BaseModel):
         default="",
         description="そのブロックの ID。ID の行そのものが欠けているブロックと、提示物では空",
     )
+    invalid_fields: list[str] = Field(
+        default_factory=list, description="値が型に合わず読めなかった欄の名前（欠けた欄とは別）"
+    )
+    reason: str = Field(default="", description="値が型に合わず読めなかった理由（欠けた欄だけのときは空）")
+
+    def problem_text(self) -> str:
+        """このブロックが読めない理由を 1 句にする。欠けた欄と、型に合わない値の欄を言い分ける。"""
+        parts: list[str] = []
+        if self.missing_fields:
+            parts.append("必須の欄" + "、".join(f"「{name}」" for name in self.missing_fields) + "が無い")
+        if self.invalid_fields:
+            parts.append(self.reason or ("欄" + "、".join(f"「{name}」" for name in self.invalid_fields) + "の値が型に合わない"))
+        return "。".join(parts)
 
 
 class SkippedHeading(BaseModel):
@@ -597,6 +610,7 @@ class SourceSection(BaseModel):
 
     file: str = Field(description="設定に書いたファイルの名前")
     heading_path: str = Field(description="見出しの道筋")
+    heading: str = Field(default="", description="見出しの文字（# と前後の空白を含まない）")
     heading_line: str = Field(description="見出しの行そのもの（# を含む）")
     body: str = Field(description="本文（見出しの行と下位の見出しの節は含まない）")
     fingerprint: str = Field(description="本文の指紋")

@@ -840,3 +840,35 @@ def test_REQ_245_only_the_first_broken_rule_is_returned_when_recording(settings)
     )
     assert bundle_broken.rejection is not None
     assert bundle_broken.rejection.constraint == "前面に出す束の実在"
+
+
+# ---------------------------------------------------------------- 適用範囲の注
+
+
+def test_REQ_532_a_noted_channel_scope_is_chosen_for_the_channel(settings) -> None:
+    """適用範囲に末尾の括弧書きの注がある決めも、注を落とした語で媒体の名前と比べて選ぶ。"""
+    _append(settings, CHANNEL_DECISION.replace("- 適用範囲: nagiho", "- 適用範囲: nagiho（応募の文面だけ）"))
+
+    named = _view(settings, "nagiho")
+
+    assert named.positioning is not None
+    assert named.positioning.headline_package == OLDER_HEADLINE
+    assert named.positioning.decided_on == date(2026, 9, 11)
+
+
+def test_REQ_532_a_noted_whole_scope_is_chosen_when_no_channel_is_named(settings) -> None:
+    """適用範囲が「全体（注）」の決めも、媒体を省いた読みと材料の取り出しで「全体」の決めとして選ぶ。"""
+    from accord.models.results import MaterialRequest
+    from accord.services.material import MaterialService
+
+    positioning = settings.path_for("positioning")
+    text = positioning.read_text(encoding="utf-8")
+    positioning.write_text(text.replace("- 適用範囲: 全体", "- 適用範囲: 全体（媒体を問わない）"), encoding="utf-8")
+
+    whole = _view(settings)
+    material = MaterialService(settings).assemble(MaterialRequest(channel="tsukikusa"))
+
+    assert whole.positioning is not None
+    assert whole.positioning.decided_on == date(2026, 9, 10)
+    assert material.positioning is not None
+    assert material.positioning.decided_on == date(2026, 9, 10)

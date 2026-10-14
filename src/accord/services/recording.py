@@ -1,13 +1,12 @@
 """書き込みの記録。設定で有効にしたとき、書き込みの操作が変えた正本のファイルを git にコミットする。
 
-AI のセッションにデータの置き場を知らせない構成では、セッションは自分ではコミットできない。
-accord がコミットしなければ、正本の変更の履歴が残らない。だから書いた操作の側で、書いたファイル
-だけをコミットする。人の手の変更がまだコミットされていないファイルには書かない。その人の許可なしに、
-人の手の変更を accord のコミットに混ぜて履歴にしないためである。
+正本のファイルは、人も AI のセッションも直接触らない。accord がコミットしなければ、正本の変更の
+履歴が残らない。だから書いた操作の側で、書いたファイルだけをコミットする。accord を通さない変更が
+まだコミットされずに残っているファイルには書かない。その変更を accord のコミットに混ぜて、
+accord が書いたものとして履歴にしないためである。
 
 有効でないときは、git を 1 度も呼ばない。
 """
-
 from __future__ import annotations
 
 from accord.models.results import NextAction, Rejection
@@ -47,27 +46,28 @@ class WriteRecorder:
         try:
             dirty = self.git().has_uncommitted_change(path)
         except GitError as error:
+            # spec: REQ-500
             return Rejection(
                 constraint=UNCOMMITTED_CHANGE,
                 reason=f"{file_name} の git の状態を読めなかったので書かなかった（{error}）。",
                 next_action=NextAction(
                     operation=operation,
-                    example="データの置き場の git の状態を確かめてから、もう一度呼ぶ。",
+                    example="git の状態を読めなかったことを依頼した人に伝え、もう一度呼ぶ。",
                 ),
             )
         # spec: REQ-405
         if not dirty:
             return None
+        # spec: REQ-500
         return Rejection(
             constraint=UNCOMMITTED_CHANGE,
             reason=(
-                f"{file_name} に、まだコミットしていない人の手の変更がある。"
-                "accord はその変更を自分のコミットに混ぜないため、書かなかった。"
-                f"先にその変更をコミットしてから、もう一度 {operation} を呼ぶ。"
+                f"{file_name} に accord を通さない変更（まだコミットされていない変更）があるので、"
+                "書かなかった。accord はその変更を自分のコミットに混ぜない。"
             ),
             next_action=NextAction(
                 operation=operation,
-                example=f"データの置き場で {file_name} の変更をコミットしてから、同じ引数で呼び直す。",
+                example=f"{file_name} に accord を通さない変更があることを、依頼した人に伝える。",
             ),
         )
 
@@ -84,7 +84,8 @@ class WriteRecorder:
         except GitError as error:
             return [
                 f"{file_name} に書いたが、git へのコミットが通らなかった（{error}）。"
-                f"設定 {COMMIT_WRITES_KEY} が有効なので、データの置き場でこのファイルをコミットする。"
+                f"設定 {COMMIT_WRITES_KEY} が有効なのに、この書き込みは履歴に残っていない。"
+                "このことを依頼した人に伝える。"
             ]
         if not commit:
             return []

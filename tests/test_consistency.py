@@ -1324,3 +1324,112 @@ def test_REQ_386_the_returned_line_can_be_appended_as_is(
     _append_to_block(ledger, heading, line)
 
     assert _freshness(_report(settings)) == []
+
+
+# ---------------------------------------------------------------- パッケージの仮説の状態と決めの適用範囲の語彙
+
+
+def _replace_once(path: Path, old: str, new: str) -> None:
+    text = path.read_text(encoding="utf-8")
+    assert old in text, f"{old} が {path.name} に無い"
+    path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+
+def test_REQ_528_a_hypothesis_state_outside_the_vocabulary_is_a_violation(settings, alt_settings) -> None:
+    """パッケージ定義の仮説の状態が語彙に無ければ違反を返し、語彙の中なら返さない（2 つの見本で）。"""
+    for current in (settings, alt_settings):
+        assert not [
+            item
+            for item in ConsistencyService(current).inspect().violations
+            if item.constraint == "パッケージの仮説の状態の語彙"
+        ]
+        _replace_once(current.path_for("packages"), "- 仮説の状態: 検証中", "- 仮説の状態: 無い状態")
+
+        found = [
+            item
+            for item in ConsistencyService(current).inspect().violations
+            if item.constraint == "パッケージの仮説の状態の語彙"
+        ]
+
+        assert len(found) == 1, found
+        assert "無い状態" in found[0].expected
+        assert found[0].candidates == list(current.package_hypothesis_states)
+
+
+def test_REQ_529_a_positioning_scope_outside_the_vocabulary_is_a_violation(settings, alt_settings) -> None:
+    """決めの適用範囲が「全体」でも媒体の名前でも適用先の語でもなければ違反を返す（2 つの見本で）。"""
+    for current in (settings, alt_settings):
+        assert not [
+            item
+            for item in ConsistencyService(current).inspect().violations
+            if item.constraint == "決めの適用範囲の語彙"
+        ]
+        _replace_once(current.path_for("positioning"), "- 適用範囲: 全体", "- 適用範囲: 無い媒体")
+
+        found = [
+            item
+            for item in ConsistencyService(current).inspect().violations
+            if item.constraint == "決めの適用範囲の語彙"
+        ]
+
+        assert len(found) == 1, found
+        assert "無い媒体" in found[0].expected
+        assert found[0].candidates[0] == "全体"
+        assert set(current.channels) <= set(found[0].candidates)
+
+
+def test_REQ_529_a_channel_name_is_an_accepted_scope(settings) -> None:
+    """適用範囲が設定の媒体の名前なら、違反にしない。"""
+    _replace_once(settings.path_for("positioning"), "- 適用範囲: 全体", f"- 適用範囲: {settings.channels[0]}")
+
+    found = [
+        item
+        for item in ConsistencyService(settings).inspect().violations
+        if item.constraint == "決めの適用範囲の語彙"
+    ]
+
+    assert found == []
+
+
+def test_REQ_528_a_state_with_a_trailing_note_is_read_without_the_note(settings, alt_settings) -> None:
+    """仮説の状態に末尾の括弧書きの注があっても、注を落とした語が語彙にあれば違反にしない。注を落としても語彙に無ければ違反。"""
+    for current in (settings, alt_settings):
+        packages = current.path_for("packages")
+        _replace_once(packages, "- 仮説の状態: 検証中", "- 仮説の状態: 検証中（引き合い 2 件、2026-10 時点）")
+
+        noted = [
+            item
+            for item in ConsistencyService(current).inspect().violations
+            if item.constraint == "パッケージの仮説の状態の語彙"
+        ]
+        assert noted == []
+
+        _replace_once(packages, "- 仮説の状態: 検証中（", "- 仮説の状態: 無い状態（")
+        found = [
+            item
+            for item in ConsistencyService(current).inspect().violations
+            if item.constraint == "パッケージの仮説の状態の語彙"
+        ]
+        assert len(found) == 1, found
+
+
+def test_REQ_529_a_scope_with_a_trailing_note_is_read_without_the_note(settings, alt_settings) -> None:
+    """適用範囲に末尾の括弧書きの注があっても、注を落とした語が「全体」か媒体の名前なら違反にしない。"""
+    for current in (settings, alt_settings):
+        positioning = current.path_for("positioning")
+        _replace_once(positioning, "- 適用範囲: 全体", "- 適用範囲: 全体（媒体を問わない）")
+
+        noted = [
+            item
+            for item in ConsistencyService(current).inspect().violations
+            if item.constraint == "決めの適用範囲の語彙"
+        ]
+        assert noted == []
+
+        _replace_once(positioning, "- 適用範囲: 全体（", "- 適用範囲: 無い媒体（")
+        found = [
+            item
+            for item in ConsistencyService(current).inspect().violations
+            if item.constraint == "決めの適用範囲の語彙"
+        ]
+        assert len(found) == 1, found
