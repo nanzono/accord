@@ -23,7 +23,7 @@ from accord.models.results import (
 from accord.repository.markdown_repository import MarkdownRepository
 from accord.services.offering import OfferingService
 from accord.vocabulary.settings import load_settings
-from conftest import source_digest
+from conftest import commit_all, source_digest
 
 # 設定を書き換えたときに使う、別人の語彙。コードには 1 行も現れない語にしてある。
 OTHER_CATEGORIES = [
@@ -149,6 +149,7 @@ def _old_category_result(sample_copy: Path) -> tuple[WriteResult, str]:
     before = _load(sample_copy)
     old_category = before.capability_categories[0]
     _rewrite_categories(sample_copy, OTHER_CATEGORIES)
+    commit_all(sample_copy / "data")
     after = _load(sample_copy)
     heading = MarkdownRepository(after).load().section_headings()[-1]
     result = OfferingService(after).register_capability(
@@ -229,6 +230,7 @@ def test_REQ_109_capability_categories_come_from_settings(sample_copy: Path) -> 
     assert old_category not in OTHER_CATEGORIES
 
     _rewrite_categories(sample_copy, OTHER_CATEGORIES)
+    commit_all(sample_copy / "data")
     after = _load(sample_copy)
     assert after.capability_categories == OTHER_CATEGORIES
 
@@ -293,6 +295,7 @@ def test_REQ_114_private_evidence_of_a_registered_capability_is_named_in_a_warni
 ) -> None:
     """公開不可の節を裏づけに登記すると、対外の文面に出せないことを節の名前つきで断る。"""
     _rewrite(settings.path_for("engagements"), *MAKE_PRIVATE)
+    commit_all(settings.source_dir)
 
     accepted = OfferingService(settings).register_capability(
         _record_evidence_draft(settings, evidence_sections=[PRIVATE_SECTION_ID])
@@ -307,6 +310,7 @@ def test_REQ_114_private_evidence_of_a_registered_capability_is_named_in_a_warni
 def test_REQ_370_private_evidence_warning_names_the_rule(settings) -> None:
     """公開不可の節を裏づけに登記すると、その節の警告の先頭に当たったルールの名前が付く。"""
     _rewrite(settings.path_for("engagements"), *MAKE_PRIVATE)
+    commit_all(settings.source_dir)
 
     accepted = OfferingService(settings).register_capability(
         _record_evidence_draft(settings, evidence_sections=[PRIVATE_SECTION_ID])

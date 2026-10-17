@@ -388,11 +388,24 @@ class PositioningView(BaseModel):
 
 
 class ConsistencyNotice(BaseModel):
-    """読みの操作の返り値に載せる、正本全体の整合の検査の知らせ。違反が無ければ載せない。"""
+    """読みの操作の返り値に載せる、正本全体の整合の検査と、accord を通さない変更の知らせ。
+
+    違反も未コミットの変更も accord 以外のコミットも無ければ載せない。
+    """
 
     violation_count: int = Field(description="正本全体の整合の検査の違反の件数")
     fixes: list[str] = Field(
-        default_factory=list, description="直し先（違反 1 件を 1 行にしたもの。多ければ件数に畳む）"
+        default_factory=list,
+        description=(
+            "直し先（違反 1 件を 1 行にしたもの。多ければ件数に畳む）と、"
+            "未コミットの変更を捨てる操作・コミットを取り消す操作の名前を書いた行"
+        ),
+    )
+    uncommitted_change_count: int = Field(
+        default=0, description="置き場の中の、未コミットの変更のあるファイルの件数"
+    )
+    foreign_commit_count: int = Field(
+        default=0, description="移行のコミットより後の、accord 以外のコミットの件数"
     )
 
 

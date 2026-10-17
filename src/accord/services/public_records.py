@@ -82,7 +82,7 @@ class PublicRecordService:
             source=_value(draft.source),
         )
         file_name = self.settings.files[PUBLIC_RECORDS_KEY]
-        # spec: REQ-405
+        # spec: REQ-514
         refusal = self.recorder.refusal(file_name, REGISTER_OPERATION)
         if refusal is not None:
             return WriteResult(accepted=False, rejection=refusal)

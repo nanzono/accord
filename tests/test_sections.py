@@ -16,7 +16,7 @@ import pytest
 from accord.repository.markdown_repository import MarkdownRepository
 from accord.repository.sections import section_fingerprint
 from accord.services.sections import SectionService
-from conftest import git, source_digest
+from conftest import commit_all, git, source_digest
 
 CAREER = "career_master.md"
 LEDGER = "keirekisho/daicho.md"
@@ -1306,7 +1306,7 @@ def test_REQ_533_a_known_file_scopes_the_parent(recording) -> None:
 
 
 def _two_disclosure_lines(settings) -> str:
-    """写しの受託案件 1 つに、値の違う公開可否の行をもう 1 行足してコミットし、足した後の全文を返す。"""
+    """写しの受託案件 1 つに、値の違う公開可否の行をもう 1 行足して根のコミットに畳み、足した後の全文を返す。"""
     career = settings.path_for("career")
     text = career.read_text(encoding="utf-8").replace(
         "- 公開可否: 公開可（業種と規模までにとどめ、製品名は出さない）\n",
@@ -1314,7 +1314,7 @@ def _two_disclosure_lines(settings) -> str:
         1,
     )
     career.write_text(text, encoding="utf-8")
-    git(settings.source_dir, "commit", "-q", "-am", "公開可否の行を 2 行にする")
+    commit_all(settings.source_dir, "公開可否の行を 2 行にする")
     return text
 
 
@@ -1368,12 +1368,12 @@ TALK_ITEM = "- 社内の勉強会での発表\n  - 公開可否: 公開不可（
 
 
 def _itemized(settings) -> list[str]:
-    """写しの受託案件 1 つの本文の末尾に、公開可否の行を持つ箇条書きの項目を 2 つ足してコミットし、値の並びを返す。"""
+    """写しの受託案件 1 つの本文の末尾に、公開可否の行を持つ箇条書きの項目を 2 つ足して根のコミットに畳み、値の並びを返す。"""
     body = _service(settings).read_section("yukinoha-quality").body
     career = settings.path_for("career")
     text = career.read_text(encoding="utf-8")
     career.write_text(text.replace(body, f"{body}\n{MOVE_ITEM}\n{TALK_ITEM}", 1), encoding="utf-8")
-    git(settings.source_dir, "commit", "-q", "-am", "公開可否の行を持つ項目を足す")
+    commit_all(settings.source_dir, "公開可否の行を持つ項目を足す")
     return [YUKINOHA_DISCLOSURE, "公開可", "公開不可（社内の話）"]
 
 
@@ -1504,7 +1504,7 @@ def test_REQ_537_moving_a_disclosure_line_to_the_next_item_needs_a_declaration(r
     career.write_text(
         career.read_text(encoding="utf-8").replace(body, f"{body}\n{first}\n{second}", 1), encoding="utf-8"
     )
-    git(recording.source_dir, "commit", "-q", "-am", "公開可否の行を持つ項目を足す")
+    commit_all(recording.source_dir, "公開可否の行を持つ項目を足す")
     values = [YUKINOHA_DISCLOSURE, "公開可", "公開可（工場の名前は出さない）", "公開不可（社内の話）"]
     current = _service(recording).read_section("yukinoha-quality").body
     moved = current.replace(

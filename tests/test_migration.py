@@ -219,6 +219,10 @@ OTHER_CALLS = {
         "reason": "移行の前に断られることを見るため",
     },
     "export_source": {"path": "/nonexistent-migration-check/all.md"},
+    "add_term": {"kind": "媒体", "term": "見本の媒体", "reason": "移行の前の断りを見る"},
+    "remove_term": {"kind": "媒体", "term": "tsukikusa", "reason": "移行の前の断りを見る"},
+    "revert_commit": {"commit": "deadbeef", "reason": "移行の前の断りを見る"},
+    "discard_uncommitted": {"reason": "移行の前の断りを見る"},
 }
 
 
@@ -331,7 +335,7 @@ def test_REQ_523_the_migrated_place_reads_the_same_as_the_sample(legacy, alt_set
     assert reloaded.reading == alt_settings.reading
 
 
-def test_REQ_405_migration_does_not_write_over_an_uncommitted_change_to_the_settings_file(legacy) -> None:
+def test_REQ_552_migration_does_not_write_over_an_uncommitted_change_to_the_settings_file(legacy) -> None:
     """移行が消す accord.toml に accord を通さない未コミットの変更があれば、移行しない。"""
     data, _, settings = legacy
     config = data / "accord.toml"
@@ -346,6 +350,39 @@ def test_REQ_405_migration_does_not_write_over_an_uncommitted_change_to_the_sett
     assert source_digest(data) == before
     assert _commit_count(data) == commits
 
+
+
+def test_REQ_552_migration_ignores_uncommitted_changes_in_other_files(legacy) -> None:
+    """移行は、書く 2 つのファイルのほかに未コミットの変更があっても、それを理由に断らず、混ぜずに移行する。"""
+    data, _, settings = legacy
+    career = data / "career_master.md"
+    edited = career.read_text(encoding="utf-8") + "\n書きかけ\n"
+    career.write_text(edited, encoding="utf-8")
+
+    result = MigrationService(settings).migrate_data()
+
+    assert result.accepted is True, result.rejection
+    changed = git(data, "show", "--name-only", "--format=", "HEAD").split()
+    assert sorted(changed) == ["accord.toml", "vocabulary.md"]
+    assert career.read_text(encoding="utf-8") == edited
+
+
+def test_REQ_551_migration_is_not_refused_for_commits_without_the_operation_line(legacy) -> None:
+    """移行の前の履歴に、操作の名前を示す行を持たないコミットが何件あっても、移行を断らない。"""
+    data, _, settings = legacy
+    for number in range(3):
+        (data / "career_master.md").write_text(
+            (data / "career_master.md").read_text(encoding="utf-8") + f"\n移行の前の直し {number}\n",
+            encoding="utf-8",
+        )
+        git(data, "commit", "-q", "-am", f"移行の前の直し {number}")
+    commits = _commit_count(data)
+
+    result = MigrationService(settings).migrate_data()
+
+    assert result.accepted is True, result.rejection
+    assert _commit_count(data) == commits + 1
+    assert "Accord-Operation: migrate_data" in git(data, "log", "-1", "--format=%B")
 
 # ---------------------------------------------------------------- accord の形との違い
 

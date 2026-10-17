@@ -1,7 +1,7 @@
 """起動時と読みの前の整合の検査と、返り値に正本の置き場の絶対パスを出さないことのテスト。
 
 起動時の検査は、標準入出力のサーバーを子のプロセスで起動して標準エラーを見る（入力を閉じると
-サーバーは終わる）。読みの前の知らせは、読みの操作の返り値の欄で見る。18 の操作をすべて
+サーバーは終わる）。読みの前の知らせは、読みの操作の返り値の欄で見る。23 の操作をすべて
 一時の写しの上で呼び、返り値を JSON にした文字列に写しの絶対パスが現れないことも見る。
 """
 
@@ -129,7 +129,7 @@ def test_REQ_459_an_unchanged_source_is_not_checked_again(settings, monkeypatch)
 
 
 def _call_every_tool(settings, export_path: str = "") -> list[str]:
-    """19 の操作を、書き出し先を設定した写しの上ですべて呼び、返り値の文字列を集める。"""
+    """23 の操作を、書き出し先を設定した写しの上ですべて呼び、返り値の文字列を集める。"""
     server = create_server(settings)
     calls = {
         "get_positioning": {},
@@ -208,6 +208,10 @@ def _call_every_tool(settings, export_path: str = "") -> list[str]:
             "reason": "置き場が返り値に出ないことを見るため",
         },
         "export_source": {"path": export_path},
+        "add_term": {"kind": "媒体", "term": "見本の媒体", "reason": "置き場が返り値に出ないことを見るため"},
+        "remove_term": {"kind": "媒体", "term": "無い媒体", "reason": "置き場が返り値に出ないことを見るため"},
+        "revert_commit": {"commit": "deadbeef", "reason": "置き場が返り値に出ないことを見るため"},
+        "discard_uncommitted": {"reason": "置き場が返り値に出ないことを見るため"},
         "migrate_data": {},
     }
     assert set(calls) == {tool.name for tool in asyncio.run(server.list_tools())}

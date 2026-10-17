@@ -1,4 +1,4 @@
-"""MCP のツール 19 本と資源 1 本を開く、薄い皮。
+"""MCP のツール 23 本と資源 1 本を開く、薄い皮。
 
 この文書がするのは、引数の型を確かめてサービスに渡し、返ってきた型をそのまま返すことだけである。
 制約の判断はサービスにあり、正本の在処はリポジトリにある。移行の前の置き場で移行のほかの操作を
@@ -34,13 +34,18 @@ from accord.services.material import MaterialService
 from accord.services.offering import OfferingService
 from accord.services.positioning import PositioningService
 from accord.services.public_records import PublicRecordService
-from accord.services.recording import MigrationService, WriteRecorder
+from accord.services.recording import (
+    HistoryService,
+    MigrationService,
+    VocabularyService,
+    WriteRecorder,
+)
 from accord.services.sections import SectionService
 from accord.services.watch import SourceWatch
 from accord.vocabulary.settings import Settings
 
 # ツールと資源の名前。README の「動かす」の表と同じ綴りで、変えない。
-# spec: REQ-549
+# spec: REQ-526
 TOOL_NAMES = (
     "get_positioning",
     "assemble_material",
@@ -60,6 +65,10 @@ TOOL_NAMES = (
     "move_section",
     "set_disclosure",
     "export_source",
+    "add_term",
+    "remove_term",
+    "revert_commit",
+    "discard_uncommitted",
     "migrate_data",
 )
 ONTOLOGY_URI = "accord://ontology"
@@ -85,6 +94,7 @@ def as_date(text: str) -> date | None:
 # spec: REQ-463
 # spec: REQ-487
 # spec: REQ-500
+# spec: REQ-527
 INSTRUCTIONS = """accord は、案件獲得の正本（何ができるか、何をしてきたか、どう売るか）と、
 そこから派生する対外表現が食い違わないようにする道具である。
 正本のファイルを直接開かず、accord の操作で読み書きする。正本の置き場は教えない。
@@ -95,12 +105,16 @@ INSTRUCTIONS = """accord は、案件獲得の正本（何ができるか、何�
 見出しの変更と節の追加と節の削除と節の移動と公開可否の変更も accord の操作で行う。
 見出しは rename_heading、節を足すのは add_section、消すのは remove_section、動かすのは move_section、
 公開可否は set_disclosure で変える。どれも read_section で読んだ指紋を渡す（節を足すときは要らない）。
+語彙の変更と取り消しと未コミットの変更を捨てることと移行も accord の操作で行い、置き場のファイルを直接書かない。
+語彙の語を足すのは add_term、消すのは remove_term、accord のコミット 1 件を打ち消すのは revert_commit、
+accord を通さない未コミットの変更を捨てるのは discard_uncommitted、前の版の置き場を移すのは migrate_data。
+書き込みが、未コミットの変更か accord 以外のコミットで断られたら、依頼した人に確かめてから、断りの次の一手を呼ぶ。
 外に出す前に check_consistency を呼ぶ。
 """
 
 
 def create_server(settings: Settings, watch: SourceWatch | None = None) -> MCPServer:
-    """設定を 1 つ受け取り、ツール 19 本と資源 1 本を登録したサーバーを返す。
+    """設定を 1 つ受け取り、ツール 23 本と資源 1 本を登録したサーバーを返す。
 
     読みの前の整合の検査（watch）は、読みの操作のすべてで 1 つを共有する。起動時の検査の結果も
     これに残るので、起動後の最初の読みは、正本が変わっていなければ検査を走らせ直さない。
@@ -108,6 +122,8 @@ def create_server(settings: Settings, watch: SourceWatch | None = None) -> MCPSe
     watch = watch or SourceWatch(settings)
     recorder = WriteRecorder(settings)
     migration_service = MigrationService(settings, recorder=recorder)
+    vocabulary_service = VocabularyService(settings, recorder=recorder)
+    history_service = HistoryService(settings, recorder=recorder)
     positioning_service = PositioningService(settings, recorder=recorder, watch=watch)
     offering_service = OfferingService(settings, recorder=recorder)
     material_service = MaterialService(settings, watch=watch)
@@ -459,6 +475,51 @@ def create_server(settings: Settings, watch: SourceWatch | None = None) -> MCPSe
         if (blocked := recorder.migration_refusal("export_source")) is not None:
             return ExportResult(written=False, rejection=blocked)
         return section_service.export_source(path)
+
+    @mcp.tool()
+    def add_term(kind: str, term: str, reason: str) -> WriteResult:
+        """語彙（vocabulary.md）の種類の節の末尾に、語を 1 行足す。
+
+        kind は語彙の種類の名前（媒体・決めの適用先・機能の分類・パッケージの仮説の状態・公開記録の種類・
+        公開記録の役割のどれか）、term は足す語（改行を含まない 1 行。その種類に既にある語は足さない）、
+        reason は何をなぜ足すかの 1 文。通ると、その種類の語の一覧を返し、1 件のコミットにする。
+        語を直すときは、新しい語を足し、使っている節を revise_section で直してから、古い語を remove_term で消す。
+        """
+        # spec: REQ-508
+        return vocabulary_service.add_term(kind, term, reason)
+
+    @mcp.tool()
+    def remove_term(kind: str, term: str, reason: str) -> WriteResult:
+        """語彙（vocabulary.md）の種類の節から、語の行を消す。正本の節が使っている語は消さない。
+
+        kind は語彙の種類の名前、term は消す語、reason は何をなぜ消すかの 1 文。使っている節があれば、
+        その節の見出しの道筋を返して消さない（先に revise_section で直す）。通ると 1 件のコミットにする。
+        """
+        # spec: REQ-510
+        return vocabulary_service.remove_term(kind, term, reason)
+
+    @mcp.tool()
+    def revert_commit(commit: str, reason: str) -> WriteResult:
+        """置き場の履歴のコミット 1 件の変更を打ち消すコミットを 1 件作る。
+
+        commit はコミットの短い識別子か長い識別子（断りの候補に返るものをそのまま渡す）、reason は何をなぜ
+        取り消すかの 1 文。移行のコミットとそれより前のコミット、合流のコミット、既に打ち消したコミットは
+        取り消さない。後のコミットとぶつかるときと、打ち消した後に新しい整合の検査の違反が出るときは、
+        置き場をそのままにして断る。accord 以外のコミットがあっても呼べる（それを打ち消すための操作）。
+        """
+        # spec: REQ-517
+        return history_service.revert_commit(commit, reason)
+
+    @mcp.tool()
+    def discard_uncommitted(reason: str) -> WriteResult:
+        """置き場の accord を通さない未コミットの変更を捨て、作業ツリーを最後のコミットの状態に戻す。
+
+        reason は何をなぜ捨てるかの 1 文。捨てる前の差分（最後のコミットとの差分と、追跡していない
+        ファイルの名前と中身）と、捨てたファイルの名前を返す。頼まれた直しが差分に入っていれば、
+        捨てた後に accord の操作でやり直す。捨てる変更が無ければ、何もせずに空の差分を返す。
+        """
+        # spec: REQ-521
+        return history_service.discard_uncommitted(reason)
 
     @mcp.tool()
     def migrate_data() -> WriteResult:

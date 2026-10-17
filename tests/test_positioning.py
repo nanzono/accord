@@ -15,7 +15,7 @@ from pathlib import Path
 from accord.models.results import PositioningDraft
 from accord.repository.markdown_repository import MarkdownRepository
 from accord.services.positioning import PositioningService
-from conftest import add_vocabulary_terms, source_digest
+from conftest import add_vocabulary_terms, commit_all, source_digest
 
 # 同梱のサンプルが持つ決め。日付の新しいほうが、いまの看板になる。
 # 決めが指すのはパッケージの ID なので、見出し（表示名）とは別に持つ。
@@ -117,6 +117,8 @@ def _make_the_package_stale(settings) -> None:
         ),
         encoding="utf-8",
     )
+    # テストの準備なので、accord が書き始める前の置き場の中身として根のコミットに畳む。
+    commit_all(settings.source_dir)
 
 
 def _record_the_older_headline(settings):
@@ -459,6 +461,7 @@ def test_REQ_182_a_fresh_package_definition_is_said_to_be_no_older_than_the_deci
         ),
         encoding="utf-8",
     )
+    commit_all(settings.source_dir)
 
     result = PositioningService(settings).record(
         PositioningDraft(

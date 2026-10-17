@@ -85,9 +85,16 @@ def add_vocabulary_terms(settings: Settings, kind: str, terms: list[str]) -> Set
 
 
 def commit_all(directory: Path, message: str = "テストの準備") -> None:
-    """一時の置き場のいまの中身をすべて 1 件のコミットにする（テストが直接書いた変更を確定する）。"""
+    """一時の置き場のいまの中身をすべて、根のコミットに畳む（テストが直接書いた準備を確定する）。
+
+    テストの準備は、accord が書き始める前の置き場の中身なので、根のコミットの後に別のコミットを作らない。
+    別のコミットにすると、操作の名前を示す行を持たないので、accord 以外のコミットとして数えられ、
+    その後の書き込みが断られる。accord が書いた後に呼ぶと履歴を書き換えてしまうので、そのときは落とす。
+    """
+    count = int(git(directory, "rev-list", "--count", "HEAD").strip())
+    assert count == 1, "テストの準備は、accord が書く前（コミットが根の 1 件だけのとき）に行う。"
     git(directory, "add", "-A")
-    git(directory, "commit", "-q", "--allow-empty", "-m", message)
+    git(directory, "commit", "-q", "--amend", "--allow-empty", "-m", message)
 
 
 def git(directory: Path, *args: str) -> str:

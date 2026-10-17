@@ -14,7 +14,10 @@ AI が accord を使い始めるときは、まず資源 `accord://ontology` を
 指された値が読めないときの言い分けは [id-reference.md](id-reference.md) にあります。
 
 このファイルは、正本が定める ID の欄と、資源が返すものと、正本とコードの結び付きと、起動した
-accord が開く口の顔ぶれを述べます。ルールが 1 件ずつ何を見て何を返すかは、このファイルではなく
+accord が開く口の顔ぶれを述べます。語彙（置き場の `vocabulary.md` の 6 つの種類と語）を変える 2 つの操作
+（語彙に語を足す・語彙から語を消す）の要件もここに置きます。語が「使われている」かは、整合の検査が語彙と
+照らしている欄（売り方の決めの適用範囲、機能の台帳の分類の節の見出し、パッケージ定義の仮説の状態、公開記録の
+種類と役割）だけで見ます。ルールが 1 件ずつ何を見て何を返すかは、このファイルではなく
 機能ごとの要件のファイルが持ちます。要件の書き方と番号の決まりは [README.md](README.md) に
 あります。
 
@@ -146,6 +149,55 @@ accord が開く口の顔ぶれを述べます。ルールが 1 件ずつ何を�
 
 - 関係するファイル: `src/accord/server/app.py`
 - 検証手順: `uv run pytest tests/test_smoke.py -k REQ_549`
+- status: superseded by REQ-526
+
+## REQ-508
+語彙の種類と語と理由を渡されて語彙に語を足すとき、accord は vocabulary.md のその種類の節の末尾に語を 1 行足す。
+
+- 関係するファイル: `src/accord/services/recording.py`、`src/accord/repository/markdown_repository.py`、`src/accord/server/app.py`
+- 検証手順: `uv run pytest tests/test_vocabulary_terms.py -k REQ_508`
+
+## REQ-509
+もし足す語がその種類に既にあるか、空か、改行を含むなら、accord は書かずに、その種類のいまの語の一覧を断りに返す。
+
+- 関係するファイル: `src/accord/services/recording.py`、`src/accord/repository/markdown_repository.py`、`src/accord/server/app.py`
+- 検証手順: `uv run pytest tests/test_vocabulary_terms.py -k REQ_509`
+
+## REQ-510
+語彙の種類と語と理由を渡されて語彙から語を消すとき、accord はその種類の節からその語の行を消す。
+
+- 関係するファイル: `src/accord/services/recording.py`、`src/accord/repository/markdown_repository.py`、`src/accord/server/app.py`
+- 検証手順: `uv run pytest tests/test_vocabulary_terms.py -k REQ_510`
+
+## REQ-511
+もし消す語を正本のどこかの節が使っているなら、accord は書かずに、使っている節の道筋を断りに返す。
+
+- 関係するファイル: `src/accord/services/recording.py`、`src/accord/repository/markdown_repository.py`、`src/accord/server/app.py`
+- 検証手順: `uv run pytest tests/test_vocabulary_terms.py -k REQ_511`
+
+## REQ-512
+もし渡された語彙の種類が、媒体・決めの適用先・機能の分類・パッケージの仮説の状態・公開記録の種類・公開記録の役割の 6 つのどれでもないなら、accord は書かずに、6 つの種類の名前を断りに返す。
+
+- 関係するファイル: `src/accord/services/recording.py`、`src/accord/repository/markdown_repository.py`、`src/accord/server/app.py`
+- 検証手順: `uv run pytest tests/test_vocabulary_terms.py -k REQ_512`
+
+## REQ-542
+もし語彙から消す語がその種類に無いなら、accord は書かずに、その種類のいまの語の一覧を断りに返す。
+
+- 関係するファイル: `src/accord/services/recording.py`、`src/accord/repository/markdown_repository.py`、`src/accord/server/app.py`
+- 検証手順: `uv run pytest tests/test_vocabulary_terms.py -k REQ_542`
+
+## REQ-526
+起動されたとき、accord は決めを読む・材料を取り出す・決めを登記する・機能を登記する・公開記録を登記する・パッケージを改訂する・整合を検査する・節を一覧する・節を読む・事実を検索する・事実を登記する・節を書き換える・見出しを変える・節を足す・節を消す・節を動かす・公開可否を変える・書き出す・語彙に語を足す・語彙から語を消す・コミットを取り消す・未コミットの変更を捨てる・移行するの 23 の操作を開く。（REQ-549 に取って代わる）
+
+- 関係するファイル: `src/accord/server/app.py`
+- 検証手順: `uv run pytest tests/test_smoke.py -k REQ_526`
+
+## REQ-527
+起動されたとき、accord はサーバーの説明に、語彙の変更と取り消しと未コミットの変更を捨てることと移行も accord の操作で行い、置き場のファイルを直接書かないことを書く。
+
+- 関係するファイル: `src/accord/server/app.py`
+- 検証手順: `uv run pytest tests/test_smoke.py -k REQ_527`
 
 ## 未決の質問
 

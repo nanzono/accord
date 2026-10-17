@@ -30,15 +30,14 @@ def _listed_names(settings) -> list[str]:
 # ---------------------------------------------------------------- 起動して開く口
 
 
-def test_REQ_549_the_server_opens_nineteen_tools(settings) -> None:
-    """サンプルだけで起動したサーバーが、決めを読むから書き出すまでの 18 本に移行の操作を加えたツール 19 本を開く。"""
+def test_REQ_526_the_server_opens_twenty_three_tools(settings) -> None:
+    """サンプルだけで起動したサーバーが、決めを読むから移行するまでのツール 23 本を開く。"""
     server = create_server(settings)
 
     tools = asyncio.run(server.list_tools())
 
     assert {tool.name for tool in tools} == EXPECTED_TOOLS
-    assert len(tools) == 19
-    assert "migrate_data" in EXPECTED_TOOLS
+    assert len(tools) == 23
     assert {
         "rename_heading",
         "add_section",
@@ -46,6 +45,11 @@ def test_REQ_549_the_server_opens_nineteen_tools(settings) -> None:
         "move_section",
         "set_disclosure",
         "export_source",
+        "add_term",
+        "remove_term",
+        "revert_commit",
+        "discard_uncommitted",
+        "migrate_data",
     } <= EXPECTED_TOOLS
 
 
@@ -73,17 +77,17 @@ def test_REQ_338_listing_the_names_exits_zero(settings) -> None:
 
 
 def test_REQ_339_listing_the_names_prints_every_name(settings) -> None:
-    """`accord --list` が、サーバーが開くツール 19 本と資源 1 本の名前をすべて出す。"""
+    """`accord --list` が、サーバーが開くツール 23 本と資源 1 本の名前をすべて出す。"""
     lines = _listed_names(settings)
 
     assert set(lines) == EXPECTED_TOOLS | {ONTOLOGY_URI}
 
 
 def test_REQ_340_listing_the_names_prints_no_duplicate(settings) -> None:
-    """`accord --list` が、同じ名前を 2 度出さない（20 行で、重なりが無い）。"""
+    """`accord --list` が、同じ名前を 2 度出さない（24 行で、重なりが無い）。"""
     lines = _listed_names(settings)
 
-    assert len(lines) == 20
+    assert len(lines) == 24
     assert len(lines) == len(set(lines))
 
 
@@ -122,4 +126,16 @@ def test_REQ_487_the_server_says_structure_changes_go_through_accord(settings) -
 
     assert "見出しの変更と節の追加と節の削除と節の移動と公開可否の変更も accord の操作で行う" in server.instructions
     for name in ("rename_heading", "add_section", "remove_section", "move_section", "set_disclosure"):
+        assert name in server.instructions
+
+
+def test_REQ_527_the_server_says_vocabulary_and_undo_go_through_accord(settings) -> None:
+    """サーバーの説明に、語彙の変更と取り消しと未コミットの変更を捨てることと移行も accord の操作で行い、置き場のファイルを直接書かないことが書いてある。"""
+    server = create_server(settings)
+
+    assert (
+        "語彙の変更と取り消しと未コミットの変更を捨てることと移行も accord の操作で行い、置き場のファイルを直接書かない"
+        in server.instructions
+    )
+    for name in ("add_term", "remove_term", "revert_commit", "discard_uncommitted", "migrate_data"):
         assert name in server.instructions

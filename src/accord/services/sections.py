@@ -51,7 +51,7 @@ from accord.repository.sections import (
     has_heading_line,
     heading_text_is_valid,
 )
-from accord.services.recording import WriteRecorder
+from accord.services.recording import WriteRecorder, new_violations
 from accord.vocabulary.settings import Settings
 
 # 操作の名前。次の一手にそのまま載せる。
@@ -1022,14 +1022,14 @@ class SectionService:
         notices: list[str] | None = None,
     ) -> WriteResult:
         """書く前の守りを通し、ファイルに書き、記録をとって、新しい指紋と読み比べる写しを返す。"""
-        # spec: REQ-405
+        # spec: REQ-514
         refusal = self.recorder.refusal(file_name, operation)
         if refusal is not None:
             return WriteResult(accepted=False, rejection=refusal)
 
         before = self._watch().report().violations
         after, defects_after = self._check_after(file_name, new_text)
-        appeared = _new_violations(before, after)
+        appeared = new_violations(before, after)
         blocking = [item for item in appeared if item.constraint != COPY_FRESHNESS]
         # spec: REQ-467
         # spec: REQ-482
@@ -1303,20 +1303,3 @@ def _new_defects(before: list[SourceDefect], after: list[SourceDefect]) -> list[
 def _defect_constraint(item: SourceDefect) -> str:
     """読めないブロックの断りに名乗る制約の名前。"""
     return DEFECT_CONSTRAINTS.get(item.source_key, READABLE_BLOCKS)
-
-
-def _new_violations(before: list[Violation], after: list[Violation]) -> list[Violation]:
-    """書いた後の違反のうち、書く前に無かったものを返す。
-
-    写しの鮮度は、直し先の文（変わった出典と指紋）まで比べる。書いたことで写しが新しく古くなったかを
-    見るためである。ほかの違反は、制約・ファイル・場所で比べる。同じ場所の同じ違反の文の言い回しが
-    変わっただけで、書き込みを止めないためである。
-    """
-
-    def key(item: Violation) -> tuple[str, ...]:
-        if item.constraint == COPY_FRESHNESS:
-            return (item.constraint, item.file, item.location, item.expected)
-        return (item.constraint, item.file, item.location)
-
-    seen = {key(item) for item in before}
-    return [item for item in after if key(item) not in seen]

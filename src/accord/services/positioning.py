@@ -353,7 +353,7 @@ class PositioningService:
             ],
         )
         file_name = self.settings.files["positioning"]
-        # spec: REQ-405
+        # spec: REQ-514
         refusal = self.recorder.refusal(file_name, RECORD_OPERATION)
         if refusal is not None:
             return WriteResult(accepted=False, rejection=refusal)

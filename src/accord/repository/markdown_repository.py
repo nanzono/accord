@@ -63,7 +63,15 @@ from accord.repository.sections import (
     table_blocks,
 )
 from accord.vocabulary.settings import (
+    CAPABILITY_CATEGORIES_KIND,
     CHANNEL_RULES_PER_CHANNEL_FILE,
+    CHANNELS_KIND,
+    HEADING_RE,
+    PACKAGE_HYPOTHESIS_STATES_KIND,
+    POSITIONING_TARGETS_KIND,
+    PUBLIC_RECORD_KINDS_KIND,
+    PUBLIC_RECORD_ROLES_KIND,
+    TERM_RE,
     PHRASES_FROM_TABLE,
     PRESENTATION_RULES_KEY,
     PUBLIC_RECORDS_KEY,
@@ -1303,6 +1311,95 @@ class MarkdownRepository:
             and not labels & set(read_fields(section, rule))
         ]
 
+    def vocabulary_with_term(self, kind: str, term: str) -> str:
+        """語彙のファイルの、その種類の節の末尾に「- 語」の 1 行を足した全文を返す（ファイルは書かない）。
+
+        節の中のほかの行（語の行・空行・注記）は変えない。種類の節が無ければ、ファイルの末尾に節ごと足す。
+        """
+        lines = self._vocabulary_lines()
+        start, end = _vocabulary_section(lines, kind)
+        if start is None:
+            while lines and not lines[-1].strip():
+                lines.pop()
+            return "\n".join([*lines, "", f"## {kind}", "", f"- {term}"]) + "\n"
+        terms = [index for index in range(start + 1, end) if TERM_RE.match(lines[index].strip())]
+        if terms:
+            position = terms[-1] + 1
+            inserted = [f"- {term}"]
+        else:
+            position = start + 1
+            inserted = ["", f"- {term}"]
+            if position < end and not lines[position].strip():
+                position += 1
+                inserted = [f"- {term}"]
+        if position < len(lines) and lines[position].strip():
+            inserted.append("")
+        lines[position:position] = inserted
+        return "\n".join(lines) + "\n"
+
+    def vocabulary_without_term(self, kind: str, term: str) -> str:
+        """語彙のファイルの、その種類の節から語の行を消した全文を返す（ファイルは書かない）。
+
+        語の行を消して空行が 2 つ続くときは、1 つにたたむ。ほかの節は変えない。
+        """
+        lines = self._vocabulary_lines()
+        start, end = _vocabulary_section(lines, kind)
+        if start is None:
+            return "\n".join(lines) + "\n"
+        kept = lines[: start + 1]
+        for line in lines[start + 1 : end]:
+            match = TERM_RE.match(line.strip())
+            if match is not None and match.group(1) == term:
+                continue
+            if not line.strip() and kept and not kept[-1].strip():
+                continue
+            kept.append(line)
+        kept.extend(lines[end:])
+        return "\n".join(kept) + "\n"
+
+    def _vocabulary_lines(self) -> list[str]:
+        path = self.settings.vocabulary_path
+        return path.read_text(encoding="utf-8").splitlines() if path.is_file() else [f"# {VOCABULARY_TITLE}"]
+
+    def term_users(self, kind: str, term: str) -> list[str]:
+        """その種類の語を値に持つ正本の節の見出しの道筋を、正本の並びの順に返す。
+
+        見るのは、整合の検査が語彙と照らしている欄だけである。媒体と決めの適用先は売り方の決めの
+        適用範囲（末尾の括弧書きを落とす）、機能の分類は機能の台帳の分類の節の見出し、パッケージの
+        仮説の状態はパッケージ定義の欄（末尾の括弧書きを落とす）、公開記録の種類と役割は公開記録の欄。
+        提示物は正本の節ではないので見ない。
+        """
+        wanted = term.strip()
+        scope = _label_of(POSITIONING_LABELS, "scope")
+        state = _label_of(PACKAGE_LABELS, "hypothesis_state")
+        record_kind = _label_of(PUBLIC_RECORD_LABELS, "kind")
+        record_role = _label_of(PUBLIC_RECORD_LABELS, "role")
+        if kind in (CHANNELS_KIND, POSITIONING_TARGETS_KIND):
+            return self._users("positioning", lambda block, fields: strip_note(fields.get(scope, "")) == wanted)
+        if kind == CAPABILITY_CATEGORIES_KIND:
+            return self._users("capabilities", lambda block, fields: block.heading.strip() == wanted)
+        if kind == PACKAGE_HYPOTHESIS_STATES_KIND:
+            return self._users("packages", lambda block, fields: strip_note(fields.get(state, "")) == wanted)
+        if kind == PUBLIC_RECORD_KINDS_KIND:
+            return self._users(PUBLIC_RECORDS_KEY, lambda block, fields: fields.get(record_kind, "").strip() == wanted)
+        if kind == PUBLIC_RECORD_ROLES_KIND:
+            return self._users(PUBLIC_RECORDS_KEY, lambda block, fields: fields.get(record_role, "").strip() == wanted)
+        return []
+
+    def _users(self, key: str, uses) -> list[str]:
+        """その正本の読み方で選んだ節のうち、uses が真を返す節の見出しの道筋。"""
+        if not self.settings.has_file(key):
+            return []
+        name = self.settings.files[key]
+        paths = {item.start: item.heading_path for item in self.source_sections(name)}
+        blocks, rule = self._blocks(key)
+        found: list[str] = []
+        for block in blocks:
+            if uses(block, read_fields(block, rule)) and block.start in paths:
+                if paths[block.start] not in found:
+                    found.append(paths[block.start])
+        return found
+
     # ------------------------------------------------------------ 書き戻す
 
     def append_capability(self, capability: Capability) -> None:
@@ -1484,3 +1581,22 @@ class MarkdownRepository:
         if "\n" not in text:
             return [" ".join(text.split())]
         return [" ".join(line.split()) for line in text.splitlines()]
+
+
+def _vocabulary_section(lines: list[str], kind: str) -> tuple[int | None, int]:
+    """語彙のファイルの行から、その種類の節の見出しの行の位置と、節の終わり（次の見出しの行の位置）を返す。"""
+    start: int | None = None
+    for index, line in enumerate(lines):
+        heading = HEADING_RE.match(line.strip())
+        if heading is None:
+            continue
+        if start is not None:
+            return start, index
+        if len(heading.group(1)) == 2 and heading.group(2) == kind:
+            start = index
+    return start, len(lines)
+
+
+def _label_of(labels: dict[str, str], name: str) -> str:
+    """正本の欄のラベルと型の欄の名前の対応から、型の欄の名前に当たるラベルを返す。"""
+    return next(label for label, value in labels.items() if value == name)

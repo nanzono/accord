@@ -183,7 +183,7 @@ class OfferingService:
             evidence_sections=list(draft.evidence_sections),
         )
         file_name = self.settings.files["capabilities"]
-        # spec: REQ-405
+        # spec: REQ-514
         refusal = self.recorder.refusal(file_name, "register_capability")
         if refusal is not None:
             return WriteResult(accepted=False, rejection=refusal)
@@ -254,7 +254,7 @@ class OfferingService:
             breaks_when=carried["breaks_when"],
         )
         file_name = self.settings.files["packages"]
-        # spec: REQ-405
+        # spec: REQ-514
         refusal = self.recorder.refusal(file_name, "revise_package")
         if refusal is not None:
             return WriteResult(accepted=False, rejection=refusal)
