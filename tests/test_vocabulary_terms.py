@@ -19,7 +19,7 @@ from accord.services.recording import (
     VocabularyService,
 )
 from accord.vocabulary.settings import VOCABULARY_KINDS, load_settings, parse_vocabulary
-from conftest import git, source_digest
+from conftest import git, sample_settings, source_digest
 
 REASON = "テストで語彙を変える"
 KINDS = [kind for kind, _ in VOCABULARY_KINDS]
@@ -241,4 +241,70 @@ def test_REQ_508_an_empty_reason_is_refused(settings) -> None:
     assert result.accepted is False
     assert result.rejection.constraint == "書き換えの理由"
     assert result.rejection.next_action.missing_fields == ["理由"]
+    assert source_digest(settings.source_dir) == before
+
+
+# ---------------------------------------------------------------- 媒体の語と提示物の置き場
+
+
+def test_REQ_554_a_channel_with_a_presentation_directory_is_not_removed(settings) -> None:
+    """提示物の置き場に媒体の語と同じ名前のディレクトリがあれば、書かずに、そのディレクトリの名前を返して断る。"""
+    assert (settings.presentations_dir / "tsukikusa").is_dir()
+    before = source_digest(settings.source_dir)
+
+    result = VocabularyService(settings).remove_term("媒体", "tsukikusa", REASON)
+
+    assert result.accepted is False
+    assert result.rejection.constraint == TERM_IN_USE
+    assert result.rejection.next_action.operation == "remove_term"
+    assert result.rejection.next_action.candidates == ["tsukikusa"]
+    assert "tsukikusa" in result.rejection.reason
+    assert source_digest(settings.source_dir) == before
+
+
+def test_REQ_554_a_channel_without_a_presentation_directory_can_be_removed(sample_copy) -> None:
+    """提示物の置き場にその媒体のディレクトリが無ければ、媒体の語を消せる。"""
+    import shutil
+
+    shutil.rmtree(sample_copy / "presentations" / "nagiho")
+    settings = sample_settings(sample_copy)
+
+    result = VocabularyService(settings).remove_term("媒体", "nagiho", REASON)
+
+    assert result.accepted is True, result.rejection
+    assert "nagiho" not in _words(settings, "媒体")
+
+
+def test_REQ_554_without_the_presentations_argument_a_channel_can_be_removed(sample_copy) -> None:
+    """起動の引数で提示物の置き場を渡さなければ、提示物は 0 件なので、媒体の語を消せる。"""
+    settings = load_settings(sample_copy / "data")
+
+    result = VocabularyService(settings).remove_term("媒体", "tsukikusa", REASON)
+
+    assert result.accepted is True, result.rejection
+    assert "tsukikusa" not in _words(settings, "媒体")
+
+
+def test_REQ_554_a_channel_used_by_a_section_and_a_directory_names_both(settings) -> None:
+    """節でも使われ、提示物の置き場に同じ名前のディレクトリもあれば、1 つの断りの候補に節の道筋とディレクトリの名前を並べる。"""
+    PositioningService(settings).record(
+        PositioningDraft(
+            decided_on=date(2026, 9, 20),
+            scope="tsukikusa",
+            headline_package="requirements-and-progress",
+            rationale="媒体の語を節と提示物の両方で使うための決め。",
+        )
+    )
+    assert (settings.presentations_dir / "tsukikusa").is_dir()
+    before = source_digest(settings.source_dir)
+
+    result = VocabularyService(settings).remove_term("媒体", "tsukikusa", REASON)
+
+    assert result.accepted is False
+    assert result.rejection.constraint == TERM_IN_USE
+    assert result.rejection.next_action.operation == "revise_section"
+    candidates = result.rejection.next_action.candidates
+    assert candidates[-1] == "tsukikusa"
+    assert any("2026-09-20" in path for path in candidates[:-1]), candidates
+    assert "remove_term" in result.rejection.next_action.example
     assert source_digest(settings.source_dir) == before

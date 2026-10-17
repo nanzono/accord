@@ -1386,6 +1386,20 @@ class MarkdownRepository:
             return self._users(PUBLIC_RECORDS_KEY, lambda block, fields: fields.get(record_role, "").strip() == wanted)
         return []
 
+    def presentation_directory(self, channel: str) -> str | None:
+        """提示物の置き場に、媒体の語と同じ名前のディレクトリがあれば、その名前（提示物の置き場からの相対）を返す。
+
+        提示物の置き場が起動の引数で渡されていなければ、提示物は 0 件なので None を返す。
+        """
+        root = self.settings.presentations_dir
+        name = channel.strip()
+        if root is None or not name:
+            return None
+        directory = root / name
+        if directory.is_dir() and directory.resolve().parent == root.resolve():
+            return name
+        return None
+
     def _users(self, key: str, uses) -> list[str]:
         """その正本の読み方で選んだ節のうち、uses が真を返す節の見出しの道筋。"""
         if not self.settings.has_file(key):

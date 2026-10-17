@@ -20,6 +20,7 @@ accord 以外のコミットに数えない。どちらの断りも、次の一�
 捨てる操作は、捨てる前の差分を返してから、作業ツリーを最後のコミットの状態に戻す。
 
 語彙の操作は、vocabulary.md の種類の節に語を 1 行足すか、語の行を消す。使われている語は消さない。
+媒体の語は、提示物の置き場に同じ名前のディレクトリがあるときも、使われている語として消さない。
 
 移行の前の置き場（設定ファイル accord.toml があり、語彙のファイル vocabulary.md が無い置き場）では、
 移行の操作のほかの操作を断り、移行の操作を指す。移行の操作は、設定ファイルの置き場の節と読み方の節が
@@ -36,6 +37,7 @@ from accord.models.results import NextAction, Rejection, Violation, WriteResult
 from accord.repository.git_commits import CommitEntry, GitCommits, GitError
 from accord.repository.markdown_repository import MarkdownRepository
 from accord.vocabulary.settings import (
+    CHANNELS_KIND,
     LEGACY_CONFIG_FILE,
     LEGACY_PACKAGE_SKIP_KEY,
     VOCABULARY_FILE,
@@ -489,7 +491,23 @@ class VocabularyService:
         if (refused := self._blocked(operation)) is not None:
             return refused
         users = self.repository.term_users(kind, wanted)
+        directory = self.repository.presentation_directory(wanted) if kind == CHANNELS_KIND else None
+        # 節での使用と提示物の置き場のディレクトリを両方確かめてから、1 つの断りにまとめる。
         # spec: REQ-511
+        if users and directory is not None:
+            # spec: REQ-554
+            return _refused(
+                TERM_IN_USE,
+                f"語「{wanted}」は、正本の節が「{kind}」の語として使っているうえ、提示物の置き場に同じ名前の"
+                f"ディレクトリ「{directory}」があり、そこの提示物の宛先の媒体としても使われているので、消さなかった。"
+                f"使っている節: {folded(users)}。",
+                REVISE_OPERATION,
+                candidates=[*users, directory],
+                example=(
+                    f"{REVISE_OPERATION} で候補の節を読み直して書き換え、提示物の置き場からディレクトリ「{directory}」を"
+                    f"無くしたことを依頼した人に確かめてから、もう一度 {operation} を呼ぶ。"
+                ),
+            )
         if users:
             return _refused(
                 TERM_IN_USE,
@@ -499,6 +517,19 @@ class VocabularyService:
                 REVISE_OPERATION,
                 candidates=users,
                 example=f"{REVISE_OPERATION} で候補の節を読み直して書き換え、もう一度 {operation} を呼ぶ。",
+            )
+        # spec: REQ-554
+        if directory is not None:
+            return _refused(
+                TERM_IN_USE,
+                f"語「{wanted}」は、提示物の置き場に同じ名前のディレクトリ「{directory}」があり、"
+                f"そこの提示物の宛先の媒体として使われているので、消さなかった。",
+                operation,
+                candidates=[directory],
+                example=(
+                    f"提示物の置き場からディレクトリ「{directory}」を無くしたことを依頼した人に確かめてから、"
+                    f"もう一度 {operation} を呼ぶ。"
+                ),
             )
         # spec: REQ-510
         text = self.repository.vocabulary_without_term(kind, wanted)

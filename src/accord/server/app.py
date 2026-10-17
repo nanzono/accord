@@ -493,7 +493,8 @@ def create_server(settings: Settings, watch: SourceWatch | None = None) -> MCPSe
         """語彙（vocabulary.md）の種類の節から、語の行を消す。正本の節が使っている語は消さない。
 
         kind は語彙の種類の名前、term は消す語、reason は何をなぜ消すかの 1 文。使っている節があれば、
-        その節の見出しの道筋を返して消さない（先に revise_section で直す）。通ると 1 件のコミットにする。
+        その節の見出しの道筋を返して消さない（先に revise_section で直す）。媒体の語は、提示物の置き場に
+        同じ名前のディレクトリがあれば、そのディレクトリの名前を返して消さない。通ると 1 件のコミットにする。
         """
         # spec: REQ-510
         return vocabulary_service.remove_term(kind, term, reason)
