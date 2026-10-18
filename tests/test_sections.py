@@ -402,7 +402,7 @@ def test_REQ_467_a_write_that_brings_a_new_violation_is_refused(alt_settings) ->
 
 def test_REQ_525_export_writes_every_source_file_to_the_given_path(settings, tmp_path) -> None:
     """渡された書き出し先に、正本の各ファイルの中身を、ファイルの名前の見出しを付けて 1 つの Markdown で書く。"""
-    destination = tmp_path / "exported" / "all.md"
+    destination = tmp_path / "all.md"
 
     result = _service(settings).export_source(str(destination))
 
@@ -428,7 +428,7 @@ def test_REQ_525_an_export_path_inside_the_data_is_refused(settings) -> None:
 
 def test_REQ_455_export_returns_the_name_and_size_without_the_path(settings, tmp_path) -> None:
     """書き出しが通ると、書いたファイルの名前と字数を返し、書き出し先の絶対パスを返さない。"""
-    destination = tmp_path / "exported" / "all.md"
+    destination = tmp_path / "all.md"
 
     result = _service(settings).export_source(str(destination))
 
@@ -437,6 +437,110 @@ def test_REQ_455_export_returns_the_name_and_size_without_the_path(settings, tmp
     dumped = json.dumps(result.model_dump(mode="json"), ensure_ascii=False)
     assert str(destination.parent) not in dumped
     assert str(destination.parent.parent) not in dumped
+
+
+def _tree_digest(root: Path) -> dict[str, str]:
+    """root の下のファイルの中身と symlink の行き先を、断りの前後で比べるために取る。"""
+    digest = source_digest(root)
+    for path in sorted(root.rglob("*")):
+        if path.is_symlink():
+            digest[f"link:{path.relative_to(root).as_posix()}"] = str(path.readlink())
+    return digest
+
+
+def _assert_export_refused(result, constraint: str) -> None:
+    """書き出さずに断り、次の一手に書き出しの呼び直しと直す引数 path を返したか。"""
+    assert result.written is False
+    assert result.file_name is None
+    assert result.rejection.constraint == constraint
+    assert result.rejection.next_action.operation == "export_source"
+    assert result.rejection.next_action.missing_fields == ["path"]
+    assert result.rejection.next_action.example
+
+
+@pytest.mark.parametrize("relative", ["export.md", "tsukikusa/export.md"])
+def test_REQ_555_an_export_path_inside_the_presentations_is_refused(settings, relative) -> None:
+    """書き出し先が提示物の置き場の中なら、書かずに断り、置き場の外のパスで呼び直すことを返す。"""
+    presentations = settings.presentations_dir
+    destination = presentations / relative
+    before = (source_digest(settings.source_dir), _tree_digest(presentations))
+
+    result = _service(settings).export_source(str(destination))
+
+    _assert_export_refused(result, "書き出し先は置き場の外")
+    assert "提示物の置き場" in result.rejection.reason
+    assert "置き場の外" in result.rejection.next_action.example
+    assert not destination.exists()
+    assert (source_digest(settings.source_dir), _tree_digest(presentations)) == before
+    assert str(presentations) not in json.dumps(result.model_dump(mode="json"), ensure_ascii=False)
+
+
+def test_REQ_556_an_existing_file_is_not_overwritten(settings, tmp_path) -> None:
+    """書き出し先に既にファイルがあれば、書かずに、別の名前にするか先に消してから呼び直すことを返す。"""
+    destination = tmp_path / "already.md"
+    destination.write_text("前からある中身\n", encoding="utf-8")
+    before = (source_digest(settings.source_dir), _tree_digest(settings.presentations_dir))
+
+    result = _service(settings).export_source(str(destination))
+
+    _assert_export_refused(result, "書き出し先は新しいファイル")
+    assert "既にファイルがある" in result.rejection.reason
+    assert "別の名前" in result.rejection.next_action.example
+    assert "消して" in result.rejection.next_action.example
+    assert destination.read_text(encoding="utf-8") == "前からある中身\n"
+    assert (source_digest(settings.source_dir), _tree_digest(settings.presentations_dir)) == before
+    assert str(tmp_path) not in json.dumps(result.model_dump(mode="json"), ensure_ascii=False)
+
+
+def test_REQ_556_an_existing_directory_is_not_written_over(settings, tmp_path) -> None:
+    """書き出し先に既にディレクトリがあっても、書かずに同じ断りを返し、ディレクトリの中は変えない。"""
+    destination = tmp_path / "folder.md"
+    destination.mkdir()
+
+    result = _service(settings).export_source(str(destination))
+
+    _assert_export_refused(result, "書き出し先は新しいファイル")
+    assert destination.is_dir()
+    assert list(destination.iterdir()) == []
+
+
+@pytest.mark.parametrize("target", ["missing", "existing", "inside_data"])
+def test_REQ_557_a_symlink_export_path_is_refused(settings, tmp_path, target) -> None:
+    """書き出し先のパスが symlink なら、解決した先が無くても、ファイルでも、置き場の中でも、書かずに断る。"""
+    pointed = {
+        "missing": tmp_path / "not_yet.md",
+        "existing": tmp_path / "target.md",
+        "inside_data": settings.source_dir / "export.md",
+    }[target]
+    if target == "existing":
+        pointed.write_text("行き先の中身\n", encoding="utf-8")
+    link = tmp_path / "link.md"
+    link.symlink_to(pointed)
+    before = (source_digest(settings.source_dir), _tree_digest(settings.presentations_dir))
+
+    result = _service(settings).export_source(str(link))
+
+    _assert_export_refused(result, "書き出し先は新しいファイル")
+    assert "symlink" in result.rejection.reason
+    assert link.is_symlink() and link.readlink() == pointed
+    if target == "existing":
+        assert pointed.read_text(encoding="utf-8") == "行き先の中身\n"
+    else:
+        assert not pointed.exists()
+    assert (source_digest(settings.source_dir), _tree_digest(settings.presentations_dir)) == before
+
+
+def test_REQ_558_a_missing_parent_directory_is_not_created(settings, tmp_path) -> None:
+    """書き出し先の親ディレクトリが無ければ、ディレクトリを作らず、書かずに断る。"""
+    destination = tmp_path / "missing" / "deeper" / "all.md"
+    before = (source_digest(settings.source_dir), _tree_digest(settings.presentations_dir))
+
+    result = _service(settings).export_source(str(destination))
+
+    _assert_export_refused(result, "書き出し先は新しいファイル")
+    assert "親ディレクトリが無い" in result.rejection.reason
+    assert not (tmp_path / "missing").exists()
+    assert (source_digest(settings.source_dir), _tree_digest(settings.presentations_dir)) == before
 
 
 def test_REQ_469_a_fact_written_as_a_field_is_refused(alt_settings) -> None:

@@ -497,6 +497,30 @@ ID の欄を持つ節と新しい公開可否と読んだときの指紋と理�
 - 関係するファイル: `src/accord/services/sections.py`、`src/accord/server/app.py`
 - 検証手順: `uv run pytest tests/test_sections.py -k REQ_525`
 
+## REQ-555
+もし書き出し先のパスが提示物の置き場の中なら、accord は書かずに、置き場の外のパスで呼び直すことを断りに返す。
+
+- 関係するファイル: `src/accord/services/sections.py`、`src/accord/server/app.py`
+- 検証手順: `uv run pytest tests/test_sections.py -k REQ_555`
+
+## REQ-556
+もし書き出し先のパスに既にファイルがあるなら、accord は書かずに、別の名前にするか先にそのファイルを消してから呼び直すことを断りに返す。
+
+- 関係するファイル: `src/accord/services/sections.py`、`src/accord/server/app.py`
+- 検証手順: `uv run pytest tests/test_sections.py -k REQ_556`
+
+## REQ-557
+もし書き出し先のパスが symlink なら、accord は書かずに断る。
+
+- 関係するファイル: `src/accord/services/sections.py`、`src/accord/server/app.py`
+- 検証手順: `uv run pytest tests/test_sections.py -k REQ_557`
+
+## REQ-558
+もし書き出し先の親ディレクトリが無いなら、accord はディレクトリを作らず、書かずに断る。
+
+- 関係するファイル: `src/accord/services/sections.py`、`src/accord/server/app.py`
+- 検証手順: `uv run pytest tests/test_sections.py -k REQ_558`
+
 ## 未決の質問
 
 - 「経歴の正本に無いなら」（REQ-438）の「経歴の正本」が、設定の `career` が指すファイルだけを指すのか、受託案件（`engagements`）が別のファイルのときにそのファイルも含むのかを決めていません。いまの実装は `career` が指すファイルだけに書きます。受託案件を別のファイルに置く正本（同梱の 1 つ目の見本）では、受託案件の節に事実を登記できません（節の書き換えでは直せます）。

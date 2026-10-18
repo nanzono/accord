@@ -26,7 +26,7 @@ from accord.vocabulary.settings import (
     PACKAGE_FIELD_LABELS,
     load_settings,
 )
-from conftest import REPO_ROOT, commit_all, git
+from conftest import REPO_ROOT, add_vocabulary_terms, commit_all, git
 
 FORBIDDEN_PHRASES = ["フルスタック", "幅広く対応可能", "〜に強みがあります"]
 FORBIDDEN_HEADING = "### 本人が禁じた言い回し（見本。表の 1 列目を読む）"
@@ -296,6 +296,75 @@ def test_REQ_069_unknown_channel_returns_no_rules(alt_settings) -> None:
     repository = MarkdownRepository(alt_settings)
 
     assert repository.channel_rules("shiokaze") == []
+
+
+def _outside_rules(sample_copy: Path) -> Path:
+    """提示物の置き場の外に、媒体ごとの規約と同じ名前のファイルを置いて、そのディレクトリを返す。"""
+    outside = sample_copy / "outside"
+    outside.mkdir()
+    (outside / "channel.md").write_text("# 置き場の外\n\n- 置き場の外の規約\n", encoding="utf-8")
+    return outside
+
+
+def test_REQ_560_a_channel_with_a_parent_step_reads_no_rules_outside(sample_copy) -> None:
+    """媒体の名前に .. が入り、規約のファイルのパスが提示物の置き場の外に解決されるなら、読まずに空を返す。"""
+    outside = _outside_rules(sample_copy)
+    settings = load_settings(sample_copy / "data", sample_copy / "presentations")
+    repository = MarkdownRepository(settings)
+    # 守りが無ければ読めてしまうファイルであることを先に確かめる。
+    assert (settings.presentations_dir / "../outside/channel.md").resolve() == outside / "channel.md"
+
+    assert repository.channel_rules("../outside") == []
+    assert repository.channel_rules("tsukikusa")
+
+
+def test_REQ_560_a_channel_directory_linked_outside_reads_no_rules(sample_copy) -> None:
+    """提示物の置き場の媒体のディレクトリが置き場の外への symlink なら、その先の規約を読まずに空を返す。"""
+    outside = _outside_rules(sample_copy)
+    (sample_copy / "presentations" / "linked").symlink_to(outside, target_is_directory=True)
+    settings = load_settings(sample_copy / "data", sample_copy / "presentations")
+    repository = MarkdownRepository(settings)
+
+    assert (settings.presentations_dir / "linked" / "channel.md").is_file()
+    assert repository.channel_rules("linked") == []
+
+
+def _outside_presentation(sample_copy: Path) -> Path:
+    """提示物の置き場の外に、宣言を持つ提示物と媒体ごとの規約を置いて、そのディレクトリを返す。"""
+    outside = _outside_rules(sample_copy)
+    shutil.copy(sample_copy / "presentations" / "tsukikusa" / "profile.md", outside / "profile.md")
+    return outside
+
+
+def test_REQ_561_a_channel_with_a_parent_step_is_not_walked_for_presentations(sample_copy) -> None:
+    """語彙に直接書いた媒体の名前が置き場の外に解決されるなら、そのディレクトリの Markdown を提示物にも規約にも読まない。"""
+    outside = _outside_presentation(sample_copy)
+    settings = add_vocabulary_terms(
+        load_settings(sample_copy / "data", sample_copy / "presentations"), "媒体", ["../outside"]
+    )
+    assert "../outside" in settings.channels
+    # 守りが無ければたどれてしまうディレクトリであることを先に確かめる。
+    assert (settings.presentations_dir / "../outside").resolve() == outside
+    repository = MarkdownRepository(settings)
+
+    paths = sorted(item.path for item in repository.load().presentations)
+
+    assert paths == ["nagiho/skill_sheet.md", "tsukikusa/profile.md"]
+    assert repository.channel_rules("../outside") == []
+
+
+def test_REQ_561_a_channel_directory_linked_outside_is_not_walked(sample_copy) -> None:
+    """媒体のディレクトリが置き場の外への symlink なら、その先の Markdown を提示物として読まない。"""
+    outside = _outside_presentation(sample_copy)
+    (sample_copy / "presentations" / "linked").symlink_to(outside, target_is_directory=True)
+    settings = add_vocabulary_terms(
+        load_settings(sample_copy / "data", sample_copy / "presentations"), "媒体", ["linked"]
+    )
+    assert (settings.presentations_dir / "linked" / "profile.md").is_file()
+
+    paths = sorted(item.path for item in MarkdownRepository(settings).load().presentations)
+
+    assert paths == ["nagiho/skill_sheet.md", "tsukikusa/profile.md"]
 
 
 def test_REQ_071_forbidden_phrases_heading_note_is_ignored_when_matching(settings) -> None:

@@ -14,7 +14,9 @@
 いつも 1 件のコミットにする。
 
 書き出しは、正本の各ファイルをファイルの名前の見出しでつないだ Markdown を、呼ぶ側が渡した書き出し先の
-ファイル 1 つに書く。書き出し先は置き場の外に限り、返り値にはファイルの名前と字数だけを入れる。
+ファイル 1 つに書く。書き出し先は、経歴データの置き場と提示物の置き場の外の、親ディレクトリが既にある
+新しいファイルに限る。既にあるファイルと symlink には書かず（上書きしない）、ディレクトリも作らない。
+返り値にはファイルの名前と字数だけを入れる。
 
 どの返り値にも、正本の置き場の絶対パスを入れない。ファイルは accord の形の名前で指す。
 """
@@ -83,6 +85,7 @@ ID_FIELD_KEPT = "ID の欄を元の値のまま残す"
 FACT_NOT_A_FIELD = "事実の文を欄の書き方で書かない"
 REVISION_REASON_REQUIRED = "節の書き換えの理由"
 EXPORT_OUTSIDE_DATA = "書き出し先は置き場の外"
+EXPORT_NEW_FILE = "書き出し先は新しいファイル"
 HEADING_FORMAT = "見出しの書き方"
 DEPTH_LIMIT = "見出しの深さの上限"
 PRECEDE_A_CHILD = "前に置く節は親の直下の節"
@@ -1179,33 +1182,90 @@ class SectionService:
         return result
 
     def _export_source(self, path: str) -> ExportResult:
-        destination = Path(str(path or "")).expanduser().resolve()
+        raw = str(path or "")
+        given = Path(raw).expanduser()
+        destination = given.resolve()
         data_dir = self.settings.source_dir.resolve()
+        outside_example = "置き場の外のファイルのパス（例: ~/accord_export.md）を path に渡して呼び直す。"
+        # 渡されたパスそのものが symlink なら、解決した先がどこでも（置き場の中でも）同じ断りにする。
+        # spec: REQ-557
+        if raw.strip() and given.is_symlink():
+            return _export_refused(
+                EXPORT_NEW_FILE,
+                f"書き出し先「{given.name}」が symlink なので、書き出さなかった。accord は symlink の先に書かない。",
+                "symlink ではない、まだ無いファイルのパスを path に渡して呼び直す。",
+            )
         # spec: REQ-525
-        if not str(path or "").strip() or destination == data_dir or data_dir in destination.parents:
-            return ExportResult(
-                written=False,
-                rejection=Rejection(
-                    constraint=EXPORT_OUTSIDE_DATA,
-                    reason=(
-                        "書き出し先が経歴データの置き場の中を指しているので、書き出さなかった。"
-                        "置き場の中には accord の正本と語彙のファイルのほかを置かない。"
-                    ),
-                    next_action=NextAction(
-                        operation=EXPORT_OPERATION,
-                        missing_fields=["path"],
-                        example="置き場の外のファイルのパス（例: ~/accord_export.md）を path に渡して呼び直す。",
-                    ),
-                ),
+        if not raw.strip() or _within(destination, data_dir):
+            return _export_refused(
+                EXPORT_OUTSIDE_DATA,
+                "書き出し先が経歴データの置き場の中を指しているので、書き出さなかった。"
+                "置き場の中には accord の正本と語彙のファイルのほかを置かない。",
+                outside_example,
+            )
+        presentations = self.settings.presentations_dir
+        # spec: REQ-555
+        if presentations is not None and _within(destination, presentations.resolve()):
+            return _export_refused(
+                EXPORT_OUTSIDE_DATA,
+                "書き出し先が提示物の置き場（起動の引数 --presentations）の中を指しているので、書き出さなかった。"
+                "そこに置いた写しは、提示物として読まれる。",
+                outside_example,
+            )
+        # spec: REQ-556
+        if destination.exists():
+            return _already_there(destination)
+        # spec: REQ-558
+        if not destination.parent.is_dir():
+            return _export_refused(
+                EXPORT_NEW_FILE,
+                f"書き出し先「{destination.name}」の親ディレクトリが無いので、書き出さなかった。"
+                "accord はディレクトリを作らない。",
+                "親ディレクトリが既にある場所のファイルのパスを path に渡して呼び直す。",
             )
         parts = []
         for name in self.repository.source_file_names():
             parts.append(f"# {name}\n\n{self.repository.read_source_file(name).strip()}\n")
         text = "\n".join(parts)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(text, encoding="utf-8")
+        # 確かめた後に別の手がファイルを置いても上書きしないよう、新しいファイルとしてだけ開く。
+        try:
+            with destination.open("x", encoding="utf-8") as handle:
+                handle.write(text)
+        except FileExistsError:
+            # spec: REQ-556
+            return _already_there(destination)
         # spec: REQ-455
         return ExportResult(written=True, file_name=destination.name, chars=len(text))
+
+
+def _within(path: Path, root: Path) -> bool:
+    """path が root そのものか、root の下にあるか。どちらも解決済みのパスで比べる。"""
+    return path == root or root in path.parents
+
+
+def _already_there(destination: Path) -> ExportResult:
+    """書き出し先に既にファイルがあるときの断り。上書きせず、別の名前か先に消すことを次の一手にする。"""
+    return _export_refused(
+        EXPORT_NEW_FILE,
+        f"書き出し先「{destination.name}」には既にファイルがあるので、書き出さなかった。accord は上書きしない。",
+        "別の名前のファイルのパスを path に渡すか、呼ぶ側が先にそのファイルを消してから呼び直す。",
+    )
+
+
+def _export_refused(constraint: str, reason: str, example: str) -> ExportResult:
+    """書き出さずに断る返り値を作る。次の一手は、path を直して書き出しを呼び直すこと。"""
+    return ExportResult(
+        written=False,
+        rejection=Rejection(
+            constraint=constraint,
+            reason=reason,
+            next_action=NextAction(
+                operation=EXPORT_OPERATION,
+                missing_fields=["path"],
+                example=example,
+            ),
+        ),
+    )
 
 
 def _as_date(text: str) -> date | None:

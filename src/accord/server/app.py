@@ -467,10 +467,15 @@ def create_server(settings: Settings, watch: SourceWatch | None = None) -> MCPSe
     def export_source(path: str) -> ExportResult:
         """正本の各ファイルを 1 つの Markdown につないで、path に書く。
 
-        path は経歴データの置き場の外のファイルを指す（中を指すと書かずに断る）。返るのは書いたファイルの
-        名前と字数だけ。正本は変えない。
+        path は経歴データの置き場と提示物の置き場の外の、まだ無いファイルを指す。置き場の中・既にあるファイル・
+        symlink・親ディレクトリが無い場所を指すと、書かずに断る（上書きせず、ディレクトリも作らない）。
+        返るのは書いたファイルの名前と字数だけ。正本は変えない。
         """
         # spec: REQ-525
+        # spec: REQ-555
+        # spec: REQ-556
+        # spec: REQ-557
+        # spec: REQ-558
         # spec: REQ-522
         if (blocked := recorder.migration_refusal("export_source")) is not None:
             return ExportResult(written=False, rejection=blocked)
@@ -482,10 +487,13 @@ def create_server(settings: Settings, watch: SourceWatch | None = None) -> MCPSe
 
         kind は語彙の種類の名前（媒体・決めの適用先・機能の分類・パッケージの仮説の状態・公開記録の種類・
         公開記録の役割のどれか）、term は足す語（改行を含まない 1 行。その種類に既にある語は足さない）、
-        reason は何をなぜ足すかの 1 文。通ると、その種類の語の一覧を返し、1 件のコミットにする。
-        語を直すときは、新しい語を足し、使っている節を revise_section で直してから、古い語を remove_term で消す。
+        reason は何をなぜ足すかの 1 文。媒体の語は、パスの区切り（/ と \\）か制御文字を含むか、. で始まるなら
+        足さない（提示物の置き場のディレクトリの名前に使うため）。通ると、その種類の語の一覧を返し、1 件の
+        コミットにする。語を直すときは、新しい語を足し、使っている節を revise_section で直してから、古い語を
+        remove_term で消す。
         """
         # spec: REQ-508
+        # spec: REQ-559
         return vocabulary_service.add_term(kind, term, reason)
 
     @mcp.tool()

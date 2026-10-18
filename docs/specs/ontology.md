@@ -193,6 +193,24 @@ accord が開く口の顔ぶれを述べます。語彙（置き場の `vocabula
 - 関係するファイル: `src/accord/services/recording.py`、`src/accord/repository/markdown_repository.py`
 - 検証手順: `uv run pytest tests/test_vocabulary_terms.py -k REQ_554`
 
+## REQ-559
+もし媒体に足す語がパスの区切りか制御文字を含むか、`.` か `..` か、`.` で始まるなら、accord は書かずに、媒体のいまの語の一覧を断りに返す。
+
+- 関係するファイル: `src/accord/services/recording.py`、`src/accord/server/app.py`
+- 検証手順: `uv run pytest tests/test_vocabulary_terms.py -k REQ_559`
+
+## REQ-560
+もし媒体の規約のファイルのパスが提示物の置き場の外に解決されるなら、accord はそのファイルを読まず、規約を空として扱う。
+
+- 関係するファイル: `src/accord/repository/markdown_repository.py`
+- 検証手順: `uv run pytest tests/test_reading_settings.py -k REQ_560`
+
+## REQ-561
+もし提示物を集めるときに媒体の名前から組んだディレクトリのパスが提示物の置き場の外に解決されるなら、accord はそのディレクトリをたどらない。
+
+- 関係するファイル: `src/accord/repository/markdown_repository.py`
+- 検証手順: `uv run pytest tests/test_reading_settings.py -k REQ_561`
+
 ## REQ-526
 起動されたとき、accord は決めを読む・材料を取り出す・決めを登記する・機能を登記する・公開記録を登記する・パッケージを改訂する・整合を検査する・節を一覧する・節を読む・事実を検索する・事実を登記する・節を書き換える・見出しを変える・節を足す・節を消す・節を動かす・公開可否を変える・書き出す・語彙に語を足す・語彙から語を消す・コミットを取り消す・未コミットの変更を捨てる・移行するの 23 の操作を開く。（REQ-549 に取って代わる）
 

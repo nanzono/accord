@@ -31,6 +31,7 @@ accord の形と同じことを確かめてから、語彙の節から vocabular
 from __future__ import annotations
 
 import re
+import unicodedata
 
 from accord.models.constraints import CONSTRAINTS
 from accord.models.results import NextAction, Rejection, Violation, WriteResult
@@ -460,6 +461,18 @@ class VocabularyService:
                 candidates=words,
                 example="候補に無い語を、改行を含まない 1 行で term に渡す。",
             )
+        # 媒体の語は、提示物の置き場のディレクトリの名前と媒体ごとの規約のファイルのパスに使われるので、
+        # 置き場の外を指しうる文字を持つ語は足さない。ほかの種類の語はパスに使わないので狭めない。
+        # spec: REQ-559
+        if kind == CHANNELS_KIND and (flaw := _channel_term_flaw(wanted)) is not None:
+            return _refused(
+                TERM_FORMAT,
+                f"足す媒体の語が{flaw}ので、書かなかった。媒体の語は提示物の置き場のディレクトリの名前に使う。"
+                f"「{kind}」のいまの語は候補のとおり。",
+                operation,
+                candidates=words,
+                example="パスの区切り（/ と \\）と制御文字を含まず、. で始まらない名前を term に渡す。",
+            )
         if (refused := missing_reason(reason, operation)) is not None:
             return refused
         if (refused := self._blocked(operation)) is not None:
@@ -794,3 +807,16 @@ class MigrationService:
             },
             warnings=notes,
         )
+
+
+def _channel_term_flaw(term: str) -> str | None:
+    """媒体の語がパスとして置き場の外を指しうるなら、何を含むかの言い方を返す。無ければ None。"""
+    if "/" in term or "\\" in term:
+        return "パスの区切り（/ か \\）を含む"
+    if any(unicodedata.category(char) == "Cc" for char in term):
+        return "制御文字を含む"
+    if term in (".", ".."):
+        return f"「{term}」な"
+    if term.startswith("."):
+        return "「.」で始まる"
+    return None

@@ -872,15 +872,21 @@ class MarkdownRepository:
 
         提示物の置き場の下の、語彙の媒体と同じ名前のディレクトリだけをたどる。媒体ディレクトリの
         下には、提示物でないファイルも同居するので、宣言の行で絞るのは読む側である。
+        媒体の名前から組んだディレクトリのパスが提示物の置き場の外に解決されるなら、たどらない。
         提示物の置き場が起動の引数で渡されていなければ、提示物は 0 件である。
         """
         # spec: REQ-504
         if self.settings.presentations_dir is None:
             return []
         root = self.settings.path_for("presentations")
+        resolved_root = root.resolve()
         found: list[Path] = []
         for name in self.settings.reading.presentation_directories:
             directory = root / name
+            # 媒体の名前に経路の文字が入っていても、提示物の置き場の外のディレクトリはたどらない。
+            # spec: REQ-561
+            if resolved_root not in directory.resolve().parents:
+                continue
             if directory.is_dir():
                 found.extend(sorted(directory.rglob("*.md")))
         return found
@@ -1000,16 +1006,20 @@ class MarkdownRepository:
 
         置き場は 2 通りある。見せ方の正本 1 つの中の、媒体の名前の節から読む書き方と、
         媒体ごとのファイルから読む書き方である。どちらかは設定が決める。
-        節もファイルも無ければ空の一覧を返す。
+        節もファイルも無ければ空の一覧を返す。媒体ごとのファイルのパスが提示物の置き場の外に
+        解決されるときも、そのファイルを読まずに空の一覧を返す。
         """
         rules = self.settings.reading
         if rules.channel_rules_from == CHANNEL_RULES_PER_CHANNEL_FILE:
             # spec: REQ-504
             if self.settings.presentations_dir is None:
                 return []
-            path = self.settings.presentations_dir / rules.channel_rules_file.replace(
-                CHANNEL_PLACEHOLDER, channel
-            )
+            root = self.settings.presentations_dir.resolve()
+            path = (root / rules.channel_rules_file.replace(CHANNEL_PLACEHOLDER, channel)).resolve()
+            # 媒体の名前に経路の文字が入っていても、提示物の置き場の外のファイルは規約として読まない。
+            # spec: REQ-560
+            if root not in path.parents:
+                return []
             # spec: REQ-069
             if not path.is_file():
                 return []

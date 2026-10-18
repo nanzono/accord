@@ -22,6 +22,7 @@
 - [説明書に、操作の流れをシーケンス図で載せる](0014-show-the-flows-as-sequence-diagrams-in-the-readme.md) — 採用 / 2026-10-14
 - [経歴のファイルを直接直す道を閉じ、どの変更も accord の操作で行う](0015-close-every-direct-edit-path-with-accord-operations.md) — 採用 / 2026-10-14
 - [設定ファイルを廃止し、accord の形を 1 つに固定する](0016-drop-the-settings-file-and-fix-one-form.md) — 採用 / 2026-10-14
+- [書き出し先と媒体の語に、置き場の外へ害が及ぶ道を閉じる守りを置く](0017-guard-the-export-path-and-channel-terms.md) — 採用 / 2026-10-18
 
 ## 記録の扱い
 

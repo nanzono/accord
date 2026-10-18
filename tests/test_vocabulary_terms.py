@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from datetime import date
 
+import pytest
+
 from accord.models.results import PositioningDraft
 from accord.services.positioning import PositioningService
 from accord.services.recording import (
@@ -109,6 +111,52 @@ def test_REQ_509_an_empty_or_multiline_term_is_refused(settings) -> None:
         assert result.rejection.constraint == TERM_FORMAT
         assert result.rejection.next_action.candidates == _words(settings, "機能の分類")
     assert source_digest(settings.source_dir) == before
+
+
+@pytest.mark.parametrize(
+    ("term", "named"),
+    [
+        ("../x", "パスの区切り"),
+        ("a/b", "パスの区切り"),
+        ("a\\b", "パスの区切り"),
+        (".hidden", "「.」で始まる"),
+        (".", "「.」"),
+        ("..", "「..」"),
+        ("a\tb", "制御文字"),
+        ("a\x00b", "制御文字"),
+    ],
+)
+def test_REQ_559_a_channel_term_that_could_leave_the_presentations_is_refused(settings, term, named) -> None:
+    """媒体に足す語が、パスの区切りか制御文字を含むか、. か .. か、. で始まるなら、書かずに媒体の語の一覧を返す。"""
+    before = (source_digest(settings.source_dir), source_digest(settings.presentations_dir))
+    commits = _commit_count(settings.source_dir)
+    words = _words(settings, "媒体")
+
+    result = VocabularyService(settings).add_term("媒体", term, REASON)
+
+    assert result.accepted is False, term
+    assert result.rejection.constraint == TERM_FORMAT
+    assert named in result.rejection.reason
+    assert result.rejection.next_action.candidates == words
+    assert result.rejection.next_action.operation == "add_term"
+    assert (source_digest(settings.source_dir), source_digest(settings.presentations_dir)) == before
+    assert _commit_count(settings.source_dir) == commits
+
+
+def test_REQ_559_other_kinds_still_take_a_slash(settings) -> None:
+    """媒体のほかの種類の語には文字の制限を掛けず、パスの区切りを含む語も今までどおり足せる。"""
+    result = VocabularyService(settings).add_term("機能の分類", "a/b", REASON)
+
+    assert result.accepted is True, result.rejection
+    assert _words(settings, "機能の分類")[-1] == "a/b"
+
+
+def test_REQ_559_a_plain_channel_name_is_still_added(settings) -> None:
+    """経路の文字を持たない媒体の語は、今までどおり足せる（途中の . も足せる）。"""
+    result = VocabularyService(settings).add_term("媒体", "sample.channel", REASON)
+
+    assert result.accepted is True, result.rejection
+    assert _words(settings, "媒体")[-1] == "sample.channel"
 
 
 # ---------------------------------------------------------------- 消す
